@@ -14,6 +14,7 @@ from handlers.common import (
     get_admin_reply_menu,
     make_keyboard,
     make_reply_keyboard,
+    notify_next_students,
     queue_label,
     session_names,
     show,
@@ -609,7 +610,11 @@ async def student_mark_passed_by_admin(message: Message, state: FSMContext, conn
     session_id = data.get("session_id")
     if not entry_id:
         raise BotError("Студента не обрано.")
+    entry = queues.get_entry(conn, entry_id)
+    pos = entry["position"] if entry else None
     queues.mark_done(conn, message.from_user.id, entry_id)
+    if session_id:
+        await notify_next_students(message.bot, conn, subjects, session_id, removed_position=pos)
     await state.set_state(AdminOrderState.picking_student)
     await open_admin_student_list(message, conn, subjects, session_id, note="✅ Позначено: здав! Запис видалено з черги.")
 
@@ -621,7 +626,11 @@ async def student_remove_by_admin(message: Message, state: FSMContext, conn, sub
     session_id = data.get("session_id")
     if not entry_id:
         raise BotError("Студента не обрано.")
+    entry = queues.get_entry(conn, entry_id)
+    pos = entry["position"] if entry else None
     queues.remove_entry(conn, message.from_user.id, entry_id)
+    if session_id:
+        await notify_next_students(message.bot, conn, subjects, session_id, removed_position=pos)
     await state.set_state(AdminOrderState.picking_student)
     await open_admin_student_list(message, conn, subjects, session_id, note="❌ Запис видалено з черги.")
 

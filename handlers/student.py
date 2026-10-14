@@ -17,6 +17,7 @@ from handlers.common import (
     make_keyboard,
     make_reply_keyboard,
     notify_admins_queue_opened,
+    notify_next_students,
     queue_label,
     session_names,
     show,
@@ -220,7 +221,9 @@ async def mark_passed(message: Message, state: FSMContext, conn, subjects):
             rows.append(["🏠 Головне меню"])
             await message.answer("Оберіть чергу, де ви здали 👇", reply_markup=make_reply_keyboard(rows))
             return
+    my_pos = queues.get_user_position(conn, message.from_user.id, session_id)
     queues.finish_own_entry(conn, message.from_user.id, session_id, passed=True)
+    await notify_next_students(message.bot, conn, subjects, session_id, removed_position=my_pos)
     await open_queue_screen(message, conn, subjects, session_id, note="✅ Позначено: здав! Вас знято з черги.")
 
 
@@ -240,7 +243,9 @@ async def mark_not_passed(message: Message, state: FSMContext, conn, subjects):
             rows.append(["🏠 Головне меню"])
             await message.answer("Оберіть чергу, де ви не здали 👇", reply_markup=make_reply_keyboard(rows))
             return
+    my_pos = queues.get_user_position(conn, message.from_user.id, session_id)
     new_place = queues.finish_own_entry(conn, message.from_user.id, session_id, passed=False)
+    await notify_next_students(message.bot, conn, subjects, session_id, removed_position=my_pos)
     await open_queue_screen(message, conn, subjects, session_id, note=f"❌ Позначено: не здав. Вас переміщено в кінець черги (місце {new_place}).")
 
 
@@ -262,7 +267,9 @@ async def confirm_leave_queue(message: Message, state: FSMContext, conn, subject
     session_id = data.get("session_id")
     if not session_id:
         raise BotError("Оберіть чергу.")
+    my_pos = queues.get_user_position(conn, message.from_user.id, session_id)
     queues.leave_queue(conn, message.from_user.id, session_id)
+    await notify_next_students(message.bot, conn, subjects, session_id, removed_position=my_pos)
     await open_queue_screen(message, conn, subjects, session_id, note="🚪 Ви покинули чергу.")
 
 

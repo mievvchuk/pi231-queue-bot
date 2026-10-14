@@ -263,3 +263,44 @@ async def notify_admins_user_registered(bot, conn, user_row, username: str | Non
             continue  # Не дублюємо самому користувачу, якщо він уже в адмінах
         with suppress(Exception):
             await bot.send_message(adm_id, text)
+
+
+async def notify_next_students(bot, conn, subjects: list[dict], session_id: int, removed_position: int | None = None) -> None:
+    """Сповіщає студентів, які стали №1 або №2 у черзі після зміни порядку або здачі."""
+    # Якщо зміна сталася після 2-ї позиції, то №1 і №2 не змінилися
+    if removed_position is not None and removed_position > 2:
+        return
+
+    session = queues.get_session(conn, session_id)
+    if not session or session["status"] not in ("open", "closed"):
+        return
+
+    subject, teacher = session_names(subjects, session)
+    entries = queues.get_entries(conn, session_id)
+    real_students = [e for e in entries if e.get("telegram_id") and e["telegram_id"] > 0]
+    if not real_students:
+        return
+
+    # Якщо з черги пішов хтось з позиції 1 (або позиція невідома) — сповіщаємо нового №1
+    if removed_position is None or removed_position <= 1:
+        first = real_students[0]
+        text_first = (
+            f"🔔 **Ваша черга здавати роботу!**\n\n"
+            f"📚 Предмет: **{subject}**\n"
+            f"👨‍🏫 Викладач: **{teacher}**\n"
+            f"📍 Ви зараз **1-й** у черзі! Заходьте або готуйтеся показувати роботу."
+        )
+        with suppress(Exception):
+            await bot.send_message(first["telegram_id"], text_first)
+
+    # Якщо з черги пішов хтось з позиції 1 чи 2 — сповіщаємо нового №2 (якщо він є)
+    if (removed_position is None or removed_position <= 2) and len(real_students) >= 2:
+        second = real_students[1]
+        text_second = (
+            f"⏳ **Приготуйтеся, скоро ваша черга!**\n\n"
+            f"📚 Предмет: **{subject}**\n"
+            f"👨‍🏫 Викладач: **{teacher}**\n"
+            f"📍 Ви зараз **2-й** у черзі. Перед вами здає останній студент."
+        )
+        with suppress(Exception):
+            await bot.send_message(second["telegram_id"], text_second)
