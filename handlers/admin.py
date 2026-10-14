@@ -4,8 +4,8 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, Message
 
-from handlers.common import (format_entry, format_queue, make_keyboard, queue_label,
-                             session_names, show)
+from handlers.common import (format_entry, format_queue, get_admin_reply_menu,
+                             make_keyboard, queue_label, session_names, show)
 from services import admins, queues, users
 from services.errors import BotError, PermissionDenied
 
@@ -74,43 +74,68 @@ def sessions_for_admin(conn):
 # ---------- Панель ----------
 
 @router.message(F.text == "⚡ Адмін-панель")
-@router.callback_query(F.data == "admin")
-async def panel(event, state: FSMContext):
+async def panel_message(message: Message, state: FSMContext):
     await state.clear()
+    await message.answer(
+        "⚡ **Адмін-панель**\nУсі інструменти керування перенесено на кнопки внизу під клавіатурою 👇",
+        reply_markup=get_admin_reply_menu(),
+    )
+
+
+@router.callback_query(F.data == "admin")
+async def panel_callback(callback: CallbackQuery, state: FSMContext):
+    await state.clear()
+    await show(
+        callback,
+        "⚡ **Адмін-панель**\nОберіть дію на клавіатурі внизу 👇",
+    )
+
+
+async def pick_queue_for_mode(event, mode: str, conn, subjects):
+    sessions = sessions_for_admin(conn)
+    if not sessions:
+        text = "Незавершених черг немає."
+        if isinstance(event, Message):
+            await event.answer(text)
+        else:
+            await show(event, text)
+        return
+    rows = [[(queue_label(subjects, s), f"go:{mode}:{s['id']}")] for s in sessions]
+    text = f"{PICK_TITLES[mode]}\nОберіть чергу:"
     if isinstance(event, Message):
-        await event.answer("Адмін-панель:", reply_markup=panel_keyboard())
+        await event.answer(text, reply_markup=make_keyboard(rows))
     else:
-        await show(event, "Адмін-панель:", panel_keyboard())
+        await show(event, text, make_keyboard(rows))
 
 
-
-def panel_keyboard():
-    return make_keyboard([
-        [("Створити чергу", "nq")],
-        [("Додати студента в чергу", "pick:add_student")],
-        [("Активні черги", "pick:view")],
-        [("Змінити порядок", "pick:order")],
-        [("Позначити здачу", "pick:done")],
-        [("Перенести студентів", "pick:transfer")],
-        [("Закрити запис", "pick:close")],
-        [("Історія черг", "ah")],
-        [("Заблоковані користувачі", "blist")],
-        [("Керування адміністраторами", "adm")],
-        [("Головне меню", "menu")],
-    ])
+@router.message(F.text == "📝 Додати студента")
+async def btn_add_student(message: Message, conn, subjects):
+    await pick_queue_for_mode(message, "add_student", conn, subjects)
 
 
+@router.message(F.text == "👀 Активні черги")
+async def btn_active_queues(message: Message, conn, subjects):
+    await pick_queue_for_mode(message, "view", conn, subjects)
+
+
+@router.message(F.text == "🔢 Змінити порядок")
+async def btn_change_order(message: Message, conn, subjects):
+    await pick_queue_for_mode(message, "order", conn, subjects)
+
+
+@router.message(F.text == "✅ Позначити здачу")
+async def btn_mark_done(message: Message, conn, subjects):
+    await pick_queue_for_mode(message, "done", conn, subjects)
+
+
+@router.message(F.text == "🔒 Відкрити/закрити запис")
+async def btn_toggle_signup(message: Message, conn, subjects):
+    await pick_queue_for_mode(message, "close", conn, subjects)
 
 
 @router.callback_query(F.data.startswith("pick:"))
 async def pick_queue(callback: CallbackQuery, conn, subjects):
-    mode = arg(callback)
-    sessions = sessions_for_admin(conn)
-    if not sessions:
-        await show(callback, "Незавершених черг немає.", make_keyboard([BACK_TO_PANEL]))
-        return
-    rows = [[(queue_label(subjects, s), f"go:{mode}:{s['id']}")] for s in sessions]
-    await show(callback, f"{PICK_TITLES[mode]}\nОберіть чергу:", make_keyboard(rows + [BACK_TO_PANEL]))
+    await pick_queue_for_mode(callback, arg(callback), conn, subjects)
 
 
 @router.callback_query(F.data.startswith("go:"))
@@ -565,15 +590,23 @@ async def confirm_carry(callback: CallbackQuery, conn, state: FSMContext):
 
 # ---------- Історія ----------
 
+@router.message(F.text == "📦 Історія черг")
 @router.callback_query(F.data == "ah")
-async def history_list(callback: CallbackQuery, conn, subjects):
+async def history_list(event, conn, subjects):
     sessions = queues.list_sessions(conn, ("archived",))[:15]
     if not sessions:
-        await show(callback, "Історія порожня.", make_keyboard([BACK_TO_PANEL]))
+        text = "Історія порожня."
+        if isinstance(event, Message):
+            await event.answer(text)
+        else:
+            await show(event, text)
         return
     rows = [[(f"№{s['id']} {queue_label(subjects, s)} ({s['closed_at'][:10]})", f"ahs:{s['id']}")]
             for s in sessions]
-    await show(callback, "Історія черг:", make_keyboard(rows + [BACK_TO_PANEL]))
+    if isinstance(event, Message):
+        await event.answer("Історія черг:", reply_markup=make_keyboard(rows))
+    else:
+        await show(event, "Історія черг:", make_keyboard(rows))
 
 
 HISTORY_MARK = {"completed": "✅ здав", "transferred": "↪ перенесено", "removed": "✖ не здав / видалено",
@@ -593,14 +626,18 @@ async def history_details(callback: CallbackQuery, conn, subjects):
 
 # ---------- Керування адміністраторами ----------
 
+@router.message(F.text == "👥 Адміністратори")
 @router.callback_query(F.data == "adm")
-async def admins_menu(callback: CallbackQuery):
-    await show(callback, "Керування адміністраторами:", make_keyboard([
+async def admins_menu(event):
+    rows = [
         [("Список адміністраторів", "adl")],
         [("Додати адміністратора", "ada")],
         [("Видалити адміністратора", "adr")],
-        [BACK_TO_PANEL[0]],
-    ]))
+    ]
+    if isinstance(event, Message):
+        await event.answer("Керування адміністраторами:", reply_markup=make_keyboard(rows))
+    else:
+        await show(event, "Керування адміністраторами:", make_keyboard(rows))
 
 
 def admin_label(row) -> str:
@@ -663,18 +700,26 @@ async def confirm_remove_admin(callback: CallbackQuery, conn):
 
 # ---------- Заблоковані студенти ----------
 
+@router.message(F.text == "⛔ Заблоковані")
 @router.callback_query(F.data == "blist")
-async def show_blocked_list(callback: CallbackQuery, conn):
+async def show_blocked_list(event, conn):
     blocked = users.list_blocked_users(conn)
     if not blocked:
-        await show(callback, "Заблокованих користувачів немає.", make_keyboard([BACK_TO_PANEL]))
+        text = "Заблокованих користувачів немає."
+        if isinstance(event, Message):
+            await event.answer(text)
+        else:
+            await show(event, text)
         return
     rows = []
     for u in blocked:
         tg_id_str = f" [ID: {u['telegram_id']}]" if u["telegram_id"] and u["telegram_id"] > 0 else ""
         rows.append([(f"🟢 Розблокувати {u['full_name']}{tg_id_str}", f"unblock:{u['id']}")])
-    rows.append(BACK_TO_PANEL)
-    await show(callback, "⛔ Список заблокованих користувачів:\nНатисніть на студента, щоб розблокувати:", make_keyboard(rows))
+    text = "⛔ Список заблокованих користувачів:\nНатисніть на студента, щоб розблокувати:"
+    if isinstance(event, Message):
+        await event.answer(text, reply_markup=make_keyboard(rows))
+    else:
+        await show(event, text, make_keyboard(rows))
 
 
 @router.callback_query(F.data.startswith("unblock:"))

@@ -33,10 +33,22 @@ def get_reply_menu(conn, telegram_id: int) -> ReplyKeyboardMarkup:
     keyboard = [
         [KeyboardButton(text="📋 Стати в чергу"), KeyboardButton(text="➕ Відкрити чергу")],
         [KeyboardButton(text="👥 Мої черги"), KeyboardButton(text="🔍 Переглянути черги")],
-        [KeyboardButton(text="🏠 Головне меню"), KeyboardButton(text="❓ Допомога")],
+        [KeyboardButton(text="❓ Допомога")],
     ]
     if admins.is_admin(conn, telegram_id):
         keyboard.append([KeyboardButton(text="⚡ Адмін-панель")])
+    return ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True)
+
+
+def get_admin_reply_menu() -> ReplyKeyboardMarkup:
+    """Нижня постійна клавіатура адмін-панелі під полем вводу."""
+    keyboard = [
+        [KeyboardButton(text="➕ Створити чергу"), KeyboardButton(text="📝 Додати студента")],
+        [KeyboardButton(text="👀 Активні черги"), KeyboardButton(text="🔢 Змінити порядок")],
+        [KeyboardButton(text="✅ Позначити здачу"), KeyboardButton(text="🔒 Відкрити/закрити запис")],
+        [KeyboardButton(text="📦 Історія черг"), KeyboardButton(text="⛔ Заблоковані")],
+        [KeyboardButton(text="👥 Адміністратори"), KeyboardButton(text="🏠 Головне меню")],
+    ]
     return ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True)
 
 

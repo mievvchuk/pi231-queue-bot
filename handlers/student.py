@@ -426,9 +426,9 @@ async def leave(callback: CallbackQuery, conn):
     await show(callback, "Ви покинули чергу.", make_keyboard([BACK_TO_MENU]))
 
 
-# ---------- Створення черги студентом ----------
+# ---------- Створення черги ----------
 
-@router.message(F.text == "➕ Відкрити чергу")
+@router.message(F.text.in_({"➕ Відкрити чергу", "➕ Створити чергу"}))
 @router.callback_query(F.data == "nq")
 async def new_queue_subject(event, subjects):
     rows = [[(s["name"], f"nqs:{s['id']}")] for s in subjects]

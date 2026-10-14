@@ -44,12 +44,10 @@ def main_menu(conn, telegram_id: int):
 async def start(message: Message, state: FSMContext, conn):
     await state.clear()
     if users.get_user(conn, message.from_user.id):
-        # Відправляємо і інлайн-меню, і закріплюємо зручну нижню клавіатуру
         await message.answer(
-            "Головне меню:",
+            "Головне меню. Оберіть дію на клавіатурі внизу 👇",
             reply_markup=get_reply_menu(conn, message.from_user.id),
         )
-        await message.answer("Оберіть дію:", reply_markup=main_menu(conn, message.from_user.id))
         return
     await message.answer(
         "Вітаємо в боті електронної черги ПІ-231!\nВведіть своє прізвище та ім'я:",
@@ -67,10 +65,9 @@ async def register(message: Message, state: FSMContext, conn):
         return
     await state.clear()
     await message.answer(
-        "Реєстрацію завершено!\nГоловне меню:",
+        "✅ Реєстрацію завершено!\nГоловне меню. Оберіть дію на клавіатурі внизу 👇",
         reply_markup=get_reply_menu(conn, message.from_user.id),
     )
-    await message.answer("Оберіть дію:", reply_markup=main_menu(conn, message.from_user.id))
 
 
 @router.message(F.text == "🏠 Головне меню")
@@ -79,10 +76,9 @@ async def reply_main_menu(message: Message, state: FSMContext, conn):
     if not users.get_user(conn, message.from_user.id):
         raise BotError("Спочатку зареєструйтесь: /start")
     await message.answer(
-        "Головне меню:",
+        "Головне меню. Оберіть дію на клавіатурі внизу 👇",
         reply_markup=get_reply_menu(conn, message.from_user.id),
     )
-    await message.answer("Оберіть дію:", reply_markup=main_menu(conn, message.from_user.id))
 
 
 @router.message(F.text == "❓ Допомога")
