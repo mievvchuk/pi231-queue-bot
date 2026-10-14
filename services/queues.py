@@ -214,20 +214,6 @@ def _own_active_entry(conn, telegram_id: int, session_id: int):
 def leave_queue(conn: sqlite3.Connection, telegram_id: int, session_id: int) -> None:
     with transaction(conn):
         _close_entry(conn, _own_active_entry(conn, telegram_id, session_id), "left")
-        _archive_if_empty(conn, session_id)
-
-
-def _archive_if_empty(conn, session_id: int) -> None:
-    """Студенти самі відкривають черги, тому порожня черга після виходу
-    останнього учасника завершується автоматично й не блокує створення нової."""
-    left = conn.execute(
-        "SELECT COUNT(*) FROM queue_entries "
-        "WHERE session_id = ? AND status = 'active' AND user_id IS NOT NULL",
-        (session_id,),
-    ).fetchone()[0]
-    session = get_session(conn, session_id)
-    if left == 0 and session["status"] in UNFINISHED:
-        _archive(conn, session_id)
 
 
 def create_queue(conn: sqlite3.Connection, telegram_id: int, subject_id: int,
@@ -248,7 +234,6 @@ def finish_own_entry(conn: sqlite3.Connection, telegram_id: int, session_id: int
         _require_session(conn, session_id)
         if passed:
             _close_entry(conn, entry, "completed")
-            _archive_if_empty(conn, session_id)
             return None
         ids = _ordered_ids(conn, session_id)
         ids.remove(entry["id"])
