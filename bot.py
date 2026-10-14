@@ -15,8 +15,11 @@ import os
 from aiohttp import web
 
 
+BOT_VERSION = "v1.3-reconnect"
+
+
 async def healthcheck(request: web.Request) -> web.Response:
-    return web.Response(text="PI-231 Queue Bot is running!")
+    return web.Response(text=f"PI-231 Queue Bot is running! [{BOT_VERSION}]")
 
 
 async def run_web_server():
