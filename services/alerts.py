@@ -1,6 +1,8 @@
 import asyncio
 import logging
+import zoneinfo
 from contextlib import suppress
+from datetime import datetime, time
 
 import aiohttp
 from aiogram import Bot
@@ -11,12 +13,22 @@ log = logging.getLogger(__name__)
 
 API_URL = "https://api.alerts.in.ua/v1/alerts/active.json"
 
+KYIV_TZ = zoneinfo.ZoneInfo("Europe/Kyiv")
+STUDY_START = time(8, 0)
+STUDY_END = time(16, 40)
+
 IS_KHMELNYTSKYI_ALERT_ACTIVE: bool = False
 
 
+def is_study_hours() -> bool:
+    """Перевіряє, чи поточний час у Києві в межах навчальних годин (08:00 - 16:40)."""
+    now = datetime.now(KYIV_TZ).time()
+    return STUDY_START <= now <= STUDY_END
+
+
 def get_alert_status() -> bool:
-    """Повертає True, якщо у Хмельницькому зараз повітряна тривога."""
-    return IS_KHMELNYTSKYI_ALERT_ACTIVE
+    """Повертає True, якщо зараз навчальний час (08:00 - 16:40) і у Хмельницькому зараз повітряна тривога."""
+    return is_study_hours() and IS_KHMELNYTSKYI_ALERT_ACTIVE
 
 
 def is_khmelnytskyi_alert(alerts: list[dict]) -> bool:
@@ -100,6 +112,13 @@ async def start_alerts_checker(bot: Bot, conn, token: str, interval_sec: int = 3
 
     while True:
         try:
+            if not is_study_hours():
+                # Поза навчальними годинами (з 16:40 до 08:00) моніторинг не тривожить студентів
+                if IS_KHMELNYTSKYI_ALERT_ACTIVE:
+                    IS_KHMELNYTSKYI_ALERT_ACTIVE = False
+                await asyncio.sleep(interval_sec)
+                continue
+
             alerts = await fetch_active_alerts(token)
             if alerts is not None:
                 new_status = is_khmelnytskyi_alert(alerts)
