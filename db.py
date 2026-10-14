@@ -198,7 +198,7 @@ def connect(db_target: str):
             raise RuntimeError("psycopg is required to connect to PostgreSQL. Run: pip install psycopg[binary]")
         # Neon вимагає SSL
         clean_url = db_target.replace("&channel_binding=require", "")
-        raw = psycopg.connect(clean_url, autocommit=False)
+        raw = psycopg.connect(clean_url, autocommit=True)
         return PGConnectionWrapper(raw)
 
     conn = sqlite3.connect(db_target, timeout=10, isolation_level=None)
@@ -219,12 +219,8 @@ def migrate_sqlite(conn: sqlite3.Connection) -> None:
 @contextmanager
 def transaction(conn):
     if isinstance(conn, PGConnectionWrapper):
-        try:
+        with conn.raw.transaction():
             yield
-            conn.raw.commit()
-        except BaseException:
-            conn.raw.rollback()
-            raise
     else:
         conn.execute("BEGIN IMMEDIATE")
         try:

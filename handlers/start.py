@@ -51,7 +51,10 @@ async def start(message: Message, state: FSMContext, conn):
         )
         await message.answer("Оберіть дію:", reply_markup=main_menu(conn, message.from_user.id))
         return
-    await message.answer("Вітаємо в боті електронної черги ПІ-231!\nВведіть своє прізвище та ім'я:")
+    await message.answer(
+        "Вітаємо в боті електронної черги ПІ-231!\nВведіть своє прізвище та ім'я:",
+        reply_markup=get_reply_menu(conn, message.from_user.id),
+    )
     await state.set_state(NameForm.registration)
 
 
@@ -77,8 +80,9 @@ async def reply_main_menu(message: Message, state: FSMContext, conn):
         raise BotError("Спочатку зареєструйтесь: /start")
     await message.answer(
         "Головне меню:",
-        reply_markup=main_menu(conn, message.from_user.id),
+        reply_markup=get_reply_menu(conn, message.from_user.id),
     )
+    await message.answer("Оберіть дію:", reply_markup=main_menu(conn, message.from_user.id))
 
 
 @router.message(F.text == "❓ Допомога")

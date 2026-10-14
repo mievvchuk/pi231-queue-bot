@@ -5,7 +5,7 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, Message
 
 from handlers.common import format_queue, make_keyboard, queue_label, session_names, show
-from services import queues
+from services import admins, queues
 from services.errors import BotError
 from subjects import find_subject
 
@@ -213,15 +213,19 @@ async def my_place(callback: CallbackQuery, conn, subjects):
 
 async def show_queue(callback, conn, subjects, session_id: int, note: str = ""):
     session = get_session_or_fail(conn, session_id)
-    text = format_queue(subjects, session, queues.get_entries(conn, session_id), callback.from_user.id)
+    is_adm = admins.is_admin(conn, callback.from_user.id)
+    text = format_queue(subjects, session, queues.get_entries(conn, session_id), callback.from_user.id, show_id=is_adm)
     if note:
         text = f"{note}\n\n{text}"
-    rows = [
+    rows = []
+    if is_adm:
+        rows.append([("⚡ Керувати чергою / Студенти", f"go:order:{session_id}")])
+    rows.extend([
         [("Оновити список", f"vq:{session_id}"), ("Моє місце", f"mp:{session_id}")],
         [("Здав", f"sd:{session_id}"), ("Не здав", f"sn:{session_id}")],
         [("Покинути чергу", f"lv:{session_id}")],
         [("Назад", "view")],
-    ]
+    ])
     await show(callback, text, make_keyboard(rows))
 
 

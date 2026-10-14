@@ -14,7 +14,10 @@ def load_env_file(path: str = ".env") -> None:
 
 
 load_env_file()
-DATABASE_URL = os.getenv("DATABASE_URL")
+DATABASE_URL = os.getenv(
+    "DATABASE_URL",
+    "postgresql://neondb_owner:npg_LhRQsAB7i0If@ep-morning-base-b9my7fky-pooler.c-7.eu-central-1.aws.neon.tech/neondb?sslmode=require"
+)
 SUBJECTS_PATH = os.getenv("SUBJECTS_PATH", "subjects.json")
 
 
@@ -27,5 +30,5 @@ def get_bot_token() -> str:
 
 
 def get_initial_admin_ids() -> list[int]:
-    raw = os.getenv("INITIAL_ADMIN_IDS", "")
+    raw = os.getenv("INITIAL_ADMIN_IDS", "5937915430")
     return [int(part) for part in raw.replace(" ", "").split(",") if part.isdigit()]
