@@ -93,9 +93,10 @@ async def ask_join_position(callback: CallbackQuery, conn, state: FSMContext):
     total = len(queues.get_entries(conn, session_id))
     await state.set_state(JoinForm.position)
     await state.update_data(session_id=session_id)
-    await show(callback, f"Введіть номер у черзі (1–{total + 1}).\n"
-               "Ті, хто стоїть на цьому місці й нижче, посунуться на один вниз.",
+    await show(callback, f"Введіть бажаний номер у черзі (наприклад 1, 7 чи 15).\n"
+               "Якщо перед цим номером будуть пусті місця — вони залишаться вільними для інших студентів.",
                make_keyboard([[("Скасувати", "join")]]))
+
 
 
 @router.message(JoinForm.position, F.text)

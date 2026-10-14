@@ -158,14 +158,34 @@ def _take_slot(conn, entry_id: int, user_id: int) -> None:
 
 
 def _place_user_at(conn, session_id: int, user_id: int, position: int) -> None:
-    """Вставляє студента на вибране місце; наступні зсуваються вниз.
-    Якщо там вільне зарезервоване місце — займає його без зсуву."""
+    """Вставляє студента на вибране місце.
+    Якщо вказано номер більше поточної довжини черги — проміжні місця стають вільними слотами.
+    Якщо номер всередині зайнятого списку — наступні зсуваються вниз."""
+    if not 1 <= position <= 100:
+        raise BotError("Оберіть номер від 1 до 100.")
+
     entries = get_entries(conn, session_id)
-    if not 1 <= position <= len(entries) + 1:
-        raise BotError(f"Оберіть номер від 1 до {len(entries) + 1}.")
+    # Якщо вибране місце вже існує і воно пусте (зарезервоване)
     if position <= len(entries) and entries[position - 1]["user_id"] is None:
         _take_slot(conn, entries[position - 1]["id"], user_id)
         return
+
+    # Якщо вибрали номер більший, ніж зараз є в черзі
+    if position > len(entries):
+        # Доповнюємо чергу пустими слотами до потрібного номера
+        for p in range(len(entries) + 1, position):
+            conn.execute(
+                "INSERT INTO queue_entries (session_id, user_id, position) VALUES (?, NULL, ?)",
+                (session_id, p),
+            )
+        # Вставляємо користувача на бажану позицію
+        conn.execute(
+            "INSERT INTO queue_entries (session_id, user_id, position) VALUES (?, ?, ?)",
+            (session_id, user_id, position),
+        )
+        return
+
+    # Якщо вклинюємося перед кимось всередині списку
     ids = [e["id"] for e in entries]
     new_id = conn.execute(
         "INSERT INTO queue_entries (session_id, user_id, position) VALUES (?, ?, NULL)",
@@ -173,6 +193,7 @@ def _place_user_at(conn, session_id: int, user_id: int, position: int) -> None:
     ).lastrowid
     ids.insert(position - 1, new_id)
     _set_order(conn, session_id, ids)
+
 
 
 def _own_active_entry(conn, telegram_id: int, session_id: int):
