@@ -11,6 +11,26 @@ from services.admins import init_admins
 from subjects import load_subjects
 
 
+import os
+from aiohttp import web
+
+
+async def healthcheck(request: web.Request) -> web.Response:
+    return web.Response(text="PI-231 Queue Bot is running!")
+
+
+async def run_web_server():
+    port = int(os.getenv("PORT", "8080"))
+    app = web.Application()
+    app.router.add_get("/", healthcheck)
+    app.router.add_get("/health", healthcheck)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "0.0.0.0", port)
+    await site.start()
+    logging.info(f"Healthcheck web server started on port {port}")
+
+
 async def main() -> None:
     logging.basicConfig(level=logging.INFO)
     conn = connect(config.DB_PATH)
@@ -23,8 +43,10 @@ async def main() -> None:
     dp.include_routers(start.router, student.router, admin.router, start.fallback_router)
 
     bot = Bot(config.get_bot_token())
+    await run_web_server()
     await dp.start_polling(bot)
 
 
 if __name__ == "__main__":
     asyncio.run(main())
+
