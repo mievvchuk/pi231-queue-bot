@@ -32,12 +32,12 @@ def main_menu(conn, telegram_id: int):
         [("Відкрити нову чергу", "nq")],
         [("Мої черги", "my")],
         [("Переглянути черги", "view")],
-        [("Змінити ПІБ", "rename")],
         [("Допомога", "help")],
     ]
     if admins.is_admin(conn, telegram_id):
         rows.append([("Адмін-панель", "admin")])
     return make_keyboard(rows)
+
 
 
 @router.message(Command("start"))
@@ -85,25 +85,6 @@ async def reply_main_menu(message: Message, state: FSMContext, conn):
 async def reply_help(message: Message):
     await message.answer(HELP_TEXT)
 
-
-
-@router.callback_query(F.data == "rename")
-async def ask_rename(callback: CallbackQuery, state: FSMContext):
-    await state.set_state(NameForm.rename)
-    await show(callback, "Введіть нове прізвище та ім'я:", make_keyboard([[("Скасувати", "menu")]]))
-
-
-@router.message(NameForm.rename, F.text)
-async def rename(message: Message, state: FSMContext, conn):
-    try:
-        user = users.rename_user(conn, message.from_user.id, message.text)
-    except BotError as error:
-        await message.answer(f"{error}\nСпробуйте ще раз:")
-        return
-    await state.clear()
-    await message.answer(
-        f"ПІБ змінено: {user['full_name']}", reply_markup=main_menu(conn, message.from_user.id)
-    )
 
 
 @router.callback_query(F.data == "menu")
