@@ -33,9 +33,11 @@ async def run_web_server():
 
 async def main() -> None:
     logging.basicConfig(level=logging.INFO)
-    db_target = config.DATABASE_URL or config.DB_PATH
-    conn = connect(db_target)
+    if not config.DATABASE_URL:
+        raise RuntimeError("DATABASE_URL is not set. Please specify Neon PostgreSQL URL in .env")
+    conn = connect(config.DATABASE_URL)
     init_admins(conn, config.get_initial_admin_ids())
+
 
     # conn і subjects доступні в обробниках як іменовані параметри
     dp = Dispatcher(conn=conn, subjects=load_subjects(config.SUBJECTS_PATH))
