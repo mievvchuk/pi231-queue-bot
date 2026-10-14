@@ -34,6 +34,8 @@ class StudentFlow(StatesGroup):
     pick_position = State()
     choosing_swap_target = State()
     confirm_swap = State()
+    creating_queue_subject = State()
+    creating_queue_teacher = State()
 
 
 def get_session_or_fail(conn, session_id: int):
@@ -133,9 +135,11 @@ async def back_to_queues_list(message: Message, state: FSMContext, conn, subject
 
 @router.message(F.text.startswith("📋 "), StateFilter("*"))
 async def select_queue_by_button(message: Message, state: FSMContext, conn, subjects):
+    if message.text in {"📋 Стати в чергу", "📋 Список адміністраторів"}:
+        return
     current_state = await state.get_state()
-    # Якщо адмін обирає чергу в адмін-режимі, пропускаємо до admin.py
-    if current_state and current_state.startswith("AdminPanelState"):
+    # Якщо користувач у будь-якому стані адміна — пропускаємо до admin.py
+    if current_state and (current_state.startswith("AdminPanelState") or current_state.startswith("Admin")):
         return
     session = find_session_by_label(conn, subjects, message.text)
     if not session:
@@ -154,6 +158,9 @@ async def select_queue_by_button(message: Message, state: FSMContext, conn, subj
 
 @router.message(F.text == "🔄 Оновити", StateFilter("*"))
 async def refresh_current_queue(message: Message, state: FSMContext, conn, subjects):
+    current_state = await state.get_state()
+    if current_state and (current_state.startswith("AdminPanelState") or current_state.startswith("Admin")):
+        return
     data = await state.get_data()
     session_id = data.get("session_id")
     if not session_id:
@@ -528,13 +535,16 @@ async def swap_decline(callback: CallbackQuery, conn, subjects):
 @router.message(F.text.in_({"➕ Відкрити чергу", "➕ Створити чергу"}), StateFilter("*"))
 async def start_open_queue(message: Message, state: FSMContext, conn, subjects):
     await state.clear()
+    await state.set_state(StudentFlow.creating_queue_subject)
     rows = [[f"➕ {s['name']}"] for s in subjects]
     rows.append(["🏠 Головне меню"])
     await message.answer("Оберіть предмет для нової черги на кнопках внизу 👇", reply_markup=make_reply_keyboard(rows))
 
 
-@router.message(F.text.startswith("➕ "), StateFilter("*"))
+@router.message(StudentFlow.creating_queue_subject, F.text.startswith("➕ "))
 async def new_queue_subject_selected(message: Message, state: FSMContext, conn, subjects):
+    if message.text in {"➕ Додати адміністратора", "➕ Додати студента", "➕ Додати студентів", "➕ Створити чергу", "➕ Відкрити чергу"}:
+        return
     raw_name = message.text[2:].strip()
     matched_sub = next((s for s in subjects if s["name"].lower() == raw_name.lower()), None)
     if not matched_sub:
@@ -546,15 +556,17 @@ async def new_queue_subject_selected(message: Message, state: FSMContext, conn, 
             await state.update_data(session_id=session_id)
             await open_queue_screen(message, conn, subjects, session_id, note="🎉 Чергу успішно створено!")
         except BotError as err:
+            await state.clear()
             await message.answer(f"{err}", reply_markup=get_reply_menu(conn, message.from_user.id))
         return
 
+    await state.set_state(StudentFlow.creating_queue_teacher)
     rows = [[f"👨‍🏫 {matched_sub['name']} — {t['name']}"] for t in matched_sub["teachers"]]
     rows.append(["🏠 Головне меню"])
     await message.answer(f"Оберіть викладача для предмета «{matched_sub['name']}» 👇", reply_markup=make_reply_keyboard(rows))
 
 
-@router.message(F.text.startswith("👨‍🏫 "), StateFilter("*"))
+@router.message(StudentFlow.creating_queue_teacher, F.text.startswith("👨‍🏫 "))
 async def new_queue_teacher_selected(message: Message, state: FSMContext, conn, subjects):
     raw = message.text[2:].strip()
     parts = raw.split(" — ")
@@ -573,6 +585,7 @@ async def new_queue_teacher_selected(message: Message, state: FSMContext, conn, 
         await state.update_data(session_id=session_id)
         await open_queue_screen(message, conn, subjects, session_id, note="🎉 Чергу успішно створено!")
     except BotError as err:
+        await state.clear()
         await message.answer(f"{err}", reply_markup=get_reply_menu(conn, message.from_user.id))
 
 

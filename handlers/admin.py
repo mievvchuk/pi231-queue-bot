@@ -744,3 +744,9 @@ async def confirm_remove_admin_text(message: Message, state: FSMContext, conn):
     await state.clear()
     await message.answer(f"✅ Права адміністратора для ID `{target_id}` видалено.")
     await list_admins_message(message, conn)
+
+
+@router.message(AdminManageState.select_admin_to_remove, F.text.in_({"🔙 Скасувати", "🔙 В адмін-панель"}))
+async def cancel_remove_admin(message: Message, state: FSMContext):
+    await state.clear()
+    await admins_menu(message, state)
