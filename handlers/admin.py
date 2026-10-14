@@ -57,6 +57,11 @@ class AdminAddStudent(StatesGroup):
     names = State()
 
 
+class AdminRenameStudent(StatesGroup):
+    name = State()
+
+
+
 
 def arg(callback: CallbackQuery, index: int = 1) -> str:
     return callback.data.split(":")[index]
@@ -89,6 +94,7 @@ def panel_keyboard():
         [("Перенести студентів", "pick:transfer")],
         [("Закрити запис", "pick:close")],
         [("Історія черг", "ah")],
+        [("Заблоковані користувачі", "blist")],
         [("Керування адміністраторами", "adm")],
         [("Головне меню", "menu")],
     ])
@@ -133,10 +139,10 @@ def get_open_session(conn, session_id: int):
 
 async def show_manager(callback, conn, subjects, session_id: int):
     session = get_open_session(conn, session_id)
-    text = format_queue(subjects, session, queues.get_entries(conn, session_id))
+    text = format_queue(subjects, session, queues.get_entries(conn, session_id), show_id=True)
     rows = [
         [("Додати студентів у чергу", f"go:add_student:{session_id}")],
-        [("Змінити порядок", f"go:order:{session_id}")],
+        [("Змінити порядок / студенти", f"go:order:{session_id}")],
         [("Закрити/відкрити запис", f"go:close:{session_id}")],
         [("Назад", "pick:view")],
     ]
@@ -223,9 +229,9 @@ async def toggle_signup(callback: CallbackQuery, conn, subjects):
 async def show_student_list(callback, conn, subjects, session_id: int):
     session = get_open_session(conn, session_id)
     entries = queues.get_entries(conn, session_id)
-    rows = [[(format_entry(e), f"ae:{e['id']}")] for e in entries]
-    text = format_queue(subjects, session, entries) + "\n\nОберіть студента:"
-    await show(callback, text, make_keyboard(rows + [[("Назад", "pick:order")]]))
+    rows = [[(format_entry(e, show_id=True), f"ae:{e['id']}")] for e in entries]
+    text = format_queue(subjects, session, entries, show_id=True) + "\n\nОберіть студента:"
+    await show(callback, text, make_keyboard(rows + [[("Назад", f"go:view:{session_id}")]]))
 
 
 def entry_screen(conn, subjects, entry_id: int):
@@ -234,16 +240,32 @@ def entry_screen(conn, subjects, entry_id: int):
         raise BotError("Запис не знайдено або він уже неактивний.")
     session = get_open_session(conn, entry["session_id"])
     entries = queues.get_entries(conn, session["id"])
-    lines = [format_entry(e, marked=e["id"] == entry_id) for e in entries]
+    lines = [format_entry(e, marked=e["id"] == entry_id, show_id=True) for e in entries]
     subject, teacher = session_names(subjects, session)
-    text = f"{subject}, {teacher}\n\n" + "\n".join(lines) + "\n\nОберіть дію:"
+
+    user = None
+    if entry["user_id"]:
+        user = conn.execute("SELECT * FROM users WHERE id = ?", (entry["user_id"],)).fetchone()
+
+    header_parts = [f"📚 {subject}, {teacher}"]
+    if user:
+        tg_info = f"ID: {user['telegram_id']}" if user["telegram_id"] and user["telegram_id"] > 0 else "внесено старостою"
+        status_info = "⛔ Заблокований" if user.get("is_blocked") else "✅ Активний"
+        header_parts.append(f"👤 Обрано: {user['full_name']} [{tg_info}] — {status_info}")
+
+    text = "\n".join(header_parts) + "\n\n" + "\n".join(lines) + "\n\nОберіть дію:"
     rows = [
-        [("Перемістити вище", f"au:{entry_id}"), ("Перемістити нижче", f"ad:{entry_id}")],
-        [("Перемістити на місце…", f"ag:{entry_id}")],
-        [("Позначити «Здав»", f"ax:{entry_id}")],
-        [("Видалити з черги", f"ar:{entry_id}")],
-        [("До списку", f"go:order:{session['id']}")],
+        [("⬆️ Перемістити вище", f"au:{entry_id}"), ("⬇️ Перемістити нижче", f"ad:{entry_id}")],
+        [("🔢 Перемістити на місце…", f"ag:{entry_id}")],
     ]
+    if user:
+        block_text = "🟢 Розблокувати" if user.get("is_blocked") else "⛔ Заблокувати"
+        rows.append([("✏️ Змінити ім'я", f"an:{entry_id}"), (block_text, f"ab:{entry_id}")])
+    rows.extend([
+        [("✅ Позначити «Здав»", f"ax:{entry_id}")],
+        [("❌ Видалити з черги", f"ar:{entry_id}")],
+        [("📋 До списку", f"go:order:{session['id']}")],
+    ])
     return text, make_keyboard(rows)
 
 
@@ -279,7 +301,6 @@ async def ask_position(callback: CallbackQuery, state: FSMContext, conn):
                make_keyboard([[("Скасувати", f"ae:{entry_id}")]]))
 
 
-
 @router.message(MoveTo.position, F.text)
 async def move_to_position(message: Message, state: FSMContext, conn, subjects):
     if not message.text.strip().isdigit():
@@ -294,6 +315,84 @@ async def move_to_position(message: Message, state: FSMContext, conn, subjects):
     await state.clear()
     text, markup = entry_screen(conn, subjects, entry_id)
     await message.answer(text, reply_markup=markup)
+
+
+# ---------- Зміна імені студента старостою ----------
+
+@router.callback_query(F.data.startswith("an:"))
+async def ask_rename_student(callback: CallbackQuery, state: FSMContext, conn):
+    entry_id = int(arg(callback))
+    entry = queues.get_entry(conn, entry_id)
+    if entry is None or entry["status"] != "active" or not entry["user_id"]:
+        raise BotError("Запис не знайдено або він уже неактивний.")
+    user = conn.execute("SELECT * FROM users WHERE id = ?", (entry["user_id"],)).fetchone()
+    if not user:
+        raise BotError("Користувача не знайдено.")
+    await state.set_state(AdminRenameStudent.name)
+    await state.update_data(entry_id=entry_id, user_id=user["id"])
+    tg_id = f" (ID: {user['telegram_id']})" if user["telegram_id"] and user["telegram_id"] > 0 else ""
+    await show(
+        callback,
+        f"Введіть нове ім'я для студента «{user['full_name']}»{tg_id}:\n"
+        "Формат: Прізвище Ім'я (наприклад: Шевченко Тарас)",
+        make_keyboard([[("Скасувати", f"ae:{entry_id}")]])
+    )
+
+
+@router.message(AdminRenameStudent.name, F.text)
+async def receive_student_new_name(message: Message, state: FSMContext, conn, subjects):
+    data = await state.get_data()
+    entry_id = data["entry_id"]
+    user_id = data["user_id"]
+    new_name = message.text.strip()
+    try:
+        updated_user = users.admin_rename_user(conn, user_id, new_name)
+    except BotError as error:
+        await message.answer(f"{error}\nСпробуйте ще раз:")
+        return
+    await state.clear()
+    await message.answer(f"✅ Ім'я змінено на «{updated_user['full_name']}».")
+    try:
+        text, markup = entry_screen(conn, subjects, entry_id)
+        await message.answer(text, reply_markup=markup)
+    except BotError:
+        await message.answer("Адмін-панель:", reply_markup=panel_keyboard())
+
+
+# ---------- Блокування / розблокування студента ----------
+
+@router.callback_query(F.data.startswith("ab:"))
+async def toggle_block_student(callback: CallbackQuery, conn, subjects):
+    entry_id = int(arg(callback))
+    entry = queues.get_entry(conn, entry_id)
+    if entry is None or entry["status"] != "active" or not entry["user_id"]:
+        raise BotError("Запис не знайдено або він уже неактивний.")
+    user = conn.execute("SELECT * FROM users WHERE id = ?", (entry["user_id"],)).fetchone()
+    if not user:
+        raise BotError("Користувача не знайдено.")
+
+    new_blocked_state = users.toggle_block_user(conn, user["id"])
+    tg_id_str = f" [ID: {user['telegram_id']}]" if user["telegram_id"] and user["telegram_id"] > 0 else ""
+    if new_blocked_state:
+        queues.remove_user_from_all_queues(conn, callback.from_user.id, user["id"])
+        await show(
+            callback,
+            f"⛔ Студента «{user['full_name']}»{tg_id_str} заблоковано та видалено з усіх черг.\n"
+            "Він більше не зможе записуватися в черги.",
+            make_keyboard([
+                [("До списку студентів", f"go:order:{entry['session_id']}")],
+                BACK_TO_PANEL[0]
+            ])
+        )
+    else:
+        await show(
+            callback,
+            f"🟢 Студента «{user['full_name']}»{tg_id_str} розблоковано.",
+            make_keyboard([
+                [("Назад до студента", f"ae:{entry_id}")],
+                BACK_TO_PANEL[0]
+            ])
+        )
 
 
 @router.callback_query(F.data.startswith("ax:"))
@@ -560,3 +659,33 @@ async def ask_remove_admin(callback: CallbackQuery):
 async def confirm_remove_admin(callback: CallbackQuery, conn):
     admins.remove_admin(conn, callback.from_user.id, int(arg(callback)))
     await show(callback, "Права адміністратора видалено.", make_keyboard([[("Назад", "adm")]]))
+
+
+# ---------- Заблоковані студенти ----------
+
+@router.callback_query(F.data == "blist")
+async def show_blocked_list(callback: CallbackQuery, conn):
+    blocked = users.list_blocked_users(conn)
+    if not blocked:
+        await show(callback, "Заблокованих користувачів немає.", make_keyboard([BACK_TO_PANEL]))
+        return
+    rows = []
+    for u in blocked:
+        tg_id_str = f" [ID: {u['telegram_id']}]" if u["telegram_id"] and u["telegram_id"] > 0 else ""
+        rows.append([(f"🟢 Розблокувати {u['full_name']}{tg_id_str}", f"unblock:{u['id']}")])
+    rows.append(BACK_TO_PANEL)
+    await show(callback, "⛔ Список заблокованих користувачів:\nНатисніть на студента, щоб розблокувати:", make_keyboard(rows))
+
+
+@router.callback_query(F.data.startswith("unblock:"))
+async def unblock_user_handler(callback: CallbackQuery, conn):
+    user_id = int(arg(callback))
+    users.toggle_block_user(conn, user_id)
+    user = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+    name = user["full_name"] if user else f"ID {user_id}"
+    await show(
+        callback,
+        f"🟢 Студента «{name}» успішно розблоковано.",
+        make_keyboard([[("Список заблокованих", "blist")], BACK_TO_PANEL[0]])
+    )
+

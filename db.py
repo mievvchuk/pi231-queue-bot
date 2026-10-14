@@ -59,7 +59,9 @@ MIGRATIONS = [
         action TEXT NOT NULL,
         details TEXT NOT NULL DEFAULT '',
         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    );
+    """,
+    """
+    ALTER TABLE users ADD COLUMN is_blocked INTEGER NOT NULL DEFAULT 0;
     """,
 ]
 
@@ -68,8 +70,10 @@ CREATE TABLE IF NOT EXISTS users (
     id SERIAL PRIMARY KEY,
     telegram_id BIGINT NOT NULL UNIQUE,
     full_name TEXT NOT NULL,
+    is_blocked BOOLEAN NOT NULL DEFAULT FALSE,
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+
 CREATE TABLE IF NOT EXISTS admins (
     id SERIAL PRIMARY KEY,
     telegram_id BIGINT NOT NULL UNIQUE,
@@ -156,6 +160,7 @@ class PGConnectionWrapper:
     def _init_schema(self):
         with self.raw.cursor() as cur:
             cur.execute(PG_SCHEMA)
+            cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_blocked BOOLEAN NOT NULL DEFAULT FALSE;")
         self.raw.commit()
 
     def execute(self, sql: str, params: tuple = ()):

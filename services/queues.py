@@ -27,7 +27,7 @@ def get_entry(conn: sqlite3.Connection, entry_id: int):
 def get_entries(conn: sqlite3.Connection, session_id: int) -> list[sqlite3.Row]:
     """Активні записи по порядку. full_name = NULL означає вільне місце."""
     return conn.execute(
-        """SELECT e.id, e.user_id, e.position, u.full_name, u.telegram_id
+        """SELECT e.id, e.user_id, e.position, u.full_name, u.telegram_id, u.is_blocked
            FROM queue_entries e LEFT JOIN users u ON u.id = e.user_id
            WHERE e.session_id = ? AND e.status = 'active' ORDER BY e.position""",
         (session_id,),
@@ -116,11 +116,14 @@ def join_queue(conn: sqlite3.Connection, telegram_id: int, session_id: int,
         session = _require_session(conn, session_id, statuses=("open", "closed"))
         if session["status"] != "open":
             raise BotError("Запис до цієї черги закрито.")
-        user = conn.execute("SELECT id FROM users WHERE telegram_id = ?", (telegram_id,)).fetchone()
+        user = conn.execute("SELECT id, is_blocked FROM users WHERE telegram_id = ?", (telegram_id,)).fetchone()
         if user is None:
             raise BotError("Спочатку зареєструйтесь: /start")
+        if user.get("is_blocked"):
+            raise BotError("Вас заблоковано адміністратором.")
         if get_user_position(conn, telegram_id, session_id) is not None:
             raise BotError("Ви вже записані в цю чергу.")
+
         if position is None:
             _place_user(conn, session_id, user["id"])
         else:
@@ -269,6 +272,9 @@ def add_student_by_admin(conn, actor_id: int, session_id: int, user_id: int, pos
     with transaction(conn):
         require_admin(conn, actor_id)
         session = _require_session(conn, session_id)
+        user = conn.execute("SELECT is_blocked FROM users WHERE id = ?", (user_id,)).fetchone()
+        if user and user.get("is_blocked"):
+            raise BotError("Цього студента заблоковано адміністратором.")
         # Перевіряємо чи студент уже є в черзі
         exists = conn.execute(
             "SELECT 1 FROM queue_entries WHERE session_id = ? AND user_id = ? AND status = 'active'",
@@ -378,6 +384,21 @@ def remove_entry(conn, actor_id: int, entry_id: int) -> None:
         entry = _require_active_entry(conn, entry_id)
         _close_entry(conn, entry, "removed")
         log_action(conn, actor_id, "remove_entry", str(entry_id))
+
+
+def remove_user_from_all_queues(conn, actor_id: int, user_id: int) -> None:
+    """Видаляє заблокованого студента з усіх активних черг."""
+    with transaction(conn):
+        require_admin(conn, actor_id)
+        rows = conn.execute(
+            "SELECT id FROM queue_entries WHERE user_id = ? AND status = 'active'",
+            (user_id,),
+        ).fetchall()
+        for r in rows:
+            entry = get_entry(conn, r["id"])
+            if entry and entry["status"] == "active":
+                _close_entry(conn, entry, "removed")
+                log_action(conn, actor_id, "admin_block_remove_entry", str(r["id"]))
 
 
 # ---------- Адмін: завершення заняття ----------

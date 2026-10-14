@@ -53,7 +53,7 @@ def queue_label(subjects: list[dict], session) -> str:
     return f"{subject} — {teacher}{lock}"
 
 
-def format_queue(subjects: list[dict], session, entries, my_telegram_id: int | None = None) -> str:
+def format_queue(subjects: list[dict], session, entries, my_telegram_id: int | None = None, show_id: bool = False) -> str:
     subject, teacher = session_names(subjects, session)
     lines = [subject, teacher]
     if session["lesson_title"]:
@@ -61,18 +61,22 @@ def format_queue(subjects: list[dict], session, entries, my_telegram_id: int | N
     lines.append(f"Статус: {STATUS_TEXT[session['status']]}")
     lines.append("")
     for row in entries:
-        lines.append(format_entry(row, my_telegram_id))
+        lines.append(format_entry(row, my_telegram_id, show_id=show_id))
     if not entries:
         lines.append("Черга порожня.")
     return "\n".join(lines)
 
 
-def format_entry(row, my_telegram_id: int | None = None, marked: bool = False) -> str:
+def format_entry(row, my_telegram_id: int | None = None, marked: bool = False, show_id: bool = False) -> str:
     name = row["full_name"] or "— вільне місце —"
     is_me = my_telegram_id is not None and row["telegram_id"] == my_telegram_id
     prefix = "👉 " if is_me or marked else ""
     suffix = " (ви)" if is_me else ""
-    return f"{prefix}{row['position']}. {name}{suffix}"
+    id_part = ""
+    if show_id and row["telegram_id"] and row["telegram_id"] > 0:
+        id_part = f" [ID: {row['telegram_id']}]"
+    return f"{prefix}{row['position']}. {name}{suffix}{id_part}"
+
 
 
 async def show(callback: CallbackQuery, text: str, markup: InlineKeyboardMarkup | None = None):

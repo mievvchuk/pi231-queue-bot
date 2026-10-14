@@ -24,7 +24,10 @@ def get_user(conn: sqlite3.Connection, telegram_id: int):
 
 
 def register_user(conn: sqlite3.Connection, telegram_id: int, full_name: str):
-    if get_user(conn, telegram_id):
+    existing = get_user(conn, telegram_id)
+    if existing:
+        if existing.get("is_blocked"):
+            raise BotError("Вас заблоковано адміністратором.")
         raise BotError("Ви вже зареєстровані.")
     name = validate_full_name(full_name)
     conn.execute(
@@ -34,11 +37,32 @@ def register_user(conn: sqlite3.Connection, telegram_id: int, full_name: str):
 
 
 def rename_user(conn: sqlite3.Connection, telegram_id: int, full_name: str):
-    if not get_user(conn, telegram_id):
-        raise BotError("Спочатку зареєструйтесь: /start")
     name = validate_full_name(full_name)
     conn.execute("UPDATE users SET full_name = ? WHERE telegram_id = ?", (name, telegram_id))
     return get_user(conn, telegram_id)
+
+
+def admin_rename_user(conn, user_id: int, new_name: str):
+    """Староста змінює ПІБ студенту."""
+    name = validate_full_name(new_name)
+    conn.execute("UPDATE users SET full_name = ? WHERE id = ?", (name, user_id))
+    return conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+
+
+def toggle_block_user(conn, user_id: int) -> bool:
+    """Блокує / розблоковує студента."""
+    row = conn.execute("SELECT is_blocked FROM users WHERE id = ?", (user_id,)).fetchone()
+    if not row:
+        raise BotError("Користувача не знайдено.")
+    new_state = not bool(row["is_blocked"])
+    conn.execute("UPDATE users SET is_blocked = ? WHERE id = ?", (new_state, user_id))
+    return new_state
+
+
+def list_blocked_users(conn):
+    """Повертає список заблокованих студентів."""
+    return conn.execute("SELECT * FROM users WHERE is_blocked ORDER BY full_name").fetchall()
+
 
 
 def get_or_create_user_by_name(conn, full_name: str):
