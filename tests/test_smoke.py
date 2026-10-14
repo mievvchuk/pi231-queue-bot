@@ -31,5 +31,5 @@ def test_queue_text_marks_current_user(conn, make_user):
     queues.join_queue(conn, 2, session)
     text = format_queue(subjects, queues.get_session(conn, session),
                         queues.get_entries(conn, session), my_telegram_id=2)
-    assert "👉 2. Коваль Андрій (ви)" in text
+    assert "👉 2. Коваль Андрій — це ви" in text
     assert "1. Петренко Іван" in text and "👉 1." not in text

@@ -59,6 +59,7 @@ MIGRATIONS = [
         action TEXT NOT NULL,
         details TEXT NOT NULL DEFAULT '',
         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
     """,
     """
     ALTER TABLE users ADD COLUMN is_blocked INTEGER NOT NULL DEFAULT 0;
@@ -220,6 +221,7 @@ def connect(db_target: str):
 
     conn = sqlite3.connect(db_target, timeout=10, isolation_level=None)
     conn.row_factory = sqlite3.Row
+    conn.create_function("lower", 1, lambda s: s.lower() if isinstance(s, str) else s)
     conn.execute("PRAGMA foreign_keys = ON")
     conn.execute("PRAGMA journal_mode = WAL")
     migrate_sqlite(conn)

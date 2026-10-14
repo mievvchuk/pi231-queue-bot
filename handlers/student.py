@@ -1,3 +1,4 @@
+import html
 import logging
 import re
 from contextlib import suppress
@@ -11,6 +12,9 @@ from aiogram.types import CallbackQuery, Message
 from handlers.common import (
     find_session_by_label,
     format_queue,
+    get_lost_context_menu,
+    get_paginated_reply_keyboard,
+    get_queue_actions_reply_menu,
     get_queue_view_reply_menu,
     get_queues_reply_menu,
     get_reply_menu,
@@ -18,21 +22,21 @@ from handlers.common import (
     make_reply_keyboard,
     notify_admins_queue_opened,
     notify_next_students,
+    paginate,
     queue_label,
     session_names,
     show,
 )
 from services import admins, queues, users
 from services.errors import BotError
-from subjects import find_subject
 
 log = logging.getLogger(__name__)
 router = Router()
 
-BACK_TO_MENU = [("Головне меню", "menu")]
-
 
 class StudentFlow(StatesGroup):
+    browsing_queues = State()
+    browsing_my_queues = State()
     pick_position = State()
     choosing_swap_target = State()
     confirm_swap = State()
@@ -47,6 +51,19 @@ def get_session_or_fail(conn, session_id: int):
     return session
 
 
+async def ensure_session_id(message: Message, state: FSMContext) -> int | None:
+    """Перевіряє наявність вибраної черги. Якщо контекст втрачено — просить обрати знову."""
+    data = await state.get_data()
+    session_id = data.get("session_id")
+    if not session_id:
+        await message.answer(
+            "⚠️ <b>Потрібно знову обрати чергу.</b>",
+            reply_markup=get_lost_context_menu(),
+        )
+        return None
+    return session_id
+
+
 async def open_queue_screen(message: Message, conn, subjects, session_id: int, note: str = ""):
     session = get_session_or_fail(conn, session_id)
     entries = queues.get_entries(conn, session_id)
@@ -54,85 +71,8 @@ async def open_queue_screen(message: Message, conn, subjects, session_id: int, n
     text = format_queue(subjects, session, entries, message.from_user.id, show_id=is_adm)
     if note:
         text = f"{note}\n\n{text}"
-    markup = get_queue_view_reply_menu(conn, session_id, message.from_user.id, is_open=session["status"] == "open")
+    markup = get_queue_view_reply_menu()
     await message.answer(text, reply_markup=markup)
-
-
-# ---------- Список черг та навігація (Нижні кнопки) ----------
-
-@router.message(F.text == "📋 Стати в чергу", StateFilter("*"))
-async def choose_open_queue(message: Message, state: FSMContext, conn, subjects):
-    await state.clear()
-    open_sessions = queues.list_sessions(conn, ("open",))
-    if not open_sessions:
-        await message.answer(
-            "Зараз немає черг із відкритим записом.",
-            reply_markup=get_reply_menu(conn, message.from_user.id),
-        )
-        return
-    rows = [[f"📋 {queue_label(subjects, s)}"] for s in open_sessions]
-    rows.append(["🏠 Головне меню"])
-    await message.answer(
-        "Оберіть чергу для запису на кнопках внизу 👇",
-        reply_markup=make_reply_keyboard(rows),
-    )
-
-
-@router.message(F.text == "🔍 Переглянути черги", StateFilter("*"))
-async def view_all_queues(message: Message, state: FSMContext, conn, subjects):
-    await state.clear()
-    sessions = queues.list_sessions(conn, ("open", "closed"))
-    if not sessions:
-        await message.answer(
-            "Активних черг зараз немає.",
-            reply_markup=get_reply_menu(conn, message.from_user.id),
-        )
-        return
-    await message.answer(
-        "Оберіть чергу на кнопках внизу 👇",
-        reply_markup=get_queues_reply_menu(sessions, subjects),
-    )
-
-
-@router.message(F.text == "👥 Мої черги", StateFilter("*"))
-async def my_queues(message: Message, state: FSMContext, conn, subjects):
-    await state.clear()
-    sessions = queues.list_user_sessions(conn, message.from_user.id)
-    if not sessions:
-        await message.answer(
-            "Ви ще не записані в жодну чергу.",
-            reply_markup=get_reply_menu(conn, message.from_user.id),
-        )
-        return
-    await message.answer(
-        "Ваші черги. Оберіть чергу на кнопках внизу 👇",
-        reply_markup=get_queues_reply_menu(sessions, subjects),
-    )
-
-
-@router.message(F.text == "🔄 Оновити список", StateFilter("*"))
-async def refresh_queues_list(message: Message, state: FSMContext, conn, subjects):
-    sessions = queues.list_sessions(conn, ("open", "closed"))
-    if not sessions:
-        await message.answer("Активних черг немає.", reply_markup=get_reply_menu(conn, message.from_user.id))
-        return
-    await message.answer(
-        "Список черг оновлено 👇",
-        reply_markup=get_queues_reply_menu(sessions, subjects),
-    )
-
-
-@router.message(F.text == "🔙 До списку черг", StateFilter("*"))
-async def back_to_queues_list(message: Message, state: FSMContext, conn, subjects):
-    await state.clear()
-    sessions = queues.list_sessions(conn, ("open", "closed"))
-    if not sessions:
-        await message.answer("Активних черг немає.", reply_markup=get_reply_menu(conn, message.from_user.id))
-        return
-    await message.answer(
-        "Оберіть чергу на кнопках внизу 👇",
-        reply_markup=get_queues_reply_menu(sessions, subjects),
-    )
 
 
 async def not_admin_state_filter(message: Message, state: FSMContext) -> bool:
@@ -150,9 +90,113 @@ async def not_admin_state_filter(message: Message, state: FSMContext) -> bool:
 async def student_queue_button_filter(message: Message, state: FSMContext) -> bool:
     if not message.text or not message.text.startswith("📋 "):
         return False
-    if message.text in {"📋 Стати в чергу", "📋 Список адміністраторів"}:
+    if message.text in {
+        "📋 Усі черги",
+        "📋 Мої черги",
+        "📋 Стати в чергу",
+        "📋 Список адміністраторів",
+        "📋 Черги",
+    }:
         return False
     return await not_admin_state_filter(message, state)
+
+
+# ---------- Список черг та навігація ----------
+
+@router.message(F.text.in_({"📋 Усі черги", "🔍 Переглянути черги", "📋 Стати в чергу"}), StateFilter("*"))
+async def view_all_queues(message: Message, state: FSMContext, conn, subjects):
+    await state.clear()
+    sessions = queues.list_sessions(conn, ("open", "closed"))
+    if not sessions:
+        await message.answer(
+            "Активних черг зараз немає.",
+            reply_markup=get_reply_menu(conn, message.from_user.id),
+        )
+        return
+    await state.set_state(StudentFlow.browsing_queues)
+    await state.update_data(page=1)
+    await message.answer(
+        "Оберіть чергу на кнопках внизу 👇",
+        reply_markup=get_queues_reply_menu(sessions, subjects, page=1),
+    )
+
+
+@router.message(F.text == "👥 Мої черги", StateFilter("*"))
+async def my_queues(message: Message, state: FSMContext, conn, subjects):
+    await state.clear()
+    sessions = queues.list_user_sessions(conn, message.from_user.id)
+    if not sessions:
+        await message.answer(
+            "Ви ще не записані в жодну чергу.",
+            reply_markup=get_reply_menu(conn, message.from_user.id),
+        )
+        return
+    await state.set_state(StudentFlow.browsing_my_queues)
+    await state.update_data(page=1)
+    await message.answer(
+        "Ваші черги. Оберіть чергу на кнопках внизу 👇",
+        reply_markup=get_queues_reply_menu(sessions, subjects, page=1),
+    )
+
+
+@router.message(StudentFlow.browsing_queues, F.text.in_({"⬅️", "➡️"}))
+async def paginate_all_queues(message: Message, state: FSMContext, conn, subjects):
+    sessions = queues.list_sessions(conn, ("open", "closed"))
+    data = await state.get_data()
+    page = data.get("page", 1)
+    page = (page - 1) if message.text == "⬅️" else (page + 1)
+    await state.update_data(page=page)
+    await message.answer(
+        "Оберіть чергу на кнопках внизу 👇",
+        reply_markup=get_queues_reply_menu(sessions, subjects, page=page),
+    )
+
+
+@router.message(StudentFlow.browsing_my_queues, F.text.in_({"⬅️", "➡️"}))
+async def paginate_my_queues(message: Message, state: FSMContext, conn, subjects):
+    sessions = queues.list_user_sessions(conn, message.from_user.id)
+    data = await state.get_data()
+    page = data.get("page", 1)
+    page = (page - 1) if message.text == "⬅️" else (page + 1)
+    await state.update_data(page=page)
+    await message.answer(
+        "Ваші черги. Оберіть чергу на кнопках внизу 👇",
+        reply_markup=get_queues_reply_menu(sessions, subjects, page=page),
+    )
+
+
+@router.message(F.text.in_({"🔄 Оновити список", "🔄 Оновити"}), StudentFlow.browsing_queues)
+async def refresh_all_queues_list(message: Message, state: FSMContext, conn, subjects):
+    sessions = queues.list_sessions(conn, ("open", "closed"))
+    data = await state.get_data()
+    page = data.get("page", 1)
+    if not sessions:
+        await message.answer("Активних черг немає.", reply_markup=get_reply_menu(conn, message.from_user.id))
+        return
+    await message.answer(
+        "Список черг оновлено 👇",
+        reply_markup=get_queues_reply_menu(sessions, subjects, page=page),
+    )
+
+
+@router.message(F.text.in_({"🔄 Оновити список", "🔄 Оновити"}), StudentFlow.browsing_my_queues)
+async def refresh_my_queues_list(message: Message, state: FSMContext, conn, subjects):
+    sessions = queues.list_user_sessions(conn, message.from_user.id)
+    data = await state.get_data()
+    page = data.get("page", 1)
+    if not sessions:
+        await message.answer("Ви не записані в жодну чергу.", reply_markup=get_reply_menu(conn, message.from_user.id))
+        return
+    await message.answer(
+        "Ваші черги оновлено 👇",
+        reply_markup=get_queues_reply_menu(sessions, subjects, page=page),
+    )
+
+
+@router.message(F.text.in_({"🔙 До черг", "🔙 До списку черг"}), not_admin_state_filter)
+async def back_to_queues_list(message: Message, state: FSMContext, conn, subjects):
+    await state.clear()
+    await view_all_queues(message, state, conn, subjects)
 
 
 @router.message(student_queue_button_filter)
@@ -170,168 +214,135 @@ async def select_queue_by_button(message: Message, state: FSMContext, conn, subj
     await open_queue_screen(message, conn, subjects, session["id"])
 
 
-# ---------- Дії всередині черги (Нижні кнопки) ----------
+# ---------- Дії всередині черги ----------
 
 @router.message(F.text == "🔄 Оновити", not_admin_state_filter)
 async def refresh_current_queue(message: Message, state: FSMContext, conn, subjects):
-    data = await state.get_data()
-    session_id = data.get("session_id")
+    session_id = await ensure_session_id(message, state)
     if not session_id:
-        sessions = queues.list_user_sessions(conn, message.from_user.id)
-        if sessions:
-            session_id = sessions[0]["id"]
-            await state.update_data(session_id=session_id)
-        else:
-            await message.answer("Оберіть чергу на кнопках внизу 👇", reply_markup=get_reply_menu(conn, message.from_user.id))
-            return
+        return
     await open_queue_screen(message, conn, subjects, session_id)
 
 
-@router.message(F.text == "📍 Моє місце", StateFilter("*"))
+@router.message(F.text == "📍 Моє місце", not_admin_state_filter)
 async def show_my_place(message: Message, state: FSMContext, conn, subjects):
-    data = await state.get_data()
-    session_id = data.get("session_id")
+    session_id = await ensure_session_id(message, state)
     if not session_id:
-        sessions = queues.list_user_sessions(conn, message.from_user.id)
-        if sessions:
-            session_id = sessions[0]["id"]
-            await state.update_data(session_id=session_id)
-        else:
-            await message.answer("Ви не записані в цю чергу.", reply_markup=get_reply_menu(conn, message.from_user.id))
-            return
+        return
     place = queues.get_user_position(conn, message.from_user.id, session_id)
     total = len(queues.get_entries(conn, session_id))
-    note = f"📍 Ваше місце в черзі: {place} з {total}" if place else "Ви не записані в цю чергу."
+    note = f"📍 Ваше місце: <b>{place}</b> із {total}." if place else "Ви не записані в цю чергу."
     await open_queue_screen(message, conn, subjects, session_id, note=note)
 
 
-@router.message(F.text.in_({"✅ Здав", "здав", "здала"}), StateFilter("*"))
-async def mark_passed(message: Message, state: FSMContext, conn, subjects):
-    data = await state.get_data()
-    session_id = data.get("session_id")
+@router.message(F.text == "⚙️ Дії", not_admin_state_filter)
+async def show_queue_actions(message: Message, state: FSMContext, conn):
+    session_id = await ensure_session_id(message, state)
     if not session_id:
-        sessions = queues.list_user_sessions(conn, message.from_user.id)
-        if len(sessions) == 1:
-            session_id = sessions[0]["id"]
-            await state.update_data(session_id=session_id)
-        elif not sessions:
-            raise BotError("Ви не записані в жодну чергу.")
-        else:
-            rows = [[f"📋 {queue_label(subjects, s)}"] for s in sessions]
-            rows.append(["🏠 Головне меню"])
-            await message.answer("Оберіть чергу, де ви здали 👇", reply_markup=make_reply_keyboard(rows))
-            return
-    my_pos = queues.get_user_position(conn, message.from_user.id, session_id)
-    queues.finish_own_entry(conn, message.from_user.id, session_id, passed=True)
-    await notify_next_students(message.bot, conn, subjects, session_id, removed_position=my_pos)
-    await open_queue_screen(message, conn, subjects, session_id, note="✅ Позначено: здав! Вас знято з черги.")
+        return
+    session = get_session_or_fail(conn, session_id)
+    is_in_queue = queues.get_user_position(conn, message.from_user.id, session_id) is not None
+    is_open = session["status"] == "open"
+    markup = get_queue_actions_reply_menu(is_in_queue, is_open=is_open)
+    await message.answer("⚙️ <b>Оберіть дію:</b>", reply_markup=markup)
 
 
-@router.message(F.text.in_({"❌ Не здав", "не здав", "не здала"}), StateFilter("*"))
-async def mark_not_passed(message: Message, state: FSMContext, conn, subjects):
-    data = await state.get_data()
-    session_id = data.get("session_id")
-    if not session_id:
-        sessions = queues.list_user_sessions(conn, message.from_user.id)
-        if len(sessions) == 1:
-            session_id = sessions[0]["id"]
-            await state.update_data(session_id=session_id)
-        elif not sessions:
-            raise BotError("Ви не записані в жодну чергу.")
-        else:
-            rows = [[f"📋 {queue_label(subjects, s)}"] for s in sessions]
-            rows.append(["🏠 Головне меню"])
-            await message.answer("Оберіть чергу, де ви не здали 👇", reply_markup=make_reply_keyboard(rows))
-            return
-    my_pos = queues.get_user_position(conn, message.from_user.id, session_id)
-    new_place = queues.finish_own_entry(conn, message.from_user.id, session_id, passed=False)
-    await notify_next_students(message.bot, conn, subjects, session_id, removed_position=my_pos)
-    await open_queue_screen(message, conn, subjects, session_id, note=f"❌ Позначено: не здав. Вас переміщено в кінець черги (місце {new_place}).")
-
-
-@router.message(F.text == "🚪 Покинути чергу", StateFilter("*"))
-async def ask_leave_queue(message: Message, state: FSMContext, conn, subjects):
-    data = await state.get_data()
-    session_id = data.get("session_id")
-    if not session_id:
-        raise BotError("Оберіть чергу.")
-    if queues.get_user_position(conn, message.from_user.id, session_id) is None:
-        raise BotError("Ви не записані в цю чергу.")
-    markup = make_reply_keyboard([["⚠️ Підтвердити вихід"], ["🔙 Назад до черги"]])
-    await message.answer("Покинути чергу? Ваше місце буде втрачено.", reply_markup=markup)
-
-
-@router.message(F.text == "⚠️ Підтвердити вихід", StateFilter("*"))
-async def confirm_leave_queue(message: Message, state: FSMContext, conn, subjects):
-    data = await state.get_data()
-    session_id = data.get("session_id")
-    if not session_id:
-        raise BotError("Оберіть чергу.")
-    my_pos = queues.get_user_position(conn, message.from_user.id, session_id)
-    queues.leave_queue(conn, message.from_user.id, session_id)
-    await notify_next_students(message.bot, conn, subjects, session_id, removed_position=my_pos)
-    await open_queue_screen(message, conn, subjects, session_id, note="🚪 Ви покинули чергу.")
-
-
-@router.message(F.text == "🔙 Назад до черги", not_admin_state_filter)
+@router.message(F.text.in_({"🔙 Назад до черги", "🔙 Назад"}), not_admin_state_filter)
 async def back_to_current_queue(message: Message, state: FSMContext, conn, subjects):
-    data = await state.get_data()
-    session_id = data.get("session_id")
+    session_id = await ensure_session_id(message, state)
     if not session_id:
-        await message.answer("Головне меню 👇", reply_markup=get_reply_menu(conn, message.from_user.id))
         return
     await state.clear()
     await state.update_data(session_id=session_id)
     await open_queue_screen(message, conn, subjects, session_id)
 
 
-# ---------- Запис у чергу (Нижні кнопки) ----------
-
-@router.message(F.text == "📝 Записатися в чергу", StateFilter("*"))
-async def ask_join_options(message: Message, state: FSMContext, conn, subjects):
-    data = await state.get_data()
-    session_id = data.get("session_id")
+@router.message(F.text.in_({"✅ Здав", "здав", "здала"}), not_admin_state_filter)
+async def mark_passed(message: Message, state: FSMContext, conn, subjects):
+    session_id = await ensure_session_id(message, state)
     if not session_id:
-        raise BotError("Оберіть чергу.")
-    markup = make_reply_keyboard([
-        ["➡️ В кінець черги"],
-        ["🔢 Обрати номер"],
-        ["🔙 Назад до черги"],
-    ])
-    await message.answer("Як ви бажаєте записатися в чергу?", reply_markup=markup)
-
-
-@router.message(F.text == "➡️ В кінець черги", StateFilter("*"))
-async def join_queue_end(message: Message, state: FSMContext, conn, subjects):
-    data = await state.get_data()
-    session_id = data.get("session_id")
-    if not session_id:
-        raise BotError("Оберіть чергу.")
-    position, total = queues.join_queue(conn, message.from_user.id, session_id)
+        return
+    my_pos = queues.get_user_position(conn, message.from_user.id, session_id)
+    queues.finish_own_entry(conn, message.from_user.id, session_id, passed=True)
+    await notify_next_students(message.bot, conn, subjects, session_id, removed_position=my_pos)
     await open_queue_screen(
         message, conn, subjects, session_id,
-        note=f"🎉 Ви успішно записані! Ваш номер: {position} (всього: {total})",
+        note="✅ <b>Здачу зараховано</b>\n\nВас знято з черги.",
     )
 
 
-@router.message(F.text == "🔢 Обрати номер", StateFilter("*"))
-async def ask_specific_number(message: Message, state: FSMContext):
-    data = await state.get_data()
-    session_id = data.get("session_id")
+@router.message(F.text.in_({"❌ Не здав", "не здав", "не здала"}), not_admin_state_filter)
+async def mark_not_passed(message: Message, state: FSMContext, conn, subjects):
+    session_id = await ensure_session_id(message, state)
     if not session_id:
-        raise BotError("Оберіть чергу.")
+        return
+    my_pos = queues.get_user_position(conn, message.from_user.id, session_id)
+    new_place = queues.finish_own_entry(conn, message.from_user.id, session_id, passed=False)
+    await notify_next_students(message.bot, conn, subjects, session_id, removed_position=my_pos)
+    await open_queue_screen(
+        message, conn, subjects, session_id,
+        note=f"❌ <b>Позначено: не здав</b>\n\nВас переміщено в кінець черги на місце <b>{new_place}</b>.",
+    )
+
+
+@router.message(F.text == "🚪 Покинути чергу", not_admin_state_filter)
+async def ask_leave_queue(message: Message, state: FSMContext, conn):
+    session_id = await ensure_session_id(message, state)
+    if not session_id:
+        return
+    if queues.get_user_position(conn, message.from_user.id, session_id) is None:
+        raise BotError("Ви не записані в цю чергу.")
+    markup = make_reply_keyboard([["⚠️ Підтвердити вихід"], ["🔙 Назад до черги"]])
+    await message.answer("🚪 <b>Покинути чергу?</b>\n\nВаше місце буде втрачено.", reply_markup=markup)
+
+
+@router.message(F.text == "⚠️ Підтвердити вихід", not_admin_state_filter)
+async def confirm_leave_queue(message: Message, state: FSMContext, conn, subjects):
+    session_id = await ensure_session_id(message, state)
+    if not session_id:
+        return
+    my_pos = queues.get_user_position(conn, message.from_user.id, session_id)
+    queues.leave_queue(conn, message.from_user.id, session_id)
+    await notify_next_students(message.bot, conn, subjects, session_id, removed_position=my_pos)
+    await open_queue_screen(message, conn, subjects, session_id, note="🚪 <b>Ви вийшли з черги.</b>")
+
+
+# ---------- Запис у чергу ----------
+
+@router.message(F.text.in_({"📝 Стати в кінець", "➡️ В кінець черги"}), not_admin_state_filter)
+async def join_queue_end(message: Message, state: FSMContext, conn, subjects):
+    session_id = await ensure_session_id(message, state)
+    if not session_id:
+        return
+    session = get_session_or_fail(conn, session_id)
+    if session["status"] != "open":
+        raise BotError("Запис у цю чергу закрито.")
+    position, total = queues.join_queue(conn, message.from_user.id, session_id)
+    await open_queue_screen(
+        message, conn, subjects, session_id,
+        note=f"✅ <b>Ви записалися</b>\n\nВаше місце: <b>{position}</b> із {total}.",
+    )
+
+
+@router.message(F.text.in_({"🔢 Обрати місце", "🔢 Обрати номер"}), not_admin_state_filter)
+async def ask_specific_number(message: Message, state: FSMContext, conn):
+    session_id = await ensure_session_id(message, state)
+    if not session_id:
+        return
+    session = get_session_or_fail(conn, session_id)
+    if session["status"] != "open":
+        raise BotError("Запис у цю чергу закрито.")
     await state.set_state(StudentFlow.pick_position)
     await state.update_data(session_id=session_id)
     await message.answer(
-        "Введіть бажаний номер у черзі (наприклад 1, 7 чи 15):\n"
-        "Якщо перед цим номером будуть пусті місця — вони залишаться вільними для інших студентів.",
+        "🔢 <b>Вибір місця</b>\n\nВведіть бажаний номер у черзі (наприклад 3 чи 7):",
         reply_markup=make_reply_keyboard([["🔙 Назад до черги"]]),
     )
 
 
 @router.message(StudentFlow.pick_position, F.text)
 async def handle_join_number(message: Message, state: FSMContext, conn, subjects):
-    if message.text == "🔙 Назад до черги":
+    if message.text in {"🔙 Назад до черги", "🔙 Назад"}:
         data = await state.get_data()
         session_id = data.get("session_id")
         await state.clear()
@@ -343,7 +354,10 @@ async def handle_join_number(message: Message, state: FSMContext, conn, subjects
         await message.answer("Введіть число (наприклад 3) або натисніть «🔙 Назад до черги»:")
         return
     data = await state.get_data()
-    session_id = data["session_id"]
+    session_id = data.get("session_id")
+    if not session_id:
+        await message.answer("⚠️ <b>Потрібно знову обрати чергу.</b>", reply_markup=get_lost_context_menu())
+        return
     pos = int(message.text.strip())
     try:
         position, total = queues.join_queue(conn, message.from_user.id, session_id, pos)
@@ -354,18 +368,17 @@ async def handle_join_number(message: Message, state: FSMContext, conn, subjects
     await state.update_data(session_id=session_id)
     await open_queue_screen(
         message, conn, subjects, session_id,
-        note=f"🎉 Ви успішно зайняли номер {position}!",
+        note=f"✅ <b>Ви записалися</b>\n\nВаше місце: <b>{position}</b> із {total}.",
     )
 
 
-# ---------- Обмін місцями між студентами (Нижні кнопки) ----------
+# ---------- Обмін місцями між студентами ----------
 
-@router.message(F.text == "🔄 Помінятися місцем", StateFilter("*"))
+@router.message(F.text.in_({"🔁 Обмінятися місцями", "🔄 Помінятися місцем"}), not_admin_state_filter)
 async def start_swap_flow(message: Message, state: FSMContext, conn, subjects):
-    data = await state.get_data()
-    session_id = data.get("session_id")
+    session_id = await ensure_session_id(message, state)
     if not session_id:
-        raise BotError("Оберіть чергу.")
+        return
     my_pos = queues.get_user_position(conn, message.from_user.id, session_id)
     if my_pos is None:
         raise BotError("Ви не записані в цю чергу.")
@@ -375,21 +388,44 @@ async def start_swap_flow(message: Message, state: FSMContext, conn, subjects):
         if e["user_id"] and e["telegram_id"] and e["telegram_id"] > 0 and e["telegram_id"] != message.from_user.id
     ]
     if not candidates:
-        await message.answer("У цій черзі немає інших зареєстрованих студентів, з якими можна помінятися.")
-        await open_queue_screen(message, conn, subjects, session_id)
+        await open_queue_screen(
+            message, conn, subjects, session_id,
+            note="У цій черзі немає інших студентів, з якими можна помінятися.",
+        )
         return
-    rows = [[f"🔄 {e['position']}. {e['full_name']}"] for e in candidates]
-    rows.append(["🔙 Назад до черги"])
+
     await state.set_state(StudentFlow.choosing_swap_target)
-    await state.update_data(session_id=session_id)
-    await message.answer("Оберіть студента на кнопках внизу, з яким хочете помінятися місцями 👇", reply_markup=make_reply_keyboard(rows))
+    await state.update_data(session_id=session_id, swap_page=1)
+    page_candidates, cur_page, total_pages = paginate(candidates, 1, per_page=8)
+    rows = [[f"🔄 {e['position']}. {e['full_name']}"] for e in page_candidates]
+    markup = get_paginated_reply_keyboard(rows, cur_page, total_pages, back_text="🔙 Назад до черги")
+    await message.answer("🔁 <b>Обмін місцями</b>\n\nОберіть студента на кнопках внизу 👇", reply_markup=markup)
+
+
+@router.message(StudentFlow.choosing_swap_target, F.text.in_({"⬅️", "➡️"}))
+async def paginate_swap_targets(message: Message, state: FSMContext, conn):
+    data = await state.get_data()
+    session_id = data.get("session_id")
+    page = data.get("swap_page", 1)
+    page = (page - 1) if message.text == "⬅️" else (page + 1)
+    await state.update_data(swap_page=page)
+
+    entries = queues.get_entries(conn, session_id)
+    candidates = [
+        e for e in entries
+        if e["user_id"] and e["telegram_id"] and e["telegram_id"] > 0 and e["telegram_id"] != message.from_user.id
+    ]
+    page_candidates, cur_page, total_pages = paginate(candidates, page, per_page=8)
+    rows = [[f"🔄 {e['position']}. {e['full_name']}"] for e in page_candidates]
+    markup = get_paginated_reply_keyboard(rows, cur_page, total_pages, back_text="🔙 Назад до черги")
+    await message.answer("Оберіть студента для обміну місцями 👇", reply_markup=markup)
 
 
 @router.message(StudentFlow.choosing_swap_target, F.text)
 async def swap_target_chosen(message: Message, state: FSMContext, conn, subjects):
     data = await state.get_data()
     session_id = data.get("session_id")
-    if message.text == "🔙 Назад до черги":
+    if message.text in {"🔙 Назад до черги", "🔙 Назад"}:
         await state.clear()
         if session_id:
             await state.update_data(session_id=session_id)
@@ -421,10 +457,10 @@ async def swap_target_chosen(message: Message, state: FSMContext, conn, subjects
     await state.set_state(StudentFlow.confirm_swap)
     await state.update_data(session_id=session_id, target_entry_id=target["id"])
     text = (
-        f"🔄 **Запропонувати обмін місцями?**\n\n"
-        f"👤 Студент: **{target_name}** (місце {target['position']})\n"
-        f"Ваше поточне місце: **{my_pos}**\n\n"
-        f"Студенту надійде сповіщення в боті. Якщо він погодиться — ваші місця автоматично поміняються."
+        f"🔁 <b>Запропонувати обмін місцями?</b>\n\n"
+        f"👤 Студент: <b>{html.escape(target_name)}</b> (місце {target['position']})\n"
+        f"Ваше поточне місце: <b>{my_pos}</b>\n\n"
+        f"Студенту надійде сповіщення. Якщо він погодиться — місця оновляться автоматично."
     )
     markup = make_reply_keyboard([["✅ Підтвердити обмін"], ["🔙 Назад до черги"]])
     await message.answer(text, reply_markup=markup)
@@ -435,7 +471,7 @@ async def swap_confirm_action(message: Message, state: FSMContext, conn, subject
     data = await state.get_data()
     session_id = data.get("session_id")
     target_entry_id = data.get("target_entry_id")
-    if message.text == "🔙 Назад до черги":
+    if message.text in {"🔙 Назад до черги", "🔙 Назад"}:
         await state.clear()
         if session_id:
             await state.update_data(session_id=session_id)
@@ -457,12 +493,11 @@ async def swap_confirm_action(message: Message, state: FSMContext, conn, subject
     subject, teacher = session_names(subjects, session)
 
     invite_text = (
-        f"🔄 **Пропозиція обміну місцями в черзі!**\n\n"
-        f"Студент **{sender_name}** (місце {my_entry['position']}) пропонує помінятися з вами місцями:\n"
-        f"📚 **{subject} — {teacher}**\n\n"
-        f"• Ваше поточне місце: **{target['position']}**\n"
-        f"• Нове місце після обміну: **{my_entry['position']}**\n\n"
-        f"Погодитися на обмін?"
+        f"🔁 <b>Пропозиція обміну місцями</b>\n\n"
+        f"Студент <b>{html.escape(sender_name)}</b> (місце {my_entry['position']}) пропонує помінятися місцями:\n"
+        f"📚 <b>{html.escape(subject)} — {html.escape(teacher)}</b>\n\n"
+        f"• Ваше поточне місце: <b>{target['position']}</b>\n"
+        f"• Нове місце після обміну: <b>{my_entry['position']}</b>"
     )
     invite_keyboard = make_keyboard([
         [
@@ -473,17 +508,16 @@ async def swap_confirm_action(message: Message, state: FSMContext, conn, subject
     try:
         await message.bot.send_message(target_user["telegram_id"], invite_text, reply_markup=invite_keyboard)
     except Exception:
-        raise BotError("Не вдалося надіслати запит студенту (можливо, він заблокував бота).")
+        raise BotError("Не вдалося надіслати запит студенту.")
 
     await state.clear()
     await state.update_data(session_id=session_id)
     await open_queue_screen(
         message, conn, subjects, session_id,
-        note=f"✅ Запит надіслано студенту {target_user['full_name']}!\nЯк тільки він відповість, ви отримаєте сповіщення."
+        note=f"✅ <b>Запит на обмін надіслано</b> студенту {html.escape(target_user['full_name'])}.",
     )
 
 
-# Обробники кнопок у повідомленні пропозиції обміну (для отримувача)
 @router.callback_query(F.data.startswith("sw_yes:"))
 async def swap_accept(callback: CallbackQuery, conn, subjects):
     _, sender_entry_id, target_entry_id = callback.data.split(":")
@@ -499,7 +533,7 @@ async def swap_accept(callback: CallbackQuery, conn, subjects):
 
     sender_entry = queues.get_entry(conn, sender_entry_id)
     if not sender_entry or sender_entry["status"] != "active":
-        raise BotError("Студент, який надсилав запит, уже вийшов з черги або змінив позицію.")
+        raise BotError("Студент, який надсилав запит, уже змінив позицію або вийшов.")
 
     session = get_session_or_fail(conn, target_entry["session_id"])
     subject, teacher = session_names(subjects, session)
@@ -509,18 +543,18 @@ async def swap_accept(callback: CallbackQuery, conn, subjects):
 
     await show(
         callback,
-        f"🎉 Ви успішно обмінялися місцями з **{sender_user['full_name']}**!\n"
-        f"📚 {subject} — {teacher}\n"
-        f"Ваше нове місце: **{new_target_pos}**"
+        f"✅ <b>Обмін успішний</b>\n\n"
+        f"Ви обмінялися місцями з <b>{html.escape(sender_user['full_name'])}</b>.\n"
+        f"Ваше нове місце: <b>{new_target_pos}</b>."
     )
 
     if sender_user and sender_user["telegram_id"] and sender_user["telegram_id"] > 0:
         with suppress(Exception):
             await callback.bot.send_message(
                 sender_user["telegram_id"],
-                f"🎉 Студент **{target_user['full_name']}** погодився на обмін місцями!\n"
-                f"📚 {subject} — {teacher}\n"
-                f"Ваше нове місце: **{new_sender_pos}**",
+                f"✅ <b>Обмін успішний</b>\n\n"
+                f"Студент <b>{html.escape(target_user['full_name'])}</b> погодився на обмін.\n"
+                f"Ваше нове місце: <b>{new_sender_pos}</b>.",
                 reply_markup=get_reply_menu(conn, sender_user["telegram_id"]),
             )
 
@@ -538,20 +572,20 @@ async def swap_decline(callback: CallbackQuery, conn, subjects):
     sender_entry = queues.get_entry(conn, sender_entry_id)
     sender_user = conn.execute("SELECT * FROM users WHERE id = ?", (sender_entry["user_id"],)).fetchone() if sender_entry else None
 
-    await show(callback, "❌ Ви відхилили пропозицію обміну місцями.")
+    await show(callback, "❌ <b>Ви відхилили пропозицію обміну місцями.</b>")
 
     if sender_user and sender_user["telegram_id"] and sender_user["telegram_id"] > 0:
         target_name = target_user["full_name"] if target_user else "Студент"
         with suppress(Exception):
             await callback.bot.send_message(
                 sender_user["telegram_id"],
-                f"❌ Студент **{target_name}** відхилив вашу пропозицію обміну місцями."
+                f"❌ Студент <b>{html.escape(target_name)}</b> відхилив пропозицію обміну місцями."
             )
 
 
-# ---------- Створення черги (Нижні кнопки) ----------
+# ---------- Створення черги ----------
 
-@router.message(F.text.in_({"➕ Відкрити чергу", "➕ Створити чергу"}), StateFilter("*"))
+@router.message(F.text.in_({"➕ Відкрити чергу", "➕ Створити чергу"}), not_admin_state_filter)
 async def start_open_queue(message: Message, state: FSMContext, conn, subjects):
     await state.clear()
     await state.set_state(StudentFlow.creating_queue_subject)
@@ -580,7 +614,7 @@ async def new_queue_subject_selected(message: Message, state: FSMContext, conn, 
                 message.bot, conn, message.from_user.id, creator_name,
                 matched_sub["name"], teacher["name"]
             )
-            await open_queue_screen(message, conn, subjects, session_id, note="🎉 Чергу успішно створено!")
+            await open_queue_screen(message, conn, subjects, session_id, note="🎉 <b>Чергу успішно створено!</b>")
         except BotError as err:
             await state.clear()
             await message.answer(f"{err}", reply_markup=get_reply_menu(conn, message.from_user.id))
@@ -615,20 +649,21 @@ async def new_queue_teacher_selected(message: Message, state: FSMContext, conn, 
             message.bot, conn, message.from_user.id, creator_name,
             matched_sub["name"], matched_teacher["name"]
         )
-        await open_queue_screen(message, conn, subjects, session_id, note="🎉 Чергу успішно створено!")
+        await open_queue_screen(message, conn, subjects, session_id, note="🎉 <b>Чергу успішно створено!</b>")
     except BotError as err:
         await state.clear()
         await message.answer(f"{err}", reply_markup=get_reply_menu(conn, message.from_user.id))
 
 
-# ---------- Зворотна сумісність для застарілих inline-кнопок ----------
+# ---------- Зворотна сумісність ----------
 
 @router.callback_query(F.data.startswith("vq:"))
 async def legacy_view_queue(callback: CallbackQuery, conn, subjects, state: FSMContext):
     session_id = int(callback.data.split(":")[1])
     await state.clear()
     await state.update_data(session_id=session_id)
-    await callback.message.delete()
+    with suppress(Exception):
+        await callback.message.delete()
     await open_queue_screen(callback.message, conn, subjects, session_id)
 
 
@@ -638,8 +673,9 @@ async def legacy_button_finish(callback: CallbackQuery, conn, subjects):
     session_id = int(session_id)
     passed = prefix == "sd"
     queues.finish_own_entry(conn, callback.from_user.id, session_id, passed)
-    note = "Позначено: здав." if passed else "Позначено: не здав."
-    await callback.message.delete()
+    note = "✅ <b>Здачу зараховано</b>\n\nВас знято з черги." if passed else "❌ <b>Позначено: не здав</b>"
+    with suppress(Exception):
+        await callback.message.delete()
     await open_queue_screen(callback.message, conn, subjects, session_id, note=note)
 
 
@@ -647,4 +683,4 @@ async def legacy_button_finish(callback: CallbackQuery, conn, subjects):
 async def legacy_ask_leave(callback: CallbackQuery, conn):
     session_id = int(callback.data.split(":")[1])
     queues.leave_queue(conn, callback.from_user.id, session_id)
-    await show(callback, "Ви покинули чергу.")
+    await show(callback, "🚪 <b>Ви вийшли з черги.</b>")

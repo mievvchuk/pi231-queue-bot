@@ -1,3 +1,4 @@
+import html
 import logging
 import re
 from contextlib import suppress
@@ -38,60 +39,151 @@ def make_reply_keyboard(rows: list[list[str]]) -> ReplyKeyboardMarkup:
 
 
 def get_reply_menu(conn, telegram_id: int) -> ReplyKeyboardMarkup:
-    """Нижня постійна клавіатура (ReplyKeyboard) під полем вводу."""
+    """Головне меню студента: не більше 4-5 основних кнопок."""
     keyboard = [
-        [KeyboardButton(text="📋 Стати в чергу"), KeyboardButton(text="➕ Відкрити чергу")],
-        [KeyboardButton(text="👥 Мої черги"), KeyboardButton(text="🔍 Переглянути черги")],
-        [KeyboardButton(text="❓ Допомога")],
+        [KeyboardButton(text="📋 Усі черги"), KeyboardButton(text="👥 Мої черги")],
+        [KeyboardButton(text="➕ Відкрити чергу"), KeyboardButton(text="❓ Допомога")],
     ]
     if admins.is_admin(conn, telegram_id):
         keyboard.append([KeyboardButton(text="⚡ Адмін-панель")])
     return ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True)
 
 
+def get_queue_view_reply_menu() -> ReplyKeyboardMarkup:
+    """Основні кнопки екрану перегляду черги: рівно 4 кнопки."""
+    return make_reply_keyboard([
+        ["📍 Моє місце", "⚙️ Дії"],
+        ["🔄 Оновити", "🔙 До черг"],
+    ])
+
+
+def get_queue_actions_reply_menu(is_in_queue: bool, is_open: bool = True) -> ReplyKeyboardMarkup:
+    """Меню «Дії» залежно від статусу запису студента."""
+    if is_in_queue:
+        return make_reply_keyboard([
+            ["✅ Здав", "❌ Не здав"],
+            ["🔁 Обмінятися місцями", "🚪 Покинути чергу"],
+            ["🔙 Назад до черги"],
+        ])
+    if is_open:
+        return make_reply_keyboard([
+            ["📝 Стати в кінець", "🔢 Обрати місце"],
+            ["🔙 Назад до черги"],
+        ])
+    return make_reply_keyboard([["🔙 Назад до черги"]])
+
+
 def get_admin_reply_menu() -> ReplyKeyboardMarkup:
-    """Нижня постійна клавіатура адмін-панелі під полем вводу."""
-    keyboard = [
-        [KeyboardButton(text="➕ Створити чергу"), KeyboardButton(text="📝 Додати студента")],
-        [KeyboardButton(text="👀 Активні черги"), KeyboardButton(text="🔢 Змінити порядок")],
-        [KeyboardButton(text="✅ Позначити здачу"), KeyboardButton(text="🔒 Відкрити/закрити запис")],
-        [KeyboardButton(text="📊 Звіти за предметами"), KeyboardButton(text="📦 Історія черг")],
-        [KeyboardButton(text="⛔ Заблоковані"), KeyboardButton(text="👥 Адміністратори")],
-        [KeyboardButton(text="🏠 Головне меню")],
-    ]
-    return ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True)
+    """Головне меню адмін-панелі: категорії."""
+    return make_reply_keyboard([
+        ["📋 Черги", "👥 Студенти"],
+        ["👥 Користувачі", "📊 Звіти"],
+        ["⚙️ Налаштування", "🏠 Головне меню"],
+    ])
 
 
-def get_queues_reply_menu(sessions: list, subjects: list[dict], back_text: str = "🏠 Головне меню") -> ReplyKeyboardMarkup:
-    """Нижня клавіатура зі списком черг."""
-    rows = []
-    for s in sessions:
-        rows.append([f"📋 {queue_label(subjects, s)}"])
-    rows.append(["🔄 Оновити список"])
+def get_admin_users_menu() -> ReplyKeyboardMarkup:
+    """Вкладене меню адміна: Користувачі."""
+    return make_reply_keyboard([
+        ["📋 Список користувачів", "➕ Додати користувача"],
+        ["🔍 Знайти користувача", "🔙 В адмін-панель"],
+    ])
+
+
+def get_user_card_menu(is_blocked: bool) -> ReplyKeyboardMarkup:
+    """Клавіатура картки користувача."""
+    block_btn = "🟢 Розблокувати" if is_blocked else "⛔ Заблокувати"
+    return make_reply_keyboard([
+        ["✏️ Змінити ПІБ", block_btn],
+        ["🗑 Видалити", "🔙 До користувачів"],
+    ])
+
+
+def get_admin_queues_menu() -> ReplyKeyboardMarkup:
+    """Вкладене меню адміна: Черги."""
+    return make_reply_keyboard([
+        ["👀 Активні черги", "➕ Створити чергу"],
+        ["🔒 Відкрити/закрити", "📦 Історія"],
+        ["🔙 Назад"],
+    ])
+
+
+def get_admin_students_menu() -> ReplyKeyboardMarkup:
+    """Вкладене меню адміна: Студенти."""
+    return make_reply_keyboard([
+        ["📝 Додати студента", "🔢 Змінити порядок"],
+        ["✅ Позначити здачу", "⛔ Заблоковані"],
+        ["🔙 Назад"],
+    ])
+
+
+def get_admin_settings_menu() -> ReplyKeyboardMarkup:
+    """Вкладене меню адміна: Налаштування."""
+    return make_reply_keyboard([
+        ["👥 Адміністратори", "⛔ Заблоковані"],
+        ["🔙 Назад"],
+    ])
+
+
+def get_lost_context_menu() -> ReplyKeyboardMarkup:
+    """Меню при втраті контексту черги."""
+    return make_reply_keyboard([
+        ["📋 Усі черги", "👥 Мої черги"],
+        ["🏠 Головне меню"],
+    ])
+
+
+def paginate(items: list, page: int, per_page: int = 8) -> tuple[list, int, int]:
+    """Розбиває список на сторінки (по 8 елементів)."""
+    total = len(items)
+    if total == 0:
+        return [], 1, 1
+    total_pages = (total + per_page - 1) // per_page
+    page = max(1, min(page, total_pages))
+    start = (page - 1) * per_page
+    end = start + per_page
+    return items[start:end], page, total_pages
+
+
+def get_paginated_reply_keyboard(
+    item_rows: list[list[str]],
+    page: int,
+    total_pages: int,
+    back_text: str = "🔙 Назад",
+    extra_row: list[str] | None = None,
+) -> ReplyKeyboardMarkup:
+    """Створює нижню клавіатуру з пагінацією (⬅️, 1/3, ➡️)."""
+    rows = list(item_rows)
+    if total_pages > 1:
+        nav = []
+        if page > 1:
+            nav.append("⬅️")
+        nav.append(f"{page}/{total_pages}")
+        if page < total_pages:
+            nav.append("➡️")
+        rows.append(nav)
+    if extra_row:
+        rows.append(extra_row)
     rows.append([back_text])
     return make_reply_keyboard(rows)
 
 
-def get_queue_view_reply_menu(conn, session_id: int, telegram_id: int, is_open: bool = True) -> ReplyKeyboardMarkup:
-    """Нижня клавіатура під час перегляду черги."""
-    is_in_queue = queues.get_user_position(conn, telegram_id, session_id) is not None
-    is_adm = admins.is_admin(conn, telegram_id)
-    rows = []
-    if is_in_queue:
-        rows.append(["🔄 Помінятися місцем", "📍 Моє місце"])
-        rows.append(["✅ Здав", "❌ Не здав"])
-        rows.append(["🚪 Покинути чергу", "🔄 Оновити"])
-    else:
-        if is_open:
-            rows.append(["📝 Записатися в чергу", "🔄 Оновити"])
-        else:
-            rows.append(["🔄 Оновити"])
-
-    if is_adm:
-        rows.append(["⚡ Керувати цією чергою"])
-
-    rows.append(["🔙 До списку черг", "🏠 Головне меню"])
-    return make_reply_keyboard(rows)
+def get_queues_reply_menu(
+    sessions: list,
+    subjects: list[dict],
+    page: int = 1,
+    back_text: str = "🏠 Головне меню"
+) -> ReplyKeyboardMarkup:
+    """Нижня клавіатура зі списком черг з пагінацією по 8 штук."""
+    page_items, current_page, total_pages = paginate(sessions, page, per_page=8)
+    rows = [[f"📋 {queue_label(subjects, s)}"] for s in page_items]
+    return get_paginated_reply_keyboard(
+        rows,
+        page=current_page,
+        total_pages=total_pages,
+        back_text=back_text,
+        extra_row=["🔄 Оновити"],
+    )
 
 
 def normalize_text(text: str) -> str:
@@ -160,16 +252,29 @@ def format_queue(subjects: list[dict], session, entries, my_telegram_id: int | N
 
     lines = []
     if get_alert_status():
-        lines.append("🚨 ПОВІТРЯНА ТРИВОГА У М. ХМЕЛЬНИЦЬКИЙ!")
-        lines.append("Заняття призупинено, чергу збережено до наступної пари.")
+        lines.append("🚨 <b>Повітряна тривога</b>")
+        lines.append("Заняття призупинено, чергу збережено.")
         lines.append("")
 
     subject, teacher = session_names(subjects, session)
-    lines.extend([subject, teacher])
-    if session.get("lesson_title"):
-        lines.append(f"Заняття: {session['lesson_title']}")
-    status_str = "🚨 тривога (черга збережена)" if get_alert_status() else STATUS_TEXT.get(session.get("status"), str(session.get("status")))
-    lines.append(f"Статус: {status_str}")
+    lines.append(f"📋 <b>{html.escape(subject)}</b>")
+    lesson_title = session["lesson_title"] if "lesson_title" in session.keys() else None
+    if lesson_title:
+        lines.append(f"Заняття: {html.escape(lesson_title)}")
+    lines.append("")
+
+    status = session["status"] if "status" in session.keys() else ""
+    if get_alert_status():
+        lines.append("🚨 <b>Тривога (черга збережена)</b>")
+    elif status == "open":
+        lines.append("🟢 <b>Запис відкрито</b>")
+    elif status == "closed":
+        lines.append("🔴 <b>Запис закрито</b>")
+    elif status == "archived":
+        lines.append("📦 <b>Архів</b>")
+    else:
+        lines.append(f"Статус: {status}")
+
     lines.append("")
     for row in entries:
         lines.append(format_entry(row, my_telegram_id, show_id=show_id))
@@ -179,15 +284,21 @@ def format_queue(subjects: list[dict], session, entries, my_telegram_id: int | N
 
 
 def format_entry(row, my_telegram_id: int | None = None, marked: bool = False, show_id: bool = False) -> str:
-    name = row.get("full_name") or "— вільне місце —"
-    is_me = my_telegram_id is not None and row.get("telegram_id") == my_telegram_id
-    prefix = "👉 " if is_me or marked else ""
-    suffix = " (ви)" if is_me else ""
-    id_part = ""
-    if show_id and row.get("telegram_id") and row["telegram_id"] > 0:
-        id_part = f" [ID: {row['telegram_id']}]"
-    return f"{prefix}{row.get('position', '?')}. {name}{suffix}{id_part}"
+    raw_name = row["full_name"] if "full_name" in row.keys() else None
+    if raw_name:
+        name = html.escape(raw_name)
+    else:
+        name = "Вільне місце"
 
+    tg_id = row["telegram_id"] if "telegram_id" in row.keys() else None
+    is_me = my_telegram_id is not None and tg_id == my_telegram_id
+    prefix = "👉 " if (is_me or marked) else ""
+    suffix = " — це ви" if is_me else ""
+    id_part = ""
+    if show_id and tg_id and tg_id > 0:
+        id_part = f" <code>[ID: {tg_id}]</code>"
+    pos = row["position"] if "position" in row.keys() else "?"
+    return f"{prefix}{pos}. {name}{suffix}{id_part}"
 
 
 async def show(callback: CallbackQuery, text: str, markup: InlineKeyboardMarkup | None = None):
@@ -207,18 +318,18 @@ class Guard(BaseMiddleware):
 
     async def __call__(self, handler, event, data):
         if isinstance(event, CallbackQuery):
-            with suppress(TelegramBadRequest):  # прострочена кнопка — не страшно
+            with suppress(TelegramBadRequest):
                 await event.answer()
         try:
             return await handler(event, data)
         except BotError as error:
-            await self.notify(event, str(error))
+            await self.notify(event, f"⚠️ {html.escape(str(error))}")
         except TelegramAPIError:
             log.exception("Telegram API error")
         except Exception as error:
             log.exception(f"Unexpected error in handler: {error}")
             err_details = f"{type(error).__name__}: {error}"
-            await self.notify(event, f"⚠️ Помилка: {err_details}\nСпробуйте /start або 🏠 Головне меню.")
+            await self.notify(event, f"⚠️ <b>Помилка:</b> {html.escape(err_details)}\nСпробуйте /start або 🏠 Головне меню.")
 
     @staticmethod
     async def notify(event, text: str) -> None:
@@ -234,16 +345,16 @@ async def notify_admins_queue_opened(bot, conn, creator_id: int, creator_name: s
     """Сповіщає всіх адміністраторів про відкриття нової черги."""
     admin_list = admins.list_admins(conn)
     text = (
-        f"📢 **Відкрито нову чергу!**\n\n"
-        f"👤 Створив(-ла): **{creator_name}**\n"
-        f"📚 Предмет: **{subject_name}**\n"
-        f"👨‍🏫 Викладач: **{teacher_name}**\n\n"
+        f"📢 <b>Відкрито нову чергу!</b>\n\n"
+        f"👤 Створив(-ла): <b>{html.escape(creator_name)}</b>\n"
+        f"📚 Предмет: <b>{html.escape(subject_name)}</b>\n"
+        f"👨‍🏫 Викладач: <b>{html.escape(teacher_name)}</b>\n\n"
         f"Чергу відкрито для запису студентів."
     )
     for adm in admin_list:
         adm_id = adm["telegram_id"]
         if adm_id == creator_id:
-            continue  # Не дублюємо самому творцю, якщо це адмін
+            continue
         with suppress(Exception):
             await bot.send_message(adm_id, text)
 
@@ -251,23 +362,22 @@ async def notify_admins_queue_opened(bot, conn, creator_id: int, creator_name: s
 async def notify_admins_user_registered(bot, conn, user_row, username: str | None = None) -> None:
     """Сповіщає всіх адміністраторів про реєстрацію нового студента."""
     admin_list = admins.list_admins(conn)
-    username_part = f" (@{username})" if username else ""
+    username_part = f" (@{html.escape(username)})" if username else ""
     text = (
-        f"👤 **Новий користувач зареєструвався в боті!**\n\n"
-        f"• **ПІБ:** {user_row['full_name']}\n"
-        f"• **Telegram ID:** `{user_row['telegram_id']}`{username_part}"
+        f"👤 <b>Новий користувач зареєструвався в боті!</b>\n\n"
+        f"• ПІБ: <b>{html.escape(user_row['full_name'])}</b>\n"
+        f"• Telegram ID: <code>{user_row['telegram_id']}</code>{username_part}"
     )
     for adm in admin_list:
         adm_id = adm["telegram_id"]
         if adm_id == user_row["telegram_id"]:
-            continue  # Не дублюємо самому користувачу, якщо він уже в адмінах
+            continue
         with suppress(Exception):
             await bot.send_message(adm_id, text)
 
 
 async def notify_next_students(bot, conn, subjects: list[dict], session_id: int, removed_position: int | None = None) -> None:
     """Сповіщає студентів, які стали №1 або №2 у черзі після зміни порядку або здачі."""
-    # Якщо зміна сталася після 2-ї позиції, то №1 і №2 не змінилися
     if removed_position is not None and removed_position > 2:
         return
 
@@ -277,30 +387,28 @@ async def notify_next_students(bot, conn, subjects: list[dict], session_id: int,
 
     subject, teacher = session_names(subjects, session)
     entries = queues.get_entries(conn, session_id)
-    real_students = [e for e in entries if e.get("telegram_id") and e["telegram_id"] > 0]
+    real_students = [e for e in entries if "telegram_id" in e.keys() and e["telegram_id"] and e["telegram_id"] > 0]
     if not real_students:
         return
 
-    # Якщо з черги пішов хтось з позиції 1 (або позиція невідома) — сповіщаємо нового №1
     if removed_position is None or removed_position <= 1:
         first = real_students[0]
         text_first = (
-            f"🔔 **Ваша черга здавати роботу!**\n\n"
-            f"📚 Предмет: **{subject}**\n"
-            f"👨‍🏫 Викладач: **{teacher}**\n"
-            f"📍 Ви зараз **1-й** у черзі! Заходьте або готуйтеся показувати роботу."
+            f"🔔 <b>Ваша черга здавати роботу!</b>\n\n"
+            f"📚 Предмет: <b>{html.escape(subject)}</b>\n"
+            f"👨‍🏫 Викладач: <b>{html.escape(teacher)}</b>\n"
+            f"📍 Ви зараз <b>1-й</b> у черзі! Заходьте або готуйтеся показувати роботу."
         )
         with suppress(Exception):
             await bot.send_message(first["telegram_id"], text_first)
 
-    # Якщо з черги пішов хтось з позиції 1 чи 2 — сповіщаємо нового №2 (якщо він є)
     if (removed_position is None or removed_position <= 2) and len(real_students) >= 2:
         second = real_students[1]
         text_second = (
-            f"⏳ **Приготуйтеся, скоро ваша черга!**\n\n"
-            f"📚 Предмет: **{subject}**\n"
-            f"👨‍🏫 Викладач: **{teacher}**\n"
-            f"📍 Ви зараз **2-й** у черзі. Перед вами здає останній студент."
+            f"⏳ <b>Приготуйтеся, скоро ваша черга!</b>\n\n"
+            f"📚 Предмет: <b>{html.escape(subject)}</b>\n"
+            f"👨‍🏫 Викладач: <b>{html.escape(teacher)}</b>\n"
+            f"📍 Ви зараз <b>2-й</b> у черзі. Перед вами здає останній студент."
         )
         with suppress(Exception):
             await bot.send_message(second["telegram_id"], text_second)

@@ -2,6 +2,8 @@ import asyncio
 import logging
 
 from aiogram import Bot, Dispatcher
+from aiogram.client.default import DefaultBotProperties
+from aiogram.enums import ParseMode
 
 import config
 from db import connect
@@ -48,7 +50,7 @@ async def main() -> None:
     dp.callback_query.outer_middleware(Guard())
     dp.include_routers(start.router, admin.router, student.router, start.fallback_router)
 
-    bot = Bot(config.get_bot_token())
+    bot = Bot(config.get_bot_token(), default=DefaultBotProperties(parse_mode=ParseMode.HTML))
     await run_web_server()
     if getattr(config, "ALERTS_TOKEN", None):
         from services.alerts import start_alerts_checker

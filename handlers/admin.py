@@ -1,3 +1,4 @@
+import html
 import logging
 import re
 
@@ -11,10 +12,17 @@ from handlers.common import (
     find_session_by_label,
     format_entry,
     format_queue,
+    get_admin_queues_menu,
     get_admin_reply_menu,
+    get_admin_settings_menu,
+    get_admin_students_menu,
+    get_admin_users_menu,
+    get_paginated_reply_keyboard,
+    get_user_card_menu,
     make_keyboard,
     make_reply_keyboard,
     notify_next_students,
+    paginate,
     queue_label,
     session_names,
     show,
@@ -43,12 +51,26 @@ router.message.middleware(AdminOnly())
 
 
 class AdminPanelState(StatesGroup):
+    in_queues_menu = State()
+    in_students_menu = State()
+    in_settings_menu = State()
     select_queue_for_view = State()
     select_queue_for_add_student = State()
     select_queue_for_order = State()
     select_queue_for_close = State()
     select_subject_for_report = State()
     add_student_names = State()
+
+
+class AdminUserState(StatesGroup):
+    in_users_menu = State()
+    browsing_users = State()
+    viewing_card = State()
+    adding_user = State()
+    searching_user = State()
+    editing_name = State()
+    confirming_name_edit = State()
+    confirming_delete = State()
 
 
 class AdminOrderState(StatesGroup):
@@ -75,9 +97,20 @@ def get_admin_queue_menu(is_open: bool) -> ReplyKeyboardMarkup:
     lock_text = "🔒 Закрити запис" if is_open else "🔓 Відкрити запис"
     rows = [
         ["➕ Додати студентів", "🔢 Керувати студентами"],
-        [lock_text, "🔄 Оновити"],
-        ["📦 Завершити чергу", "🔙 В адмін-панель"],
-        ["🏠 Головне меню"],
+        [lock_text, "📦 Завершити чергу"],
+        ["🔄 Оновити", "🔙 Назад"],
+    ]
+    return make_reply_keyboard(rows)
+
+
+def get_admin_student_menu(is_blocked: bool) -> ReplyKeyboardMarkup:
+    block_btn = "🟢 Розблокувати" if is_blocked else "⛔ Заблокувати"
+    rows = [
+        ["⬆️ Вище", "⬇️ Нижче"],
+        ["🔢 Задати номер", "✏️ Змінити ім'я"],
+        [block_btn, "✅ Позначити «Здав»"],
+        ["❌ Видалити з черги"],
+        ["🔙 До списку студентів", "🔙 Назад"],
     ]
     return make_reply_keyboard(rows)
 
@@ -91,18 +124,19 @@ async def open_admin_queue_manager(message: Message, conn, subjects, session_id:
     await message.answer(text, reply_markup=get_admin_queue_menu(session["status"] == "open"))
 
 
-async def open_admin_student_list(message: Message, conn, subjects, session_id: int, note: str = ""):
+async def open_admin_student_list(message: Message, conn, subjects, session_id: int, note: str = "", page: int = 1):
     session = get_open_session(conn, session_id)
     entries = queues.get_entries(conn, session_id)
     if not entries:
         await open_admin_queue_manager(message, conn, subjects, session_id, note="У черзі немає студентів.")
         return
-    rows = [[f"👤 {format_entry(e, show_id=True)}"] for e in entries]
-    rows.append(["🔙 Назад до черги", "🔙 В адмін-панель"])
+    page_entries, cur_page, total_pages = paginate(entries, page, per_page=8)
+    rows = [[f"👤 {format_entry(e, show_id=True)}"] for e in page_entries]
+    markup = get_paginated_reply_keyboard(rows, cur_page, total_pages, back_text="🔙 Назад до черги")
     text = format_queue(subjects, session, entries, show_id=True) + "\n\nОберіть студента для дій на кнопках внизу 👇"
     if note:
         text = f"{note}\n\n{text}"
-    await message.answer(text, reply_markup=make_reply_keyboard(rows))
+    await message.answer(text, reply_markup=markup)
 
 
 async def open_admin_student_manager(message: Message, conn, subjects, entry_id: int, note: str = ""):
@@ -117,67 +151,392 @@ async def open_admin_student_manager(message: Message, conn, subjects, entry_id:
         user = conn.execute("SELECT * FROM users WHERE id = ?", (entry["user_id"],)).fetchone()
 
     lines = []
-    lines.append(f"📚 {subject} — {teacher}")
-    user_name = user["full_name"] if user else "— вільне місце —"
-    tg_info = f" [ID: {user['telegram_id']}]" if user and user["telegram_id"] and user["telegram_id"] > 0 else " [без TG]"
+    lines.append(f"📚 <b>{html.escape(subject)} — {html.escape(teacher)}</b>")
+    user_name = html.escape(user["full_name"]) if user else "— вільне місце —"
+    tg_info = f" <code>[ID: {user['telegram_id']}]</code>" if user and user["telegram_id"] and user["telegram_id"] > 0 else " [без TG]"
     status_info = "⛔ Заблокований" if user and user.get("is_blocked") else "✅ Активний"
-    lines.append(f"👤 Студент: **{user_name}**{tg_info} — {status_info}")
-    lines.append(f"📍 Поточна позиція в черзі: **{entry['position']}**")
+    lines.append(f"👤 Студент: <b>{user_name}</b>{tg_info} — {status_info}")
+    lines.append(f"📍 Поточна позиція в черзі: <b>{entry['position']}</b>")
     lines.append("")
     lines.append("Оберіть дію на кнопках внизу 👇")
     text = "\n".join(lines)
     if note:
         text = f"{note}\n\n{text}"
 
-    block_btn = "🟢 Розблокувати" if user and user.get("is_blocked") else "⛔ Заблокувати"
-    rows = [
-        ["⬆️ Вище", "⬇️ Нижче"],
-        ["🔢 Задати номер", "✏️ Змінити ім'я"],
-        [block_btn, "✅ Позначити «Здав»"],
-        ["❌ Видалити з черги"],
-        ["🔙 До списку студентів", "🔙 Назад до черги"],
-    ]
-    await message.answer(text, reply_markup=make_reply_keyboard(rows))
+    is_blocked = bool(user and user.get("is_blocked"))
+    await message.answer(text, reply_markup=get_admin_student_menu(is_blocked))
 
 
-# ---------- Головна адмін-панель ----------
+# ---------- Головна адмін-панель та категорії ----------
 
 @router.message(F.text.in_({"⚡ Адмін-панель", "🔙 В адмін-панель"}), StateFilter("*"))
 async def admin_panel_open(message: Message, state: FSMContext):
     await state.clear()
     await message.answer(
-        "⚡ **Адмін-панель**\nУсі дії та черги доступні на кнопках внизу під полем вводу 👇",
+        "⚡ <b>Адмін-панель</b>\n\nОберіть категорію на кнопках нижче 👇",
         reply_markup=get_admin_reply_menu(),
     )
 
 
-@router.message(F.text == "⚡ Керувати цією чергою", StateFilter("*"))
-async def admin_manage_from_view(message: Message, state: FSMContext, conn, subjects):
-    data = await state.get_data()
-    session_id = data.get("session_id")
-    if not session_id:
-        sessions = queues.list_sessions(conn, ("open", "closed"))
-        if not sessions:
-            raise BotError("Активних черг немає.")
-        session_id = sessions[0]["id"]
+@router.message(F.text == "📋 Черги", StateFilter("*"))
+async def admin_category_queues(message: Message, state: FSMContext):
+    await state.set_state(AdminPanelState.in_queues_menu)
+    await message.answer(
+        "📋 <b>Керування чергами</b>\n\nОберіть дію нижче 👇",
+        reply_markup=get_admin_queues_menu(),
+    )
+
+
+@router.message(F.text == "👥 Студенти", StateFilter("*"))
+async def admin_category_students(message: Message, state: FSMContext):
+    await state.set_state(AdminPanelState.in_students_menu)
+    await message.answer(
+        "👥 <b>Керування студентами</b>\n\nОберіть дію нижче 👇",
+        reply_markup=get_admin_students_menu(),
+    )
+
+
+@router.message(F.text == "👥 Користувачі", StateFilter("*"))
+async def admin_category_users(message: Message, state: FSMContext):
     await state.clear()
-    await state.update_data(session_id=session_id)
-    await open_admin_queue_manager(message, conn, subjects, session_id)
+    await state.set_state(AdminUserState.in_users_menu)
+    await message.answer(
+        "👥 <b>Користувачі</b>\n\nОберіть дію нижче 👇",
+        reply_markup=get_admin_users_menu(),
+    )
 
 
-# ---------- Вибір черги для адмін-дій ----------
+def format_user_card(user) -> str:
+    is_placeholder = bool(user["telegram_id"] and user["telegram_id"] < 0)
+    tg_status = "ще не прив’язано" if is_placeholder else "прив’язано"
+    status_text = "⛔ заблокований" if user.get("is_blocked") else "активний"
+    lines = [
+        "👤 <b>Користувач</b>",
+        "",
+        f"ПІБ: <b>{html.escape(user['full_name'])}</b>",
+        f"Telegram: {tg_status}",
+    ]
+    if not is_placeholder and user["telegram_id"] and user["telegram_id"] > 0:
+        lines.append(f"Telegram ID: <code>{user['telegram_id']}</code>")
+    lines.append(f"Статус: {status_text}")
+    return "\n".join(lines)
+
+
+async def show_users_page(message: Message, state: FSMContext, conn, page: int = 1):
+    users_list, current_page, total_pages = users.list_users(conn, page=page, per_page=8)
+    if not users_list:
+        await message.answer("Користувачів у базі ще немає.", reply_markup=get_admin_users_menu())
+        return
+
+    await state.set_state(AdminUserState.browsing_users)
+    await state.update_data(users_page=current_page)
+
+    lines = ["👥 <b>Користувачі</b>", ""]
+    for idx, u in enumerate(users_list, 1):
+        lines.append(f"{idx}. {html.escape(u['full_name'])}")
+    lines.append("")
+    lines.append(f"Сторінка {current_page}/{total_pages}")
+    text = "\n".join(lines)
+
+    user_buttons = [f"👤 #{u['id']} {u['full_name']}" for u in users_list]
+    row_pairs = [user_buttons[i:i + 2] for i in range(0, len(user_buttons), 2)]
+    markup = get_paginated_reply_keyboard(row_pairs, current_page, total_pages, back_text="🔙 В адмін-панель")
+    await message.answer(text, reply_markup=markup)
+
+
+@router.message(F.text == "📋 Список користувачів", StateFilter("*"))
+async def admin_list_users_start(message: Message, state: FSMContext, conn):
+    await state.clear()
+    await show_users_page(message, state, conn, page=1)
+
+
+@router.message(AdminUserState.browsing_users, F.text.in_({"⬅️", "➡️"}))
+async def admin_paginate_users(message: Message, state: FSMContext, conn):
+    data = await state.get_data()
+    page = data.get("users_page", 1)
+    page = (page - 1) if message.text == "⬅️" else (page + 1)
+    await show_users_page(message, state, conn, page=page)
+
+
+@router.message(F.text.startswith("👤 #"), StateFilter("*"))
+async def admin_open_user_card(message: Message, state: FSMContext, conn):
+    match = re.search(r"👤 #(\d+)", message.text)
+    if not match:
+        return
+    user_id = int(match.group(1))
+    user = users.get_user_by_id(conn, user_id)
+    if not user:
+        raise BotError("Користувача не знайдено.")
+
+    await state.set_state(AdminUserState.viewing_card)
+    await state.update_data(current_user_id=user["id"])
+    await message.answer(
+        format_user_card(user),
+        reply_markup=get_user_card_menu(bool(user.get("is_blocked"))),
+    )
+
+
+@router.message(F.text == "🔙 До користувачів", StateFilter("*"))
+async def admin_back_to_users(message: Message, state: FSMContext, conn):
+    data = await state.get_data()
+    page = data.get("users_page", 1)
+    await show_users_page(message, state, conn, page=page)
+
+
+@router.message(F.text == "➕ Додати користувача", StateFilter("*"))
+async def admin_start_add_user(message: Message, state: FSMContext):
+    await state.set_state(AdminUserState.adding_user)
+    await message.answer(
+        "➕ <b>Додавання користувача</b>\n\n"
+        "Введіть ПІБ студента (двома словами, наприклад: <code>Петренко Іван</code>):",
+        reply_markup=make_reply_keyboard([["↩️ Скасувати"]]),
+    )
+
+
+@router.message(AdminUserState.adding_user, F.text)
+async def admin_finish_add_user(message: Message, state: FSMContext, conn):
+    if message.text in {"↩️ Скасувати", "🔙 Назад", "🔙 В адмін-панель"}:
+        await admin_category_users(message, state)
+        return
+    try:
+        new_user = users.admin_create_placeholder(conn, message.from_user.id, message.text)
+    except BotError as err:
+        await message.answer(f"⚠️ {err}\n\nСпробуйте ще раз або натисніть «↩️ Скасувати»:")
+        return
+
+    await state.set_state(AdminUserState.viewing_card)
+    await state.update_data(current_user_id=new_user["id"])
+    await message.answer(
+        "✅ <b>Користувача додано!</b>\n\n" + format_user_card(new_user),
+        reply_markup=get_user_card_menu(False),
+    )
+
+
+@router.message(F.text.in_({"🔍 Знайти користувача", "🔍 Шукати знову"}), StateFilter("*"))
+async def admin_start_search_user(message: Message, state: FSMContext):
+    await state.set_state(AdminUserState.searching_user)
+    await message.answer(
+        "🔍 <b>Пошук користувача</b>\n\n"
+        "Введіть частину імені або прізвища:",
+        reply_markup=make_reply_keyboard([["↩️ Скасувати"]]),
+    )
+
+
+@router.message(AdminUserState.searching_user, F.text)
+async def admin_finish_search_user(message: Message, state: FSMContext, conn):
+    if message.text in {"↩️ Скасувати", "🔙 Назад", "🔙 До користувачів", "🔙 В адмін-панель"}:
+        await admin_category_users(message, state)
+        return
+
+    results = users.search_users(conn, message.text)
+    if not results:
+        await message.answer(
+            f"🔍 Користувачів за запитом «{html.escape(message.text)}» не знайдено.",
+            reply_markup=make_reply_keyboard([["🔍 Шукати знову"], ["🔙 До користувачів"]]),
+        )
+        return
+
+    lines = [f"🔍 <b>Результати пошуку:</b> ({len(results)})", ""]
+    for idx, u in enumerate(results[:10], 1):
+        lines.append(f"{idx}. {html.escape(u['full_name'])}")
+    if len(results) > 10:
+        lines.append("")
+        lines.append(f"... та ще {len(results) - 10} знайдених користувачів.")
+
+    user_buttons = [f"👤 #{u['id']} {u['full_name']}" for u in results[:8]]
+    row_pairs = [user_buttons[i:i + 2] for i in range(0, len(user_buttons), 2)]
+    row_pairs.append(["🔙 До користувачів"])
+    await message.answer("\n".join(lines), reply_markup=make_reply_keyboard(row_pairs))
+
+
+@router.message(F.text == "✏️ Змінити ПІБ", AdminUserState.viewing_card)
+async def admin_ask_edit_name(message: Message, state: FSMContext, conn):
+    data = await state.get_data()
+    user_id = data.get("current_user_id")
+    if not user_id:
+        raise BotError("Користувача не обрано.")
+    user = users.get_user_by_id(conn, user_id)
+    if not user:
+        raise BotError("Користувача не знайдено.")
+
+    await state.set_state(AdminUserState.editing_name)
+    await message.answer(
+        f"✏️ <b>Зміна ПІБ для користувача:</b>\n{html.escape(user['full_name'])}\n\n"
+        "Введіть нове ПІБ (двома словами, наприклад: <code>Коваль Андрій</code>):",
+        reply_markup=make_reply_keyboard([["↩️ Скасувати"]]),
+    )
+
+
+@router.message(AdminUserState.editing_name, F.text)
+async def admin_receive_new_name(message: Message, state: FSMContext, conn):
+    data = await state.get_data()
+    user_id = data.get("current_user_id")
+    if message.text in {"↩️ Скасувати", "🔙 Назад"}:
+        user = users.get_user_by_id(conn, user_id)
+        await state.set_state(AdminUserState.viewing_card)
+        await message.answer(format_user_card(user), reply_markup=get_user_card_menu(bool(user.get("is_blocked"))))
+        return
+
+    try:
+        new_name = users.validate_full_name(message.text)
+    except BotError as err:
+        await message.answer(f"⚠️ {err}\n\nСпробуйте ще раз або натисніть «↩️ Скасувати»:")
+        return
+
+    user = users.get_user_by_id(conn, user_id)
+    await state.set_state(AdminUserState.confirming_name_edit)
+    await state.update_data(pending_name=new_name)
+    await message.answer(
+        f"Підтвердіть зміну ПІБ:\n\n"
+        f"Було: <b>{html.escape(user['full_name'])}</b>\n"
+        f"Стане: <b>{html.escape(new_name)}</b>",
+        reply_markup=make_reply_keyboard([["✅ Підтвердити зміну"], ["↩️ Скасувати"]]),
+    )
+
+
+@router.message(AdminUserState.confirming_name_edit, F.text)
+async def admin_confirm_new_name(message: Message, state: FSMContext, conn):
+    data = await state.get_data()
+    user_id = data.get("current_user_id")
+    pending_name = data.get("pending_name")
+
+    if message.text != "✅ Підтвердити зміну":
+        user = users.get_user_by_id(conn, user_id)
+        await state.set_state(AdminUserState.viewing_card)
+        await message.answer("Зміну ПІБ скасовано.\n\n" + format_user_card(user), reply_markup=get_user_card_menu(bool(user.get("is_blocked"))))
+        return
+
+    try:
+        updated = users.admin_update_full_name(conn, message.from_user.id, user_id, pending_name)
+    except BotError as err:
+        user = users.get_user_by_id(conn, user_id)
+        await state.set_state(AdminUserState.viewing_card)
+        await message.answer(f"⚠️ {err}\n\n" + format_user_card(user), reply_markup=get_user_card_menu(bool(user.get("is_blocked"))))
+        return
+
+    await state.set_state(AdminUserState.viewing_card)
+    await message.answer("✅ <b>ПІБ успішно змінено!</b>\n\n" + format_user_card(updated), reply_markup=get_user_card_menu(bool(updated.get("is_blocked"))))
+
+
+@router.message(F.text.in_({"⛔ Заблокувати", "🟢 Розблокувати"}), AdminUserState.viewing_card)
+async def admin_toggle_user_block(message: Message, state: FSMContext, conn):
+    data = await state.get_data()
+    user_id = data.get("current_user_id")
+    if not user_id:
+        raise BotError("Користувача не обрано.")
+    new_state = users.admin_toggle_block_user(conn, message.from_user.id, user_id)
+    if new_state:
+        queues.remove_user_from_all_queues(conn, message.from_user.id, user_id)
+        note = "⛔ <b>Користувача заблоковано</b> (знято з усіх черг)."
+    else:
+        note = "🟢 <b>Користувача розблоковано.</b>"
+
+    updated = users.get_user_by_id(conn, user_id)
+    await message.answer(f"{note}\n\n" + format_user_card(updated), reply_markup=get_user_card_menu(new_state))
+
+
+@router.message(F.text == "🗑 Видалити", AdminUserState.viewing_card)
+async def admin_ask_delete_user(message: Message, state: FSMContext, conn):
+    data = await state.get_data()
+    user_id = data.get("current_user_id")
+    if not user_id:
+        raise BotError("Користувача не обрано.")
+    user = users.get_user_by_id(conn, user_id)
+    if not user:
+        raise BotError("Користувача не знайдено.")
+
+    await state.set_state(AdminUserState.confirming_delete)
+    await message.answer(
+        f"🗑 <b>Видалити користувача?</b>\n\n"
+        f"Ви впевнені, що хочете безповоротно видалити <b>{html.escape(user['full_name'])}</b>?\n\n"
+        f"⚠️ Користувача можна видалити лише якщо він не має записів чи історії в чергах.",
+        reply_markup=make_reply_keyboard([["⚠️ Підтвердити видалення"], ["↩️ Скасувати"]]),
+    )
+
+
+@router.message(AdminUserState.confirming_delete, F.text)
+async def admin_confirm_delete_user(message: Message, state: FSMContext, conn):
+    data = await state.get_data()
+    user_id = data.get("current_user_id")
+    user = users.get_user_by_id(conn, user_id)
+
+    if message.text != "⚠️ Підтвердити видалення":
+        await state.set_state(AdminUserState.viewing_card)
+        await message.answer("Видалення скасовано.\n\n" + format_user_card(user), reply_markup=get_user_card_menu(bool(user.get("is_blocked"))))
+        return
+
+    try:
+        users.admin_delete_user(conn, message.from_user.id, user_id)
+    except BotError as err:
+        await state.set_state(AdminUserState.viewing_card)
+        await message.answer(
+            f"⚠️ {err}\n\n" + format_user_card(user),
+            reply_markup=get_user_card_menu(bool(user.get("is_blocked"))),
+        )
+        return
+
+    await message.answer("✅ <b>Користувача успішно видалено!</b>")
+    page = data.get("users_page", 1)
+    await show_users_page(message, state, conn, page=page)
+
+
+@router.message(F.text == "⚙️ Налаштування", StateFilter("*"))
+async def admin_category_settings(message: Message, state: FSMContext):
+    await state.set_state(AdminPanelState.in_settings_menu)
+    await message.answer(
+        "⚙️ <b>Налаштування</b>\n\nОберіть розділ нижче 👇",
+        reply_markup=get_admin_settings_menu(),
+    )
+
+
+@router.message(
+    F.text.in_({"🔙 Назад", "🔙 В адмін-панель"}),
+    StateFilter(
+        AdminPanelState.in_queues_menu,
+        AdminPanelState.in_students_menu,
+        AdminPanelState.in_settings_menu,
+        AdminUserState.in_users_menu,
+        AdminUserState.browsing_users,
+        AdminPanelState.select_queue_for_view,
+        AdminPanelState.select_queue_for_add_student,
+        AdminPanelState.select_queue_for_order,
+        AdminPanelState.select_queue_for_close,
+        AdminPanelState.select_subject_for_report,
+        AdminManageState.history_view,
+    ),
+)
+async def admin_back_to_main_panel(message: Message, state: FSMContext):
+    await admin_panel_open(message, state)
+
+
+# ---------- Вибір черги для дій адміна ----------
 
 @router.message(F.text == "👀 Активні черги", StateFilter("*"))
 async def admin_pick_active_queues(message: Message, state: FSMContext, conn, subjects):
     await state.clear()
     sessions = queues.list_sessions(conn, ("open", "closed"))
     if not sessions:
-        await message.answer("Активних черг немає.", reply_markup=get_admin_reply_menu())
+        await message.answer("Активних черг немає.", reply_markup=get_admin_queues_menu())
         return
-    rows = [[f"📋 {queue_label(subjects, s)}"] for s in sessions]
-    rows.append(["🔙 В адмін-панель", "🏠 Головне меню"])
     await state.set_state(AdminPanelState.select_queue_for_view)
-    await message.answer("👀 Оберіть чергу для перегляду та керування на кнопках внизу 👇", reply_markup=make_reply_keyboard(rows))
+    await state.update_data(page=1)
+    page_sessions, cur_page, total_pages = paginate(sessions, 1, per_page=8)
+    rows = [[f"📋 {queue_label(subjects, s)}"] for s in page_sessions]
+    markup = get_paginated_reply_keyboard(rows, cur_page, total_pages, back_text="🔙 Назад")
+    await message.answer("👀 Оберіть чергу для перегляду та керування 👇", reply_markup=markup)
+
+
+@router.message(AdminPanelState.select_queue_for_view, F.text.in_({"⬅️", "➡️"}))
+async def admin_paginate_active_queues(message: Message, state: FSMContext, conn, subjects):
+    sessions = queues.list_sessions(conn, ("open", "closed"))
+    data = await state.get_data()
+    page = data.get("page", 1)
+    page = (page - 1) if message.text == "⬅️" else (page + 1)
+    await state.update_data(page=page)
+    page_sessions, cur_page, total_pages = paginate(sessions, page, per_page=8)
+    rows = [[f"📋 {queue_label(subjects, s)}"] for s in page_sessions]
+    markup = get_paginated_reply_keyboard(rows, cur_page, total_pages, back_text="🔙 Назад")
+    await message.answer("Оберіть чергу на кнопках внизу 👇", reply_markup=markup)
 
 
 @router.message(F.text == "📝 Додати студента", StateFilter("*"))
@@ -185,12 +544,27 @@ async def admin_pick_add_student(message: Message, state: FSMContext, conn, subj
     await state.clear()
     sessions = queues.list_sessions(conn, ("open", "closed"))
     if not sessions:
-        await message.answer("Активних черг немає.", reply_markup=get_admin_reply_menu())
+        await message.answer("Активних черг немає.", reply_markup=get_admin_students_menu())
         return
-    rows = [[f"📋 {queue_label(subjects, s)}"] for s in sessions]
-    rows.append(["🔙 В адмін-панель", "🏠 Головне меню"])
     await state.set_state(AdminPanelState.select_queue_for_add_student)
-    await message.answer("📝 Оберіть чергу, в яку додати студентів, на кнопках внизу 👇", reply_markup=make_reply_keyboard(rows))
+    await state.update_data(page=1)
+    page_sessions, cur_page, total_pages = paginate(sessions, 1, per_page=8)
+    rows = [[f"📋 {queue_label(subjects, s)}"] for s in page_sessions]
+    markup = get_paginated_reply_keyboard(rows, cur_page, total_pages, back_text="🔙 Назад")
+    await message.answer("📝 Оберіть чергу, в яку додати студентів 👇", reply_markup=markup)
+
+
+@router.message(AdminPanelState.select_queue_for_add_student, F.text.in_({"⬅️", "➡️"}))
+async def admin_paginate_add_student_queues(message: Message, state: FSMContext, conn, subjects):
+    sessions = queues.list_sessions(conn, ("open", "closed"))
+    data = await state.get_data()
+    page = data.get("page", 1)
+    page = (page - 1) if message.text == "⬅️" else (page + 1)
+    await state.update_data(page=page)
+    page_sessions, cur_page, total_pages = paginate(sessions, page, per_page=8)
+    rows = [[f"📋 {queue_label(subjects, s)}"] for s in page_sessions]
+    markup = get_paginated_reply_keyboard(rows, cur_page, total_pages, back_text="🔙 Назад")
+    await message.answer("Оберіть чергу на кнопках внизу 👇", reply_markup=markup)
 
 
 @router.message(F.text.in_({"🔢 Змінити порядок", "✅ Позначити здачу"}), StateFilter("*"))
@@ -198,38 +572,83 @@ async def admin_pick_order_queue(message: Message, state: FSMContext, conn, subj
     await state.clear()
     sessions = queues.list_sessions(conn, ("open", "closed"))
     if not sessions:
-        await message.answer("Активних черг немає.", reply_markup=get_admin_reply_menu())
+        await message.answer("Активних черг немає.", reply_markup=get_admin_students_menu())
         return
-    rows = [[f"📋 {queue_label(subjects, s)}"] for s in sessions]
-    rows.append(["🔙 В адмін-панель", "🏠 Головне меню"])
     await state.set_state(AdminPanelState.select_queue_for_order)
-    await message.answer("🔢 Оберіть чергу для зміни порядку студентів 👇", reply_markup=make_reply_keyboard(rows))
+    await state.update_data(page=1)
+    page_sessions, cur_page, total_pages = paginate(sessions, 1, per_page=8)
+    rows = [[f"📋 {queue_label(subjects, s)}"] for s in page_sessions]
+    markup = get_paginated_reply_keyboard(rows, cur_page, total_pages, back_text="🔙 Назад")
+    await message.answer("🔢 Оберіть чергу для керування студентами 👇", reply_markup=markup)
 
 
-@router.message(F.text == "🔒 Відкрити/закрити запис", StateFilter("*"))
+@router.message(AdminPanelState.select_queue_for_order, F.text.in_({"⬅️", "➡️"}))
+async def admin_paginate_order_queues(message: Message, state: FSMContext, conn, subjects):
+    sessions = queues.list_sessions(conn, ("open", "closed"))
+    data = await state.get_data()
+    page = data.get("page", 1)
+    page = (page - 1) if message.text == "⬅️" else (page + 1)
+    await state.update_data(page=page)
+    page_sessions, cur_page, total_pages = paginate(sessions, page, per_page=8)
+    rows = [[f"📋 {queue_label(subjects, s)}"] for s in page_sessions]
+    markup = get_paginated_reply_keyboard(rows, cur_page, total_pages, back_text="🔙 Назад")
+    await message.answer("Оберіть чергу на кнопках внизу 👇", reply_markup=markup)
+
+
+@router.message(F.text.in_({"🔒 Відкрити/закрити", "🔒 Відкрити/закрити запис"}), StateFilter("*"))
 async def admin_pick_close_queue(message: Message, state: FSMContext, conn, subjects):
     await state.clear()
     sessions = queues.list_sessions(conn, ("open", "closed"))
     if not sessions:
-        await message.answer("Активних черг немає.", reply_markup=get_admin_reply_menu())
+        await message.answer("Активних черг немає.", reply_markup=get_admin_queues_menu())
         return
-    rows = [[f"📋 {queue_label(subjects, s)}"] for s in sessions]
-    rows.append(["🔙 В адмін-панель", "🏠 Головне меню"])
     await state.set_state(AdminPanelState.select_queue_for_close)
-    await message.answer("🔒 Оберіть чергу для відкриття/закриття запису 👇", reply_markup=make_reply_keyboard(rows))
+    await state.update_data(page=1)
+    page_sessions, cur_page, total_pages = paginate(sessions, 1, per_page=8)
+    rows = [[f"📋 {queue_label(subjects, s)}"] for s in page_sessions]
+    markup = get_paginated_reply_keyboard(rows, cur_page, total_pages, back_text="🔙 Назад")
+    await message.answer("🔒 Оберіть чергу для зміни статусу запису 👇", reply_markup=markup)
 
 
-@router.message(F.text.in_({"📊 Звіти за предметами", "📊 Інший предмет"}), StateFilter("*"))
+@router.message(AdminPanelState.select_queue_for_close, F.text.in_({"⬅️", "➡️"}))
+async def admin_paginate_close_queues(message: Message, state: FSMContext, conn, subjects):
+    sessions = queues.list_sessions(conn, ("open", "closed"))
+    data = await state.get_data()
+    page = data.get("page", 1)
+    page = (page - 1) if message.text == "⬅️" else (page + 1)
+    await state.update_data(page=page)
+    page_sessions, cur_page, total_pages = paginate(sessions, page, per_page=8)
+    rows = [[f"📋 {queue_label(subjects, s)}"] for s in page_sessions]
+    markup = get_paginated_reply_keyboard(rows, cur_page, total_pages, back_text="🔙 Назад")
+    await message.answer("Оберіть чергу на кнопках внизу 👇", reply_markup=markup)
+
+
+# ---------- Звіти по предметах ----------
+
+@router.message(F.text.in_({"📊 Звіти", "📊 Звіти за предметами", "📊 Інший предмет"}), StateFilter("*"))
 async def admin_pick_report_subject(message: Message, state: FSMContext, subjects):
     await state.clear()
     await state.set_state(AdminPanelState.select_subject_for_report)
-    rows = [[f"📊 {s['name']}"] for s in subjects]
-    rows.append(["🔙 В адмін-панель", "🏠 Головне меню"])
+    await state.update_data(page=1)
+    page_subjects, cur_page, total_pages = paginate(subjects, 1, per_page=8)
+    rows = [[f"📊 {s['name']}"] for s in page_subjects]
+    markup = get_paginated_reply_keyboard(rows, cur_page, total_pages, back_text="🔙 Назад")
     await message.answer(
-        "📊 **Формування звіту по предмету**\n"
-        "Оберіть предмет зі списку нижче. Бот сформує детальну аналітику та файл таблиці (Excel/CSV) 👇",
-        reply_markup=make_reply_keyboard(rows),
+        "📊 <b>Звіти по предметах</b>\n\nОберіть предмет для формування звіту та файлу таблиці 👇",
+        reply_markup=markup,
     )
+
+
+@router.message(AdminPanelState.select_subject_for_report, F.text.in_({"⬅️", "➡️"}))
+async def admin_paginate_report_subjects(message: Message, state: FSMContext, subjects):
+    data = await state.get_data()
+    page = data.get("page", 1)
+    page = (page - 1) if message.text == "⬅️" else (page + 1)
+    await state.update_data(page=page)
+    page_subjects, cur_page, total_pages = paginate(subjects, page, per_page=8)
+    rows = [[f"📊 {s['name']}"] for s in page_subjects]
+    markup = get_paginated_reply_keyboard(rows, cur_page, total_pages, back_text="🔙 Назад")
+    await message.answer("Оберіть предмет зі списку нижче 👇", reply_markup=markup)
 
 
 @router.message(AdminPanelState.select_subject_for_report, F.text.startswith("📊 "))
@@ -243,31 +662,29 @@ async def admin_generate_subject_report(message: Message, state: FSMContext, con
     report = queues.get_subject_report(conn, matched_sub["id"])
     teachers = ", ".join(t["name"] for t in matched_sub.get("teachers", [])) or "—"
 
-    # Формування текстового повідомлення
     lines = [
-        f"📊 **Звіт по предмету: {matched_sub['name']}**",
-        f"👨‍🏫 Викладачі: {teachers}",
-        f"📁 Проведено занять/черг: **{report['sessions_count']}**",
-        f"✅ Всього зараховано робіт: **{report['total_passed']}**",
+        f"📊 <b>Звіт по предмету: {html.escape(matched_sub['name'])}</b>",
+        f"👨‍🏫 Викладачі: {html.escape(teachers)}",
+        f"📁 Проведено занять: <b>{report['sessions_count']}</b>",
+        f"✅ Всього здач: <b>{report['total_passed']}</b>",
     ]
 
     if report["active_session"]:
-        lines.append("⚡ Зараз триває активна черга по цьому предмету!")
+        lines.append("⚡ Триває активна черга.")
 
     lines.append("")
-    lines.append("🏆 **Рейтинг здач студентів:**")
+    lines.append("🏆 <b>Рейтинг здач студентів:</b>")
     if not report["students"]:
-        lines.append("Ще немає жодного запису чи здачі по цьому предмету.")
+        lines.append("Записів немає.")
     else:
-        for idx, s in enumerate(report["students"][:20], 1):
-            pos_info = f" (👉 в черзі на місці {s['current_position']})" if s["current_position"] else ""
-            lines.append(f"{idx}. {s['name']} — **{s['passed_count']}** ✅{pos_info}")
-        if len(report["students"]) > 20:
-            lines.append(f"... та ще {len(report['students']) - 20} студентів (повний список у файлі нижче)")
+        for idx, s in enumerate(report["students"][:15], 1):
+            pos_info = f" (в черзі: #{s['current_position']})" if s["current_position"] else ""
+            lines.append(f"{idx}. {html.escape(s['name'])} — <b>{s['passed_count']}</b> ✅{pos_info}")
+        if len(report["students"]) > 15:
+            lines.append(f"... та ще {len(report['students']) - 15} студентів у таблиці нижче.")
 
     text_msg = "\n".join(lines)
 
-    # Формування CSV таблиці для Excel (utf-8-sig гарантує коректне відображення кирилиці)
     csv_rows = [
         "Прізвище та ім'я;Здано робіт;Спроб (не здав);Місце в поточній черзі;Дати здач"
     ]
@@ -282,18 +699,19 @@ async def admin_generate_subject_report(message: Message, state: FSMContext, con
 
     menu_rows = [
         ["📊 Інший предмет"],
-        ["🔙 В адмін-панель", "🏠 Головне меню"],
+        ["🔙 Назад"],
     ]
 
     await message.answer(text_msg)
     await message.answer_document(
         file,
-        caption=f"📄 Таблиця Excel/CSV: {matched_sub['name']}",
+        caption=f"📄 Таблиця: {html.escape(matched_sub['name'])}",
         reply_markup=make_reply_keyboard(menu_rows),
     )
 
 
-# Обробка вибору черги за назвою для відповідного адмін-режиму
+# ---------- Вибір конкретної черги зі списків ----------
+
 @router.message(AdminPanelState.select_queue_for_view, F.text.startswith("📋 "))
 async def admin_selected_queue_view(message: Message, state: FSMContext, conn, subjects):
     session = find_session_by_label(conn, subjects, message.text)
@@ -314,12 +732,11 @@ async def admin_selected_queue_add_student(message: Message, state: FSMContext, 
     await state.set_state(AdminPanelState.add_student_names)
     await state.update_data(session_id=session["id"])
     await message.answer(
-        f"📝 **Додавання студентів у чергу:**\n"
-        f"{queue_label(subjects, session)}\n\n"
-        "Надішліть одне прізвище та ім'я або **список студентів** (кожне з нового рядка).\n"
-        "Можна вказувати номер (наприклад `3. Диновський Денис` — поставить саме на 3 місце).\n\n"
-        "Якщо вказати номер — студент займе саме його, а перед ним утворяться вільні місця.",
-        reply_markup=make_reply_keyboard([["🔙 Назад до черги"], ["🔙 В адмін-панель"]]),
+        f"📝 <b>Додавання студентів:</b>\n"
+        f"{html.escape(queue_label(subjects, session))}\n\n"
+        "Надішліть ПІБ студента або список (кожне з нового рядка).\n"
+        "Можна вказувати номер (наприклад: <code>3. Петренко Іван</code>).",
+        reply_markup=make_reply_keyboard([["🔙 Назад до черги"], ["🔙 Назад"]]),
     )
 
 
@@ -330,8 +747,8 @@ async def admin_selected_queue_order(message: Message, state: FSMContext, conn, 
         await message.answer("⚠️ Чергу не знайдено. Оберіть зі списку на кнопках внизу 👇")
         return
     await state.set_state(AdminOrderState.picking_student)
-    await state.update_data(session_id=session["id"])
-    await open_admin_student_list(message, conn, subjects, session["id"])
+    await state.update_data(session_id=session["id"], students_page=1)
+    await open_admin_student_list(message, conn, subjects, session["id"], page=1)
 
 
 @router.message(AdminPanelState.select_queue_for_close, F.text.startswith("📋 "))
@@ -342,13 +759,13 @@ async def admin_selected_queue_close(message: Message, state: FSMContext, conn, 
         return
     make_open = session["status"] == "closed"
     queues.set_signup_open(conn, message.from_user.id, session["id"], make_open)
-    note = "🔓 Запис відкрито!" if make_open else "🔒 Запис закрито!"
+    note = "🟢 <b>Запис відкрито</b>" if make_open else "🔴 <b>Запис закрито</b>"
     await state.clear()
     await state.update_data(session_id=session["id"])
     await open_admin_queue_manager(message, conn, subjects, session["id"], note=note)
 
 
-# ---------- Керування обраною чергою (Кнопки менеджера черги) ----------
+# ---------- Керування обраною чергою ----------
 
 @router.message(F.text == "➕ Додати студентів", StateFilter("*"))
 async def admin_click_add_students(message: Message, state: FSMContext, conn, subjects):
@@ -360,12 +777,11 @@ async def admin_click_add_students(message: Message, state: FSMContext, conn, su
     await state.set_state(AdminPanelState.add_student_names)
     await state.update_data(session_id=session_id)
     await message.answer(
-        f"📝 **Додавання студентів у чергу:**\n"
-        f"{queue_label(subjects, session)}\n\n"
-        "Надішліть одне прізвище та ім'я або **список студентів** (кожне з нового рядка).\n"
-        "Можна вказувати номер (наприклад `3. Диновський Денис` — поставить саме на 3 місце).\n\n"
-        "Якщо вказати номер — студент займе саме його, а перед ним утворяться вільні місця.",
-        reply_markup=make_reply_keyboard([["🔙 Назад до черги"], ["🔙 В адмін-панель"]]),
+        f"📝 <b>Додавання студентів:</b>\n"
+        f"{html.escape(queue_label(subjects, session))}\n\n"
+        "Надішліть ПІБ студента або список (кожне з нового рядка).\n"
+        "Можна вказувати номер (наприклад: <code>3. Петренко Іван</code>).",
+        reply_markup=make_reply_keyboard([["🔙 Назад до черги"], ["🔙 Назад"]]),
     )
 
 
@@ -373,7 +789,7 @@ async def admin_click_add_students(message: Message, state: FSMContext, conn, su
 async def receive_student_names(message: Message, state: FSMContext, conn, subjects):
     data = await state.get_data()
     session_id = data.get("session_id")
-    if message.text in {"🔙 Назад до черги", "🔙 В адмін-панель"}:
+    if message.text in {"🔙 Назад до черги", "🔙 Назад"}:
         await state.clear()
         if session_id and message.text == "🔙 Назад до черги":
             await state.update_data(session_id=session_id)
@@ -410,11 +826,11 @@ async def receive_student_names(message: Message, state: FSMContext, conn, subje
 
     await state.clear()
     await state.update_data(session_id=session_id)
-    result_text = f"✅ Додано студентів: {len(added)}\n"
+    result_text = f"✅ <b>Додано студентів:</b> {len(added)}\n"
     if added:
-        result_text += "\n".join(added[:15]) + ("\n..." if len(added) > 15 else "")
+        result_text += "\n".join(added[:10]) + ("\n..." if len(added) > 10 else "")
     if skipped:
-        result_text += "\n\n⚠️ Пропущено (помилка або вже в черзі):\n" + "\n".join(skipped[:10])
+        result_text += f"\n\n⚠️ Пропущено: {len(skipped)}"
 
     await open_admin_queue_manager(message, conn, subjects, session_id, note=result_text)
 
@@ -428,7 +844,7 @@ async def toggle_signup_in_manager(message: Message, state: FSMContext, conn, su
     session = get_open_session(conn, session_id)
     make_open = session["status"] == "closed"
     queues.set_signup_open(conn, message.from_user.id, session_id, make_open)
-    note = "🔓 Запис відкрито!" if make_open else "🔒 Запис закрито!"
+    note = "🟢 <b>Запис відкрито</b>" if make_open else "🔴 <b>Запис закрито</b>"
     await open_admin_queue_manager(message, conn, subjects, session_id, note=note)
 
 
@@ -439,8 +855,18 @@ async def start_managing_students(message: Message, state: FSMContext, conn, sub
     if not session_id:
         raise BotError("Чергу не обрано.")
     await state.set_state(AdminOrderState.picking_student)
-    await state.update_data(session_id=session_id)
-    await open_admin_student_list(message, conn, subjects, session_id)
+    await state.update_data(session_id=session_id, students_page=1)
+    await open_admin_student_list(message, conn, subjects, session_id, page=1)
+
+
+@router.message(AdminOrderState.picking_student, F.text.in_({"⬅️", "➡️"}))
+async def admin_paginate_students(message: Message, state: FSMContext, conn, subjects):
+    data = await state.get_data()
+    session_id = data.get("session_id")
+    page = data.get("students_page", 1)
+    page = (page - 1) if message.text == "⬅️" else (page + 1)
+    await state.update_data(students_page=page)
+    await open_admin_student_list(message, conn, subjects, session_id, page=page)
 
 
 @router.message(AdminOrderState.picking_student, F.text.startswith("👤 "))
@@ -448,6 +874,7 @@ async def select_student_from_list(message: Message, state: FSMContext, conn, su
     data = await state.get_data()
     session_id = data.get("session_id")
     entries = queues.get_entries(conn, session_id)
+
     raw = message.text[2:].strip()
     match = re.match(r"^(\d+)[\.\)\-\s]+(.+)$", raw)
     entry = None
@@ -478,12 +905,25 @@ async def back_to_students_list(message: Message, state: FSMContext, conn, subje
     if not session_id:
         await admin_panel_open(message, state)
         return
+    page = data.get("students_page", 1)
     await state.set_state(AdminOrderState.picking_student)
     await state.update_data(session_id=session_id)
-    await open_admin_student_list(message, conn, subjects, session_id)
+    await open_admin_student_list(message, conn, subjects, session_id, page=page)
 
 
-# ---------- Дії над обраним студентом (Нижні кнопки) ----------
+@router.message(F.text == "🔙 Назад до черги", StateFilter("*"))
+async def back_to_queue_manager_from_any(message: Message, state: FSMContext, conn, subjects):
+    data = await state.get_data()
+    session_id = data.get("session_id")
+    if not session_id:
+        await admin_panel_open(message, state)
+        return
+    await state.clear()
+    await state.update_data(session_id=session_id)
+    await open_admin_queue_manager(message, conn, subjects, session_id)
+
+
+# ---------- Дії над студентом ----------
 
 @router.message(F.text == "⬆️ Вище", StateFilter("*"))
 async def student_move_up(message: Message, state: FSMContext, conn, subjects):
@@ -515,7 +955,7 @@ async def student_ask_number(message: Message, state: FSMContext):
     await message.answer(
         "Введіть бажаний номер для студента (1–100):\n"
         "Якщо номер більший за поточний список — перед ним утворяться вільні місця.",
-        reply_markup=make_reply_keyboard([["🔙 Скасувати"]]),
+        reply_markup=make_reply_keyboard([["↩️ Скасувати"]]),
     )
 
 
@@ -523,12 +963,12 @@ async def student_ask_number(message: Message, state: FSMContext):
 async def student_receive_number(message: Message, state: FSMContext, conn, subjects):
     data = await state.get_data()
     entry_id = data.get("entry_id")
-    if message.text == "🔙 Скасувати":
+    if message.text in {"↩️ Скасувати", "🔙 Скасувати", "🔙 Назад"}:
         await state.set_state(AdminOrderState.managing_entry)
         await open_admin_student_manager(message, conn, subjects, entry_id)
         return
     if not message.text.strip().isdigit():
-        await message.answer("Введіть число або натисніть «🔙 Скасувати»:")
+        await message.answer("Введіть число або натисніть «↩️ Скасувати»:")
         return
     pos = int(message.text.strip())
     try:
@@ -553,8 +993,8 @@ async def student_ask_rename(message: Message, state: FSMContext, conn):
     await state.set_state(AdminOrderState.entering_name)
     await state.update_data(user_id=user["id"])
     await message.answer(
-        f"Введіть нове ПІБ для студента «{user['full_name']}» (наприклад: Шевченко Тарас):",
-        reply_markup=make_reply_keyboard([["🔙 Скасувати"]]),
+        f"Введіть нове ПІБ для студента «{html.escape(user['full_name'])}»:",
+        reply_markup=make_reply_keyboard([["↩️ Скасувати"]]),
     )
 
 
@@ -563,7 +1003,7 @@ async def student_receive_rename(message: Message, state: FSMContext, conn, subj
     data = await state.get_data()
     entry_id = data.get("entry_id")
     user_id = data.get("user_id")
-    if message.text == "🔙 Скасувати":
+    if message.text in {"↩️ Скасувати", "🔙 Скасувати", "🔙 Назад"}:
         await state.set_state(AdminOrderState.managing_entry)
         await open_admin_student_manager(message, conn, subjects, entry_id)
         return
@@ -574,7 +1014,7 @@ async def student_receive_rename(message: Message, state: FSMContext, conn, subj
         await message.answer(f"{err}\nСпробуйте ще раз:")
         return
     await state.set_state(AdminOrderState.managing_entry)
-    await open_admin_student_manager(message, conn, subjects, entry_id, note=f"✅ Ім'я змінено на «{updated_user['full_name']}».")
+    await open_admin_student_manager(message, conn, subjects, entry_id, note=f"✅ Ім'я змінено на «{html.escape(updated_user['full_name'])}».")
 
 
 @router.message(F.text.in_({"⛔ Заблокувати", "🟢 Розблокувати"}), StateFilter("*"))
@@ -594,12 +1034,12 @@ async def student_toggle_block(message: Message, state: FSMContext, conn, subjec
         await state.set_state(AdminOrderState.picking_student)
         await open_admin_student_list(
             message, conn, subjects, session_id,
-            note=f"⛔ Студента «{user['full_name']}» заблоковано та знято з усіх черг.",
+            note=f"⛔ Студента «{html.escape(user['full_name'])}» заблоковано.",
         )
     else:
         await open_admin_student_manager(
             message, conn, subjects, entry_id,
-            note=f"🟢 Студента «{user['full_name']}» розблоковано.",
+            note=f"🟢 Студента «{html.escape(user['full_name'])}» розблоковано.",
         )
 
 
@@ -616,7 +1056,7 @@ async def student_mark_passed_by_admin(message: Message, state: FSMContext, conn
     if session_id:
         await notify_next_students(message.bot, conn, subjects, session_id, removed_position=pos)
     await state.set_state(AdminOrderState.picking_student)
-    await open_admin_student_list(message, conn, subjects, session_id, note="✅ Позначено: здав! Запис видалено з черги.")
+    await open_admin_student_list(message, conn, subjects, session_id, note="✅ <b>Здачу зараховано</b>")
 
 
 @router.message(F.text == "❌ Видалити з черги", StateFilter("*"))
@@ -632,10 +1072,10 @@ async def student_remove_by_admin(message: Message, state: FSMContext, conn, sub
     if session_id:
         await notify_next_students(message.bot, conn, subjects, session_id, removed_position=pos)
     await state.set_state(AdminOrderState.picking_student)
-    await open_admin_student_list(message, conn, subjects, session_id, note="❌ Запис видалено з черги.")
+    await open_admin_student_list(message, conn, subjects, session_id, note="❌ <b>Запис видалено</b>")
 
 
-# ---------- Завершення та архівування черги ----------
+# ---------- Завершення черги ----------
 
 @router.message(F.text == "📦 Завершити чергу", StateFilter("*"))
 async def ask_finish_queue(message: Message, state: FSMContext, conn, subjects):
@@ -650,7 +1090,7 @@ async def ask_finish_queue(message: Message, state: FSMContext, conn, subjects):
         ["🔙 Назад до черги"],
     ]
     await message.answer(
-        f"Завершити заняття?\n{queue_label(subjects, session)}\n\nОберіть дію на кнопках внизу 👇",
+        f"Завершити заняття?\n{html.escape(queue_label(subjects, session))}\n\nОберіть дію нижче 👇",
         reply_markup=make_reply_keyboard(rows),
     )
 
@@ -676,17 +1116,32 @@ async def confirm_finish_new(message: Message, state: FSMContext, conn, subjects
 
 # ---------- Історія черг ----------
 
-@router.message(F.text.in_({"📦 Історія черг", "🔙 До списку історії"}), StateFilter("*"))
+@router.message(F.text.in_({"📦 Історія", "📦 Історія черг", "🔙 До списку історії"}), StateFilter("*"))
 async def history_list(message: Message, state: FSMContext, conn, subjects):
     await state.clear()
-    sessions = queues.list_sessions(conn, ("archived",))[:15]
+    sessions = queues.list_sessions(conn, ("archived",))
     if not sessions:
-        await message.answer("Історія порожня.", reply_markup=get_admin_reply_menu())
+        await message.answer("Історія порожня.", reply_markup=get_admin_queues_menu())
         return
-    rows = [[f"📦 №{s['id']} {queue_label(subjects, s)}"] for s in sessions]
-    rows.append(["🔙 В адмін-панель", "🏠 Головне меню"])
     await state.set_state(AdminManageState.history_view)
-    await message.answer("Історія черг. Оберіть чергу для перегляду деталей 👇", reply_markup=make_reply_keyboard(rows))
+    await state.update_data(page=1)
+    page_sessions, cur_page, total_pages = paginate(sessions, 1, per_page=8)
+    rows = [[f"📦 №{s['id']} {queue_label(subjects, s)}"] for s in page_sessions]
+    markup = get_paginated_reply_keyboard(rows, cur_page, total_pages, back_text="🔙 Назад")
+    await message.answer("Історія черг. Оберіть чергу для перегляду деталей 👇", reply_markup=markup)
+
+
+@router.message(AdminManageState.history_view, F.text.in_({"⬅️", "➡️"}))
+async def admin_paginate_history(message: Message, state: FSMContext, conn, subjects):
+    sessions = queues.list_sessions(conn, ("archived",))
+    data = await state.get_data()
+    page = data.get("page", 1)
+    page = (page - 1) if message.text == "⬅️" else (page + 1)
+    await state.update_data(page=page)
+    page_sessions, cur_page, total_pages = paginate(sessions, page, per_page=8)
+    rows = [[f"📦 №{s['id']} {queue_label(subjects, s)}"] for s in page_sessions]
+    markup = get_paginated_reply_keyboard(rows, cur_page, total_pages, back_text="🔙 Назад")
+    await message.answer("Оберіть чергу з історії 👇", reply_markup=markup)
 
 
 HISTORY_MARK = {
@@ -706,30 +1161,30 @@ async def history_details_view(message: Message, state: FSMContext, conn, subjec
     session = queues.get_session(conn, session_id)
     if not session:
         raise BotError("Чергу не знайдено.")
-    lines = [f"{r['full_name']} — {HISTORY_MARK.get(r['status'], r['status'])}" for r in queues.get_history(conn, session_id)]
+    lines = [f"{html.escape(r['full_name'])} — {HISTORY_MARK.get(r['status'], r['status'])}" for r in queues.get_history(conn, session_id)]
     header = format_queue(subjects, session, [])
     body = "\n".join(lines) or "Записів немає."
     text = header.replace("Черга порожня.", "") + body
-    rows = [["🔙 До списку історії", "🔙 В адмін-панель"]]
+    rows = [["🔙 До списку історії", "🔙 Назад"]]
     await message.answer(text, reply_markup=make_reply_keyboard(rows))
 
 
-# ---------- Заблоковані студенти ----------
+# ---------- Заблоковані користувачі ----------
 
-@router.message(F.text == "⛔ Заблоковані", StateFilter("*"))
+@router.message(F.text.in_({"⛔ Заблоковані", "⛔ Заблоковані користувачі"}), StateFilter("*"))
 async def show_blocked_list(message: Message, state: FSMContext, conn):
     await state.clear()
     blocked = users.list_blocked_users(conn)
     if not blocked:
-        await message.answer("Заблокованих користувачів немає.", reply_markup=get_admin_reply_menu())
+        await message.answer("Заблокованих користувачів немає.", reply_markup=get_admin_settings_menu())
         return
     rows = []
-    for u in blocked:
+    for u in blocked[:8]:
         tg_id_str = f" (ID: {u['telegram_id']})" if u["telegram_id"] and u["telegram_id"] > 0 else ""
         rows.append([f"🟢 Розблокувати: {u['full_name']}{tg_id_str}"])
-    rows.append(["🔙 В адмін-панель", "🏠 Головне меню"])
+    rows.append(["🔙 Назад"])
     await message.answer(
-        "⛔ **Список заблокованих користувачів:**\nНатисніть на кнопку студента внизу, щоб розблокувати його 👇",
+        "⛔ <b>Заблоковані користувачі:</b>\nНатисніть на студента, щоб розблокувати його 👇",
         reply_markup=make_reply_keyboard(rows),
     )
 
@@ -748,7 +1203,7 @@ async def unblock_student_click(message: Message, state: FSMContext, conn):
     if not user:
         raise BotError("Студента не знайдено.")
     users.toggle_block_user(conn, user["id"])
-    await message.answer(f"🟢 Студента «{user['full_name']}» успішно розблоковано!")
+    await message.answer(f"🟢 Студента «{html.escape(user['full_name'])}» успішно розблоковано!")
     await show_blocked_list(message, state, conn)
 
 
@@ -759,7 +1214,7 @@ async def admins_menu(message: Message, state: FSMContext):
     await state.clear()
     rows = [
         ["📋 Список адміністраторів", "➕ Додати адміністратора"],
-        ["❌ Видалити адміністратора", "🔙 В адмін-панель"],
+        ["❌ Видалити адміністратора", "🔙 Назад"],
     ]
     await message.answer("Керування адміністраторами. Оберіть дію на кнопках внизу 👇", reply_markup=make_reply_keyboard(rows))
 
@@ -767,13 +1222,13 @@ async def admins_menu(message: Message, state: FSMContext):
 @router.message(F.text == "📋 Список адміністраторів", StateFilter("*"))
 async def list_admins_message(message: Message, conn):
     adm_list = admins.list_admins(conn)
-    lines = ["👥 **Адміністратори:**"]
+    lines = ["👥 <b>Адміністратори:</b>"]
     for r in adm_list:
         name = r["full_name"] or "без реєстрації"
-        lines.append(f"• {name} (`{r['telegram_id']}`)")
+        lines.append(f"• <b>{html.escape(name)}</b> (<code>{r['telegram_id']}</code>)")
     rows = [
         ["➕ Додати адміністратора", "❌ Видалити адміністратора"],
-        ["🔙 В адмін-панель", "🏠 Головне меню"],
+        ["🔙 Назад"],
     ]
     await message.answer("\n".join(lines), reply_markup=make_reply_keyboard(rows))
 
@@ -781,18 +1236,18 @@ async def list_admins_message(message: Message, conn):
 @router.message(F.text == "➕ Додати адміністратора", StateFilter("*"))
 async def ask_admin_id(message: Message, state: FSMContext):
     await state.set_state(AdminManageState.add_admin_id)
-    rows = [["🔙 Скасувати", "🔙 В адмін-панель"]]
+    rows = [["↩️ Скасувати", "🔙 Назад"]]
     await message.answer("Введіть числовий Telegram ID нового адміністратора:", reply_markup=make_reply_keyboard(rows))
 
 
 @router.message(AdminManageState.add_admin_id, F.text)
 async def receive_admin_id(message: Message, state: FSMContext, conn):
-    if message.text in {"🔙 Скасувати", "🔙 В адмін-панель"}:
+    if message.text in {"↩️ Скасувати", "🔙 Скасувати", "🔙 Назад"}:
         await admins_menu(message, state)
         return
     text = message.text.strip()
     if not text.isdigit() or int(text) <= 0:
-        await message.answer("Telegram ID — це число. Спробуйте ще раз або натисніть «🔙 Скасувати»:")
+        await message.answer("Telegram ID — це число. Спробуйте ще раз або натисніть «↩️ Скасувати»:")
         return
     new_admin_id = int(text)
     if admins.is_admin(conn, new_admin_id):
@@ -800,7 +1255,7 @@ async def receive_admin_id(message: Message, state: FSMContext, conn):
         return
     admins.add_admin(conn, message.from_user.id, new_admin_id)
     await state.clear()
-    await message.answer(f"✅ Адміністратора з ID `{new_admin_id}` успішно додано!")
+    await message.answer(f"✅ Адміністратора з ID <code>{new_admin_id}</code> успішно додано!")
     await list_admins_message(message, conn)
 
 
@@ -810,10 +1265,10 @@ async def choose_admin_to_remove(message: Message, state: FSMContext, conn):
     rows = []
     for r in adm_list:
         if r["telegram_id"] == message.from_user.id:
-            continue  # Не можна видалити самого себе
+            continue
         name = r["full_name"] or "без реєстрації"
         rows.append([f"❌ Видалити: {name} ({r['telegram_id']})"])
-    rows.append(["🔙 Скасувати", "🔙 В адмін-панель"])
+    rows.append(["↩️ Скасувати", "🔙 Назад"])
     await state.set_state(AdminManageState.select_admin_to_remove)
     await message.answer("Оберіть адміністратора для видалення на кнопках внизу 👇", reply_markup=make_reply_keyboard(rows))
 
@@ -826,11 +1281,11 @@ async def confirm_remove_admin_text(message: Message, state: FSMContext, conn):
     target_id = int(match.group(1))
     admins.remove_admin(conn, message.from_user.id, target_id)
     await state.clear()
-    await message.answer(f"✅ Права адміністратора для ID `{target_id}` видалено.")
+    await message.answer(f"✅ Права адміністратора для ID <code>{target_id}</code> видалено.")
     await list_admins_message(message, conn)
 
 
-@router.message(AdminManageState.select_admin_to_remove, F.text.in_({"🔙 Скасувати", "🔙 В адмін-панель"}))
+@router.message(AdminManageState.select_admin_to_remove, F.text.in_({"↩️ Скасувати", "🔙 Скасувати", "🔙 Назад"}))
 async def cancel_remove_admin(message: Message, state: FSMContext):
     await state.clear()
     await admins_menu(message, state)

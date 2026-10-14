@@ -119,7 +119,7 @@ def join_queue(conn: sqlite3.Connection, telegram_id: int, session_id: int,
         user = conn.execute("SELECT id, is_blocked FROM users WHERE telegram_id = ?", (telegram_id,)).fetchone()
         if user is None:
             raise BotError("Спочатку зареєструйтесь: /start")
-        if user.get("is_blocked"):
+        if bool(user["is_blocked"]):
             raise BotError("Вас заблоковано адміністратором.")
         if get_user_position(conn, telegram_id, session_id) is not None:
             raise BotError("Ви вже записані в цю чергу.")
@@ -279,7 +279,7 @@ def add_student_by_admin(conn, actor_id: int, session_id: int, user_id: int, pos
         require_admin(conn, actor_id)
         session = _require_session(conn, session_id)
         user = conn.execute("SELECT is_blocked FROM users WHERE id = ?", (user_id,)).fetchone()
-        if user and user.get("is_blocked"):
+        if user and bool(user["is_blocked"]):
             raise BotError("Цього студента заблоковано адміністратором.")
         # Перевіряємо чи студент уже є в черзі
         exists = conn.execute(
