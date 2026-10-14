@@ -6,8 +6,9 @@ from aiogram.types import CallbackQuery, Message
 
 from handlers.common import (format_entry, format_queue, make_keyboard, queue_label,
                              session_names, show)
-from services import admins, queues
+from services import admins, queues, users
 from services.errors import BotError, PermissionDenied
+
 
 router = Router()
 
@@ -16,12 +17,14 @@ MAX_POSITION = 60
 
 PICK_TITLES = {
     "view": "Активні черги",
+    "add_student": "Додати студента в чергу",
     "order": "Змінити порядок",
     "done": "Позначити здачу",
     "transfer": "Перенести студентів",
     "close": "Закрити/відкрити запис",
     "finish": "Завершити заняття",
 }
+
 
 
 class AdminOnly(BaseMiddleware):
@@ -50,6 +53,11 @@ class AddAdmin(StatesGroup):
     telegram_id = State()
 
 
+class AdminAddStudent(StatesGroup):
+    names = State()
+
+
+
 def arg(callback: CallbackQuery, index: int = 1) -> str:
     return callback.data.split(":")[index]
 
@@ -69,6 +77,7 @@ async def panel(callback: CallbackQuery, state: FSMContext):
 def panel_keyboard():
     return make_keyboard([
         [("Створити чергу", "nq")],
+        [("Додати студента в чергу", "pick:add_student")],
         [("Активні черги", "pick:view")],
         [("Змінити порядок", "pick:order")],
         [("Позначити здачу", "pick:done")],
@@ -79,6 +88,7 @@ def panel_keyboard():
         [("Керування адміністраторами", "adm")],
         [("Головне меню", "menu")],
     ])
+
 
 
 @router.callback_query(F.data.startswith("pick:"))
@@ -97,6 +107,8 @@ async def go_mode(callback: CallbackQuery, conn, subjects, state: FSMContext):
     mode, session_id = arg(callback), int(arg(callback, 2))
     if mode == "view":
         await show_manager(callback, conn, subjects, session_id)
+    elif mode == "add_student":
+        await start_admin_add_student(callback, conn, subjects, state, session_id)
     elif mode in ("order", "done"):
         await show_student_list(callback, conn, subjects, session_id)
     elif mode == "close":
@@ -118,12 +130,68 @@ async def show_manager(callback, conn, subjects, session_id: int):
     session = get_open_session(conn, session_id)
     text = format_queue(subjects, session, queues.get_entries(conn, session_id))
     rows = [
+        [("Додати студентів у чергу", f"go:add_student:{session_id}")],
         [("Змінити порядок", f"go:order:{session_id}")],
         [("Закрити/відкрити запис", f"go:close:{session_id}")],
         [("Завершити заняття", f"go:finish:{session_id}")],
         [("Назад", "pick:view")],
     ]
     await show(callback, text, make_keyboard(rows))
+
+
+async def start_admin_add_student(callback: CallbackQuery, conn, subjects, state: FSMContext, session_id: int):
+    session = get_open_session(conn, session_id)
+    await state.set_state(AdminAddStudent.names)
+    await state.update_data(session_id=session_id)
+    text = (
+        f"📝 **Додавання студентів у чергу:**\n"
+        f"{queue_label(subjects, session)}\n\n"
+        "Надішліть одне прізвище та ім'я або **список студентів** (кожне з нового рядка).\n"
+        "Можна навіть з номерами (наприклад `1. Петренко Іван` або просто `Петренко Іван`).\n\n"
+        "Вони будуть додані послідовно у чергу."
+    )
+    await show(callback, text, make_keyboard([[("Скасувати", "admin")]]))
+
+
+@router.message(AdminAddStudent.names, F.text)
+async def receive_admin_student_names(message: Message, state: FSMContext, conn, subjects):
+    data = await state.get_data()
+    session_id = data["session_id"]
+    lines = [line.strip() for line in message.text.split("\n") if line.strip()]
+    if not lines:
+        await message.answer("Введіть хоча б одне прізвище та ім'я:")
+        return
+
+    added = []
+    skipped = []
+
+    for raw in lines:
+        # Прибираємо порядковий номер на початку, якщо він є ("1. Петренко" -> "Петренко")
+        cleaned = raw.lstrip("0123456789. -) ")
+        try:
+            user = users.get_or_create_user_by_name(conn, cleaned)
+            pos = queues.add_student_by_admin(conn, message.from_user.id, session_id, user["id"])
+            added.append(f"{pos}. {user['full_name']}")
+        except Exception as e:
+            skipped.append(f"{raw} ({e})")
+
+    await state.clear()
+    session = get_open_session(conn, session_id)
+    result_text = f"✅ Додано студентів: {len(added)}\n"
+    if added:
+        result_text += "\n".join(added[:15]) + ("\n..." if len(added) > 15 else "")
+    if skipped:
+        result_text += "\n\n⚠️ Пропущено (помилка або вже в черзі):\n" + "\n".join(skipped[:10])
+
+    await message.answer(
+        result_text,
+        reply_markup=make_keyboard([
+            [("Переглянути чергу", f"go:view:{session_id}")],
+            [("Додати ще", f"go:add_student:{session_id}")],
+            BACK_TO_PANEL,
+        ])
+    )
+
 
 
 # ---------- Відкриття / закриття запису ----------

@@ -243,6 +243,33 @@ def create_session(conn, actor_id: int, subject_id: int, teacher_id: int, lesson
     return session_id
 
 
+def add_student_by_admin(conn, actor_id: int, session_id: int, user_id: int, position: int | None = None) -> int:
+    """Додає студента в чергу від імені старости."""
+    with transaction(conn):
+        require_admin(conn, actor_id)
+        session = _require_session(conn, session_id)
+        # Перевіряємо чи студент уже є в черзі
+        exists = conn.execute(
+            "SELECT 1 FROM queue_entries WHERE session_id = ? AND user_id = ? AND status = 'active'",
+            (session_id, user_id),
+        ).fetchone()
+        if exists:
+            raise BotError("Цей студент уже є в цій черзі.")
+
+        if position is None:
+            _place_user(conn, session_id, user_id)
+        else:
+            _place_user_at(conn, session_id, user_id, position)
+        log_action(conn, actor_id, "admin_add_student", f"user={user_id} session={session_id}")
+    
+    row = conn.execute(
+        "SELECT position FROM queue_entries WHERE session_id = ? AND user_id = ? AND status = 'active'",
+        (session_id, user_id)
+    ).fetchone()
+    return row["position"] if row else len(get_entries(conn, session_id))
+
+
+
 def _insert_session(conn, subject_id: int, teacher_id: int, lesson_title: str) -> int:
     try:
         cursor = conn.execute(

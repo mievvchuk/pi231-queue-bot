@@ -39,3 +39,17 @@ def rename_user(conn: sqlite3.Connection, telegram_id: int, full_name: str):
     name = validate_full_name(full_name)
     conn.execute("UPDATE users SET full_name = ? WHERE telegram_id = ?", (name, telegram_id))
     return get_user(conn, telegram_id)
+
+
+def get_or_create_user_by_name(conn, full_name: str):
+    """Шукає або створює користувача за ПІБ (якщо додає староста вручну)."""
+    name = validate_full_name(full_name)
+    row = conn.execute("SELECT * FROM users WHERE full_name = ?", (name,)).fetchone()
+    if row:
+        return row
+    # Для студентів, яких вписав адмін без їхнього telegram_id, створюємо унікальний від'ємний telegram_id
+    min_id = conn.execute("SELECT COALESCE(MIN(telegram_id), 0) FROM users WHERE telegram_id < 0").fetchone()[0]
+    fake_tg_id = min_id - 1
+    conn.execute("INSERT INTO users (telegram_id, full_name) VALUES (?, ?)", (fake_tg_id, name))
+    return conn.execute("SELECT * FROM users WHERE telegram_id = ?", (fake_tg_id,)).fetchone()
+
