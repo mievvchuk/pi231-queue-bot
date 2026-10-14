@@ -1,3 +1,5 @@
+import re
+
 from aiogram import BaseMiddleware, F, Router
 from aiogram.filters import StateFilter
 from aiogram.fsm.context import FSMContext
@@ -183,8 +185,8 @@ async def start_admin_add_student(callback: CallbackQuery, conn, subjects, state
         f"📝 **Додавання студентів у чергу:**\n"
         f"{queue_label(subjects, session)}\n\n"
         "Надішліть одне прізвище та ім'я або **список студентів** (кожне з нового рядка).\n"
-        "Можна навіть з номерами (наприклад `1. Петренко Іван` або просто `Петренко Іван`).\n\n"
-        "Вони будуть додані послідовно у чергу."
+        "Можна вказувати номер (наприклад `3. Диновський Денис` — поставить саме на 3 місце).\n\n"
+        "Якщо вказати номер — студент займе саме його, а перед ним утворяться вільні місця."
     )
     await show(callback, text, make_keyboard([[("Скасувати", "admin")]]))
 
@@ -202,11 +204,20 @@ async def receive_admin_student_names(message: Message, state: FSMContext, conn,
     skipped = []
 
     for raw in lines:
-        # Прибираємо порядковий номер на початку, якщо він є ("1. Петренко" -> "Петренко")
-        cleaned = raw.lstrip("0123456789. -) ")
+        # Шукаємо порядковий номер на початку, наприклад "3. Диновський Денис" або "3 Диновський"
+        match = re.match(r"^(\d+)[\.\)\-\s]+(.+)$", raw)
+        if match:
+            requested_pos = int(match.group(1))
+            cleaned = match.group(2).strip()
+        else:
+            requested_pos = None
+            cleaned = raw.strip()
+
         try:
             user = users.get_or_create_user_by_name(conn, cleaned)
-            pos = queues.add_student_by_admin(conn, message.from_user.id, session_id, user["id"])
+            pos = queues.add_student_by_admin(
+                conn, message.from_user.id, session_id, user["id"], position=requested_pos
+            )
             added.append(f"{pos}. {user['full_name']}")
         except Exception as e:
             skipped.append(f"{raw} ({e})")
