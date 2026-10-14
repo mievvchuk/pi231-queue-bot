@@ -14,6 +14,7 @@ def load_env_file(path: str = ".env") -> None:
 
 
 load_env_file()
+DATABASE_URL = os.getenv("DATABASE_URL")
 DB_PATH = os.getenv("DB_PATH", "queue_bot.db")
 SUBJECTS_PATH = os.getenv("SUBJECTS_PATH", "subjects.json")
 

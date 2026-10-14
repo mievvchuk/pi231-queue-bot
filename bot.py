@@ -33,7 +33,8 @@ async def run_web_server():
 
 async def main() -> None:
     logging.basicConfig(level=logging.INFO)
-    conn = connect(config.DB_PATH)
+    db_target = config.DATABASE_URL or config.DB_PATH
+    conn = connect(db_target)
     init_admins(conn, config.get_initial_admin_ids())
 
     # conn і subjects доступні в обробниках як іменовані параметри
