@@ -55,8 +55,9 @@ def get_admin_reply_menu() -> ReplyKeyboardMarkup:
         [KeyboardButton(text="➕ Створити чергу"), KeyboardButton(text="📝 Додати студента")],
         [KeyboardButton(text="👀 Активні черги"), KeyboardButton(text="🔢 Змінити порядок")],
         [KeyboardButton(text="✅ Позначити здачу"), KeyboardButton(text="🔒 Відкрити/закрити запис")],
-        [KeyboardButton(text="📦 Історія черг"), KeyboardButton(text="⛔ Заблоковані")],
-        [KeyboardButton(text="👥 Адміністратори"), KeyboardButton(text="🏠 Головне меню")],
+        [KeyboardButton(text="📊 Звіти за предметами"), KeyboardButton(text="📦 Історія черг")],
+        [KeyboardButton(text="⛔ Заблоковані"), KeyboardButton(text="👥 Адміністратори")],
+        [KeyboardButton(text="🏠 Головне меню")],
     ]
     return ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True)
 

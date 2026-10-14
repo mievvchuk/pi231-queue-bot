@@ -475,3 +475,70 @@ def _fill_new_queue(conn, new_id: int, entries: dict, carry: dict[int, int]) -> 
         conn.execute(
             "UPDATE queue_entries SET status = 'transferred' WHERE id = ?", (entry_id,)
         )
+
+
+def get_subject_report(conn, subject_id: int) -> dict:
+    """Формує детальну аналітику та звіт по конкретному предмету."""
+    sessions = conn.execute(
+        "SELECT * FROM queue_sessions WHERE subject_id = ? ORDER BY id ASC",
+        (subject_id,)
+    ).fetchall()
+
+    session_ids = [s["id"] for s in sessions]
+    if not session_ids:
+        return {
+            "sessions_count": 0,
+            "active_session": None,
+            "total_passed": 0,
+            "students": [],
+        }
+
+    active_session = next((s for s in reversed(sessions) if s["status"] in ("open", "closed")), None)
+
+    marks = ",".join("?" * len(session_ids))
+    entries = conn.execute(
+        f"""SELECT e.session_id, e.user_id, e.position, e.status, e.completed_at, u.full_name
+            FROM queue_entries e
+            JOIN users u ON u.id = e.user_id
+            WHERE e.session_id IN ({marks})
+            ORDER BY u.full_name ASC, e.id ASC""",
+        session_ids
+    ).fetchall()
+
+    student_stats = {}
+    total_passed = 0
+
+    for e in entries:
+        uid = e["user_id"]
+        name = e["full_name"]
+        if uid not in student_stats:
+            student_stats[uid] = {
+                "name": name,
+                "passed_count": 0,
+                "not_passed_count": 0,
+                "current_position": None,
+                "dates": [],
+            }
+
+        if e["status"] == "completed":
+            student_stats[uid]["passed_count"] += 1
+            total_passed += 1
+            if e["completed_at"]:
+                student_stats[uid]["dates"].append(str(e["completed_at"])[:16])
+        elif e["status"] == "removed":
+            student_stats[uid]["not_passed_count"] += 1
+
+        if active_session and e["session_id"] == active_session["id"] and e["status"] == "active":
+            student_stats[uid]["current_position"] = e["position"]
+
+    sorted_students = sorted(
+        student_stats.values(),
+        key=lambda s: (-s["passed_count"], s["name"])
+    )
+
+    return {
+        "sessions_count": len(sessions),
+        "active_session": active_session,
+        "total_passed": total_passed,
+        "students": sorted_students,
+    }

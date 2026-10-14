@@ -5,7 +5,7 @@ from aiogram import BaseMiddleware, F, Router
 from aiogram.filters import StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import CallbackQuery, Message, ReplyKeyboardMarkup
+from aiogram.types import BufferedInputFile, CallbackQuery, Message, ReplyKeyboardMarkup
 
 from handlers.common import (
     find_session_by_label,
@@ -46,6 +46,7 @@ class AdminPanelState(StatesGroup):
     select_queue_for_add_student = State()
     select_queue_for_order = State()
     select_queue_for_close = State()
+    select_subject_for_report = State()
     add_student_names = State()
 
 
@@ -215,6 +216,80 @@ async def admin_pick_close_queue(message: Message, state: FSMContext, conn, subj
     rows.append(["🔙 В адмін-панель", "🏠 Головне меню"])
     await state.set_state(AdminPanelState.select_queue_for_close)
     await message.answer("🔒 Оберіть чергу для відкриття/закриття запису 👇", reply_markup=make_reply_keyboard(rows))
+
+
+@router.message(F.text.in_({"📊 Звіти за предметами", "📊 Інший предмет"}), StateFilter("*"))
+async def admin_pick_report_subject(message: Message, state: FSMContext, subjects):
+    await state.clear()
+    await state.set_state(AdminPanelState.select_subject_for_report)
+    rows = [[f"📊 {s['name']}"] for s in subjects]
+    rows.append(["🔙 В адмін-панель", "🏠 Головне меню"])
+    await message.answer(
+        "📊 **Формування звіту по предмету**\n"
+        "Оберіть предмет зі списку нижче. Бот сформує детальну аналітику та файл таблиці (Excel/CSV) 👇",
+        reply_markup=make_reply_keyboard(rows),
+    )
+
+
+@router.message(AdminPanelState.select_subject_for_report, F.text.startswith("📊 "))
+async def admin_generate_subject_report(message: Message, state: FSMContext, conn, subjects):
+    raw_name = message.text[2:].strip()
+    matched_sub = next((s for s in subjects if s["name"].lower() == raw_name.lower()), None)
+    if not matched_sub:
+        await message.answer("⚠️ Предмет не знайдено. Оберіть зі списку на кнопках внизу 👇")
+        return
+
+    report = queues.get_subject_report(conn, matched_sub["id"])
+    teachers = ", ".join(t["name"] for t in matched_sub.get("teachers", [])) or "—"
+
+    # Формування текстового повідомлення
+    lines = [
+        f"📊 **Звіт по предмету: {matched_sub['name']}**",
+        f"👨‍🏫 Викладачі: {teachers}",
+        f"📁 Проведено занять/черг: **{report['sessions_count']}**",
+        f"✅ Всього зараховано робіт: **{report['total_passed']}**",
+    ]
+
+    if report["active_session"]:
+        lines.append("⚡ Зараз триває активна черга по цьому предмету!")
+
+    lines.append("")
+    lines.append("🏆 **Рейтинг здач студентів:**")
+    if not report["students"]:
+        lines.append("Ще немає жодного запису чи здачі по цьому предмету.")
+    else:
+        for idx, s in enumerate(report["students"][:20], 1):
+            pos_info = f" (👉 в черзі на місці {s['current_position']})" if s["current_position"] else ""
+            lines.append(f"{idx}. {s['name']} — **{s['passed_count']}** ✅{pos_info}")
+        if len(report["students"]) > 20:
+            lines.append(f"... та ще {len(report['students']) - 20} студентів (повний список у файлі нижче)")
+
+    text_msg = "\n".join(lines)
+
+    # Формування CSV таблиці для Excel (utf-8-sig гарантує коректне відображення кирилиці)
+    csv_rows = [
+        "Прізвище та ім'я;Здано робіт;Спроб (не здав);Місце в поточній черзі;Дати здач"
+    ]
+    for s in report["students"]:
+        dates_str = ", ".join(s["dates"]) if s["dates"] else "-"
+        cur_pos = str(s["current_position"]) if s["current_position"] else "-"
+        csv_rows.append(f"{s['name']};{s['passed_count']};{s['not_passed_count']};{cur_pos};{dates_str}")
+
+    csv_data = "\r\n".join(csv_rows).encode("utf-8-sig")
+    safe_name = re.sub(r"[^\w\s-]", "", matched_sub["name"]).replace(" ", "_")
+    file = BufferedInputFile(csv_data, filename=f"report_{safe_name}.csv")
+
+    menu_rows = [
+        ["📊 Інший предмет"],
+        ["🔙 В адмін-панель", "🏠 Головне меню"],
+    ]
+
+    await message.answer(text_msg)
+    await message.answer_document(
+        file,
+        caption=f"📄 Таблиця Excel/CSV: {matched_sub['name']}",
+        reply_markup=make_reply_keyboard(menu_rows),
+    )
 
 
 # Обробка вибору черги за назвою для відповідного адмін-режиму
