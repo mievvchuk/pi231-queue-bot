@@ -49,7 +49,8 @@ async def main() -> None:
     await run_web_server()
     if getattr(config, "ALERTS_TOKEN", None):
         from services.alerts import start_alerts_checker
-        asyncio.create_task(start_alerts_checker(bot, conn, config.ALERTS_TOKEN))
+        db_target = config.DATABASE_URL or getattr(config, "SQLITE_PATH", "bot.db")
+        asyncio.create_task(start_alerts_checker(bot, db_target, config.ALERTS_TOKEN))
     await dp.start_polling(bot)
 
 

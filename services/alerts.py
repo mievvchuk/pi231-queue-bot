@@ -1,19 +1,25 @@
 import asyncio
 import logging
-import zoneinfo
 from contextlib import suppress
-from datetime import datetime, time
+from datetime import datetime, time, timedelta, timezone
 
 import aiohttp
 from aiogram import Bot
 
+import db
 from services import admins, queues
 
 log = logging.getLogger(__name__)
 
 API_URL = "https://api.alerts.in.ua/v1/alerts/active.json"
 
-KYIV_TZ = zoneinfo.ZoneInfo("Europe/Kyiv")
+try:
+    import zoneinfo
+    KYIV_TZ = zoneinfo.ZoneInfo("Europe/Kyiv")
+    _ = datetime.now(KYIV_TZ)
+except Exception:
+    KYIV_TZ = timezone(timedelta(hours=3))
+
 STUDY_START = time(8, 0)
 STUDY_END = time(16, 40)
 
@@ -67,20 +73,33 @@ async def fetch_active_alerts(token: str) -> list[dict] | None:
     return None
 
 
-async def broadcast_alert_status(bot: Bot, conn, is_active: bool):
+async def broadcast_alert_status(bot: Bot, db_target: str, is_active: bool):
     """Розсилає сповіщення всім студентам активних черг та адмінам."""
-    active_sessions = queues.list_sessions(conn, ("open", "closed"))
-    target_user_ids = set()
+    if not db_target:
+        return
 
-    for s in active_sessions:
-        entries = queues.get_entries(conn, s["id"])
-        for e in entries:
-            if e.get("telegram_id") and e["telegram_id"] > 0:
-                target_user_ids.add(e["telegram_id"])
+    try:
+        conn = db.connect(db_target)
+    except Exception as e:
+        log.error(f"Cannot connect to db in alert broadcast: {e}")
+        return
 
-    # Додаємо адмінів, щоб вони завжди були в курсі
-    for adm in admins.list_admins(conn):
-        target_user_ids.add(adm["telegram_id"])
+    try:
+        active_sessions = queues.list_sessions(conn, ("open", "closed"))
+        target_user_ids = set()
+
+        for s in active_sessions:
+            entries = queues.get_entries(conn, s["id"])
+            for e in entries:
+                if e.get("telegram_id") and e["telegram_id"] > 0:
+                    target_user_ids.add(e["telegram_id"])
+
+        # Додаємо адмінів, щоб вони завжди були в курсі
+        for adm in admins.list_admins(conn):
+            target_user_ids.add(adm["telegram_id"])
+    finally:
+        with suppress(Exception):
+            conn.close()
 
     if not target_user_ids:
         return
@@ -105,7 +124,7 @@ async def broadcast_alert_status(bot: Bot, conn, is_active: bool):
             await asyncio.sleep(0.05)  # плавне надсилання без блокування rate-limit
 
 
-async def start_alerts_checker(bot: Bot, conn, token: str, interval_sec: int = 30):
+async def start_alerts_checker(bot: Bot, db_target: str, token: str, interval_sec: int = 30):
     """Фонова задача перевірки повітряної тривоги по Хмельницькому."""
     global IS_KHMELNYTSKYI_ALERT_ACTIVE
     log.info("Starting Khmelnytskyi Air Raid Alert checker...")
@@ -125,7 +144,7 @@ async def start_alerts_checker(bot: Bot, conn, token: str, interval_sec: int = 3
                 if new_status != IS_KHMELNYTSKYI_ALERT_ACTIVE:
                     IS_KHMELNYTSKYI_ALERT_ACTIVE = new_status
                     log.info(f"Khmelnytskyi alert status changed to: {new_status}")
-                    await broadcast_alert_status(bot, conn, new_status)
+                    await broadcast_alert_status(bot, db_target, new_status)
         except Exception as e:
             log.exception(f"Unexpected error in alerts checker: {e}")
 

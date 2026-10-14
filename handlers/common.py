@@ -214,10 +214,15 @@ class Guard(BaseMiddleware):
             await self.notify(event, str(error))
         except TelegramAPIError:
             log.exception("Telegram API error")
+        except Exception as error:
+            log.exception(f"Unexpected error in handler: {error}")
+            await self.notify(event, "⚠️ Виникла технічна помилка. Будь ласка, спробуйте /start або 🏠 Головне меню.")
 
     @staticmethod
     async def notify(event, text: str) -> None:
         try:
-            await event.bot.send_message(event.from_user.id, text)
+            user = getattr(event, "from_user", None)
+            if user:
+                await event.bot.send_message(user.id, text)
         except TelegramAPIError:
             log.exception("Cannot deliver error message")
