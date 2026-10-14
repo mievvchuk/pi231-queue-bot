@@ -43,7 +43,7 @@ async def main() -> None:
     dp = Dispatcher(conn=conn, subjects=load_subjects(config.SUBJECTS_PATH))
     dp.message.outer_middleware(Guard())
     dp.callback_query.outer_middleware(Guard())
-    dp.include_routers(start.router, student.router, admin.router, start.fallback_router)
+    dp.include_routers(start.router, admin.router, student.router, start.fallback_router)
 
     bot = Bot(config.get_bot_token())
     await run_web_server()

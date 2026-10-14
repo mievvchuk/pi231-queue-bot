@@ -133,14 +133,28 @@ async def back_to_queues_list(message: Message, state: FSMContext, conn, subject
     )
 
 
-@router.message(F.text.startswith("📋 "), StateFilter("*"))
-async def select_queue_by_button(message: Message, state: FSMContext, conn, subjects):
-    if message.text in {"📋 Стати в чергу", "📋 Список адміністраторів"}:
-        return
+async def not_admin_state_filter(message: Message, state: FSMContext) -> bool:
     current_state = await state.get_state()
-    # Якщо користувач у будь-якому стані адміна — пропускаємо до admin.py
-    if current_state and (current_state.startswith("AdminPanelState") or current_state.startswith("Admin")):
-        return
+    if current_state and (
+        current_state.startswith("AdminPanelState")
+        or current_state.startswith("AdminOrderState")
+        or current_state.startswith("AdminManageState")
+        or current_state.startswith("Admin")
+    ):
+        return False
+    return True
+
+
+async def student_queue_button_filter(message: Message, state: FSMContext) -> bool:
+    if not message.text or not message.text.startswith("📋 "):
+        return False
+    if message.text in {"📋 Стати в чергу", "📋 Список адміністраторів"}:
+        return False
+    return await not_admin_state_filter(message, state)
+
+
+@router.message(student_queue_button_filter)
+async def select_queue_by_button(message: Message, state: FSMContext, conn, subjects):
     session = find_session_by_label(conn, subjects, message.text)
     if not session:
         sessions = queues.list_sessions(conn, ("open", "closed"))
@@ -156,11 +170,8 @@ async def select_queue_by_button(message: Message, state: FSMContext, conn, subj
 
 # ---------- Дії всередині черги (Нижні кнопки) ----------
 
-@router.message(F.text == "🔄 Оновити", StateFilter("*"))
+@router.message(F.text == "🔄 Оновити", not_admin_state_filter)
 async def refresh_current_queue(message: Message, state: FSMContext, conn, subjects):
-    current_state = await state.get_state()
-    if current_state and (current_state.startswith("AdminPanelState") or current_state.startswith("Admin")):
-        return
     data = await state.get_data()
     session_id = data.get("session_id")
     if not session_id:
@@ -254,7 +265,7 @@ async def confirm_leave_queue(message: Message, state: FSMContext, conn, subject
     await open_queue_screen(message, conn, subjects, session_id, note="🚪 Ви покинули чергу.")
 
 
-@router.message(F.text == "🔙 Назад до черги", StateFilter("*"))
+@router.message(F.text == "🔙 Назад до черги", not_admin_state_filter)
 async def back_to_current_queue(message: Message, state: FSMContext, conn, subjects):
     data = await state.get_data()
     session_id = data.get("session_id")
