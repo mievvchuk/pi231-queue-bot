@@ -30,6 +30,25 @@ def register_user(conn: sqlite3.Connection, telegram_id: int, full_name: str):
             raise BotError("Вас заблоковано адміністратором.")
         raise BotError("Ви вже зареєстровані.")
     name = validate_full_name(full_name)
+
+    # Якщо староста вже додав цього студента вручну — прив'язуємо його реальний telegram_id
+    placeholder = conn.execute(
+        "SELECT * FROM users WHERE full_name = ? AND telegram_id < 0", (name,)
+    ).fetchone()
+
+    if placeholder:
+        if placeholder.get("is_blocked"):
+            raise BotError("Вас заблоковано адміністратором.")
+        conn.execute("UPDATE users SET telegram_id = ? WHERE id = ?", (telegram_id, placeholder["id"]))
+        return get_user(conn, telegram_id)
+
+    # Перевіряємо, чи це ім'я не зайняте іншим зареєстрованим користувачем
+    already_taken = conn.execute(
+        "SELECT 1 FROM users WHERE full_name = ? AND telegram_id > 0", (name,)
+    ).fetchone()
+    if already_taken:
+        raise BotError("Користувач з таким ПІБ уже зареєстрований. Якщо це помилка, зверніться до старости.")
+
     conn.execute(
         "INSERT INTO users (telegram_id, full_name) VALUES (?, ?)", (telegram_id, name)
     )
