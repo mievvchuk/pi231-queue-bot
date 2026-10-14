@@ -3,8 +3,16 @@ from contextlib import suppress
 
 from aiogram import BaseMiddleware
 from aiogram.exceptions import TelegramAPIError, TelegramBadRequest
-from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
+from aiogram.types import (
+    CallbackQuery,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    KeyboardButton,
+    Message,
+    ReplyKeyboardMarkup,
+)
 
+from services import admins
 from services.errors import BotError
 from subjects import find_subject, find_teacher
 
@@ -18,6 +26,19 @@ def make_keyboard(rows: list[list[tuple[str, str]]]) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[[InlineKeyboardButton(text=t, callback_data=d) for t, d in row] for row in rows]
     )
+
+
+def get_reply_menu(conn, telegram_id: int) -> ReplyKeyboardMarkup:
+    """Нижня постійна клавіатура (ReplyKeyboard) під полем вводу."""
+    keyboard = [
+        [KeyboardButton(text="📋 Стати в чергу"), KeyboardButton(text="➕ Відкрити чергу")],
+        [KeyboardButton(text="👥 Мої черги"), KeyboardButton(text="🔍 Переглянути черги")],
+        [KeyboardButton(text="🏠 Головне меню"), KeyboardButton(text="❓ Допомога")],
+    ]
+    if admins.is_admin(conn, telegram_id):
+        keyboard.append([KeyboardButton(text="⚡ Адмін-панель")])
+    return ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True)
+
 
 
 def session_names(subjects: list[dict], session) -> tuple[str, str]:

@@ -27,14 +27,22 @@ def get_session_or_fail(conn, session_id: int):
 
 # ---------- Запис до черги ----------
 
+@router.message(F.text == "📋 Стати в чергу")
 @router.callback_query(F.data == "join")
-async def choose_subject(callback: CallbackQuery, conn, subjects):
+async def choose_subject(event, conn, subjects):
     open_subject_ids = {s["subject_id"] for s in queues.list_sessions(conn, ("open",))}
     rows = [[(s["name"], f"js:{s['id']}")] for s in subjects if s["id"] in open_subject_ids]
     if not rows:
-        await show(callback, "Зараз немає черг із відкритим записом.", make_keyboard([BACK_TO_MENU]))
+        if isinstance(event, Message):
+            await event.answer("Зараз немає черг із відкритим записом.", reply_markup=make_keyboard([BACK_TO_MENU]))
+        else:
+            await show(event, "Зараз немає черг із відкритим записом.", make_keyboard([BACK_TO_MENU]))
         return
-    await show(callback, "Оберіть предмет:", make_keyboard(rows + [BACK_TO_MENU]))
+    if isinstance(event, Message):
+        await event.answer("Оберіть предмет:", reply_markup=make_keyboard(rows + [BACK_TO_MENU]))
+    else:
+        await show(event, "Оберіть предмет:", make_keyboard(rows + [BACK_TO_MENU]))
+
 
 
 @router.callback_query(F.data.startswith("js:"))
@@ -152,24 +160,41 @@ async def button_finish(callback: CallbackQuery, conn):
 
 # ---------- Перегляд черг ----------
 
+@router.message(F.text == "👥 Мої черги")
 @router.callback_query(F.data == "my")
-async def my_queues(callback: CallbackQuery, conn, subjects):
-    sessions = queues.list_user_sessions(conn, callback.from_user.id)
+async def my_queues(event, conn, subjects):
+    sessions = queues.list_user_sessions(conn, event.from_user.id)
     if not sessions:
-        await show(callback, "Ви ще не записані в жодну чергу.", make_keyboard([BACK_TO_MENU]))
+        text = "Ви ще не записані в жодну чергу."
+        if isinstance(event, Message):
+            await event.answer(text, reply_markup=make_keyboard([BACK_TO_MENU]))
+        else:
+            await show(event, text, make_keyboard([BACK_TO_MENU]))
         return
     rows = [[(queue_label(subjects, s), f"vq:{s['id']}")] for s in sessions]
-    await show(callback, "Мої черги:", make_keyboard(rows + [BACK_TO_MENU]))
+    if isinstance(event, Message):
+        await event.answer("Мої черги:", reply_markup=make_keyboard(rows + [BACK_TO_MENU]))
+    else:
+        await show(event, "Мої черги:", make_keyboard(rows + [BACK_TO_MENU]))
 
 
+@router.message(F.text == "🔍 Переглянути черги")
 @router.callback_query(F.data == "view")
-async def all_queues(callback: CallbackQuery, conn, subjects):
+async def all_queues(event, conn, subjects):
     sessions = queues.list_sessions(conn, ("open", "closed"))
     if not sessions:
-        await show(callback, "Активних черг немає.", make_keyboard([BACK_TO_MENU]))
+        text = "Активних черг немає."
+        if isinstance(event, Message):
+            await event.answer(text, reply_markup=make_keyboard([BACK_TO_MENU]))
+        else:
+            await show(event, text, make_keyboard([BACK_TO_MENU]))
         return
     rows = [[(queue_label(subjects, s), f"vq:{s['id']}")] for s in sessions]
-    await show(callback, "Оберіть чергу:", make_keyboard(rows + [BACK_TO_MENU]))
+    if isinstance(event, Message):
+        await event.answer("Оберіть чергу:", reply_markup=make_keyboard(rows + [BACK_TO_MENU]))
+    else:
+        await show(event, "Оберіть чергу:", make_keyboard(rows + [BACK_TO_MENU]))
+
 
 
 @router.callback_query(F.data.startswith("vq:"))
@@ -220,10 +245,15 @@ async def leave(callback: CallbackQuery, conn):
 
 # ---------- Створення черги студентом ----------
 
+@router.message(F.text == "➕ Відкрити чергу")
 @router.callback_query(F.data == "nq")
-async def new_queue_subject(callback: CallbackQuery, subjects):
+async def new_queue_subject(event, subjects):
     rows = [[(s["name"], f"nqs:{s['id']}")] for s in subjects]
-    await show(callback, "Оберіть предмет для нової черги:", make_keyboard(rows + [BACK_TO_MENU]))
+    if isinstance(event, Message):
+        await event.answer("Оберіть предмет для нової черги:", reply_markup=make_keyboard(rows + [BACK_TO_MENU]))
+    else:
+        await show(event, "Оберіть предмет для нової черги:", make_keyboard(rows + [BACK_TO_MENU]))
+
 
 
 @router.callback_query(F.data.startswith("nqs:"))

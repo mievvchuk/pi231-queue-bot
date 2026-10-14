@@ -68,10 +68,15 @@ def sessions_for_admin(conn):
 
 # ---------- Панель ----------
 
+@router.message(F.text == "⚡ Адмін-панель")
 @router.callback_query(F.data == "admin")
-async def panel(callback: CallbackQuery, state: FSMContext):
+async def panel(event, state: FSMContext):
     await state.clear()
-    await show(callback, "Адмін-панель:", panel_keyboard())
+    if isinstance(event, Message):
+        await event.answer("Адмін-панель:", reply_markup=panel_keyboard())
+    else:
+        await show(event, "Адмін-панель:", panel_keyboard())
+
 
 
 def panel_keyboard():
