@@ -1,39 +1,38 @@
+import logging
 import re
 
 from aiogram import BaseMiddleware, F, Router
 from aiogram.filters import StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import CallbackQuery, Message, ReplyKeyboardMarkup
 
-from handlers.common import (format_entry, format_queue, get_admin_reply_menu,
-                             make_keyboard, queue_label, session_names, show)
+from handlers.common import (
+    find_session_by_label,
+    format_entry,
+    format_queue,
+    get_admin_reply_menu,
+    make_keyboard,
+    make_reply_keyboard,
+    queue_label,
+    session_names,
+    show,
+)
 from services import admins, queues, users
 from services.errors import BotError, PermissionDenied
 
-
+log = logging.getLogger(__name__)
 router = Router()
 
-BACK_TO_PANEL = [("Адмін-панель", "admin")]
 MAX_POSITION = 60
-
-PICK_TITLES = {
-    "view": "Активні черги",
-    "add_student": "Додати студента в чергу",
-    "order": "Змінити порядок",
-    "done": "Позначити здачу",
-    "transfer": "Перенести студентів",
-    "close": "Закрити/відкрити запис",
-}
-
-
 
 
 class AdminOnly(BaseMiddleware):
     """Перша лінія захисту. Сервіси додатково перевіряють роль самі."""
 
     async def __call__(self, handler, event, data):
-        if not admins.is_admin(data["conn"], event.from_user.id):
+        user_id = event.from_user.id
+        if not admins.is_admin(data["conn"], user_id):
             raise PermissionDenied("У вас немає прав адміністратора.")
         return await handler(event, data)
 
@@ -42,119 +41,25 @@ router.callback_query.middleware(AdminOnly())
 router.message.middleware(AdminOnly())
 
 
-class MoveTo(StatesGroup):
-    position = State()
+class AdminPanelState(StatesGroup):
+    select_queue_for_view = State()
+    select_queue_for_add_student = State()
+    select_queue_for_order = State()
+    select_queue_for_close = State()
+    add_student_names = State()
 
 
-class Carry(StatesGroup):
-    selecting = State()
-    positions = State()
+class AdminOrderState(StatesGroup):
+    picking_student = State()
+    managing_entry = State()
+    entering_number = State()
+    entering_name = State()
 
 
-class AddAdmin(StatesGroup):
-    telegram_id = State()
-
-
-class AdminAddStudent(StatesGroup):
-    names = State()
-
-
-class AdminRenameStudent(StatesGroup):
-    name = State()
-
-
-
-
-def arg(callback: CallbackQuery, index: int = 1) -> str:
-    return callback.data.split(":")[index]
-
-
-def sessions_for_admin(conn):
-    return queues.list_sessions(conn, ("open", "closed"))
-
-
-# ---------- Панель ----------
-
-@router.message(F.text == "⚡ Адмін-панель")
-async def panel_message(message: Message, state: FSMContext):
-    await state.clear()
-    await message.answer(
-        "⚡ **Адмін-панель**\nУсі інструменти керування перенесено на кнопки внизу під клавіатурою 👇",
-        reply_markup=get_admin_reply_menu(),
-    )
-
-
-@router.callback_query(F.data == "admin")
-async def panel_callback(callback: CallbackQuery, state: FSMContext):
-    await state.clear()
-    await show(
-        callback,
-        "⚡ **Адмін-панель**\nОберіть дію на клавіатурі внизу 👇",
-    )
-
-
-async def pick_queue_for_mode(event, mode: str, conn, subjects):
-    sessions = sessions_for_admin(conn)
-    if not sessions:
-        text = "Незавершених черг немає."
-        if isinstance(event, Message):
-            await event.answer(text)
-        else:
-            await show(event, text)
-        return
-    rows = [[(queue_label(subjects, s), f"go:{mode}:{s['id']}")] for s in sessions]
-    text = f"{PICK_TITLES[mode]}\nОберіть чергу:"
-    if isinstance(event, Message):
-        await event.answer(text, reply_markup=make_keyboard(rows))
-    else:
-        await show(event, text, make_keyboard(rows))
-
-
-@router.message(F.text == "📝 Додати студента")
-async def btn_add_student(message: Message, conn, subjects):
-    await pick_queue_for_mode(message, "add_student", conn, subjects)
-
-
-@router.message(F.text == "👀 Активні черги")
-async def btn_active_queues(message: Message, conn, subjects):
-    await pick_queue_for_mode(message, "view", conn, subjects)
-
-
-@router.message(F.text == "🔢 Змінити порядок")
-async def btn_change_order(message: Message, conn, subjects):
-    await pick_queue_for_mode(message, "order", conn, subjects)
-
-
-@router.message(F.text == "✅ Позначити здачу")
-async def btn_mark_done(message: Message, conn, subjects):
-    await pick_queue_for_mode(message, "done", conn, subjects)
-
-
-@router.message(F.text == "🔒 Відкрити/закрити запис")
-async def btn_toggle_signup(message: Message, conn, subjects):
-    await pick_queue_for_mode(message, "close", conn, subjects)
-
-
-@router.callback_query(F.data.startswith("pick:"))
-async def pick_queue(callback: CallbackQuery, conn, subjects):
-    await pick_queue_for_mode(callback, arg(callback), conn, subjects)
-
-
-@router.callback_query(F.data.startswith("go:"))
-async def go_mode(callback: CallbackQuery, conn, subjects, state: FSMContext):
-    mode, session_id = arg(callback), int(arg(callback, 2))
-    if mode == "view":
-        await show_manager(callback, conn, subjects, session_id)
-    elif mode == "add_student":
-        await start_admin_add_student(callback, conn, subjects, state, session_id)
-    elif mode in ("order", "done"):
-        await show_student_list(callback, conn, subjects, session_id)
-    elif mode == "close":
-        await ask_toggle_signup(callback, conn, subjects, session_id)
-    elif mode == "finish":
-        await show_finish_menu(callback, conn, subjects, session_id)
-    elif mode == "transfer":
-        await start_carry(callback, conn, subjects, state, session_id)
+class AdminManageState(StatesGroup):
+    add_admin_id = State()
+    select_admin_to_remove = State()
+    history_view = State()
 
 
 def get_open_session(conn, session_id: int):
@@ -164,37 +69,239 @@ def get_open_session(conn, session_id: int):
     return session
 
 
-async def show_manager(callback, conn, subjects, session_id: int):
-    session = get_open_session(conn, session_id)
-    text = format_queue(subjects, session, queues.get_entries(conn, session_id), show_id=True)
+def get_admin_queue_menu(is_open: bool) -> ReplyKeyboardMarkup:
+    lock_text = "🔒 Закрити запис" if is_open else "🔓 Відкрити запис"
     rows = [
-        [("Додати студентів у чергу", f"go:add_student:{session_id}")],
-        [("Змінити порядок / студенти", f"go:order:{session_id}")],
-        [("Закрити/відкрити запис", f"go:close:{session_id}")],
-        [("Назад", "pick:view")],
+        ["➕ Додати студентів", "🔢 Керувати студентами"],
+        [lock_text, "🔄 Оновити"],
+        ["📦 Завершити чергу", "🔙 В адмін-панель"],
+        ["🏠 Головне меню"],
     ]
-    await show(callback, text, make_keyboard(rows))
+    return make_reply_keyboard(rows)
 
 
-
-async def start_admin_add_student(callback: CallbackQuery, conn, subjects, state: FSMContext, session_id: int):
+async def open_admin_queue_manager(message: Message, conn, subjects, session_id: int, note: str = ""):
     session = get_open_session(conn, session_id)
-    await state.set_state(AdminAddStudent.names)
+    entries = queues.get_entries(conn, session_id)
+    text = format_queue(subjects, session, entries, show_id=True)
+    if note:
+        text = f"{note}\n\n{text}"
+    await message.answer(text, reply_markup=get_admin_queue_menu(session["status"] == "open"))
+
+
+async def open_admin_student_list(message: Message, conn, subjects, session_id: int, note: str = ""):
+    session = get_open_session(conn, session_id)
+    entries = queues.get_entries(conn, session_id)
+    if not entries:
+        await open_admin_queue_manager(message, conn, subjects, session_id, note="У черзі немає студентів.")
+        return
+    rows = [[f"👤 {format_entry(e, show_id=True)}"] for e in entries]
+    rows.append(["🔙 Назад до черги", "🔙 В адмін-панель"])
+    text = format_queue(subjects, session, entries, show_id=True) + "\n\nОберіть студента для дій на кнопках внизу 👇"
+    if note:
+        text = f"{note}\n\n{text}"
+    await message.answer(text, reply_markup=make_reply_keyboard(rows))
+
+
+async def open_admin_student_manager(message: Message, conn, subjects, entry_id: int, note: str = ""):
+    entry = queues.get_entry(conn, entry_id)
+    if entry is None or entry["status"] != "active":
+        raise BotError("Запис не знайдено або він уже неактивний.")
+    session = get_open_session(conn, entry["session_id"])
+    subject, teacher = session_names(subjects, session)
+
+    user = None
+    if entry["user_id"]:
+        user = conn.execute("SELECT * FROM users WHERE id = ?", (entry["user_id"],)).fetchone()
+
+    lines = []
+    lines.append(f"📚 {subject} — {teacher}")
+    user_name = user["full_name"] if user else "— вільне місце —"
+    tg_info = f" [ID: {user['telegram_id']}]" if user and user["telegram_id"] and user["telegram_id"] > 0 else " [без TG]"
+    status_info = "⛔ Заблокований" if user and user.get("is_blocked") else "✅ Активний"
+    lines.append(f"👤 Студент: **{user_name}**{tg_info} — {status_info}")
+    lines.append(f"📍 Поточна позиція в черзі: **{entry['position']}**")
+    lines.append("")
+    lines.append("Оберіть дію на кнопках внизу 👇")
+    text = "\n".join(lines)
+    if note:
+        text = f"{note}\n\n{text}"
+
+    block_btn = "🟢 Розблокувати" if user and user.get("is_blocked") else "⛔ Заблокувати"
+    rows = [
+        ["⬆️ Вище", "⬇️ Нижче"],
+        ["🔢 Задати номер", "✏️ Змінити ім'я"],
+        [block_btn, "✅ Позначити «Здав»"],
+        ["❌ Видалити з черги"],
+        ["🔙 До списку студентів", "🔙 Назад до черги"],
+    ]
+    await message.answer(text, reply_markup=make_reply_keyboard(rows))
+
+
+# ---------- Головна адмін-панель ----------
+
+@router.message(F.text.in_({"⚡ Адмін-панель", "🔙 В адмін-панель"}), StateFilter("*"))
+async def admin_panel_open(message: Message, state: FSMContext):
+    await state.clear()
+    await message.answer(
+        "⚡ **Адмін-панель**\nУсі дії та черги доступні на кнопках внизу під полем вводу 👇",
+        reply_markup=get_admin_reply_menu(),
+    )
+
+
+@router.message(F.text == "⚡ Керувати цією чергою", StateFilter("*"))
+async def admin_manage_from_view(message: Message, state: FSMContext, conn, subjects):
+    data = await state.get_data()
+    session_id = data.get("session_id")
+    if not session_id:
+        sessions = queues.list_sessions(conn, ("open", "closed"))
+        if not sessions:
+            raise BotError("Активних черг немає.")
+        session_id = sessions[0]["id"]
+    await state.clear()
     await state.update_data(session_id=session_id)
-    text = (
+    await open_admin_queue_manager(message, conn, subjects, session_id)
+
+
+# ---------- Вибір черги для адмін-дій ----------
+
+@router.message(F.text == "👀 Активні черги", StateFilter("*"))
+async def admin_pick_active_queues(message: Message, state: FSMContext, conn, subjects):
+    await state.clear()
+    sessions = queues.list_sessions(conn, ("open", "closed"))
+    if not sessions:
+        await message.answer("Активних черг немає.", reply_markup=get_admin_reply_menu())
+        return
+    rows = [[f"📋 {queue_label(subjects, s)}"] for s in sessions]
+    rows.append(["🔙 В адмін-панель", "🏠 Головне меню"])
+    await state.set_state(AdminPanelState.select_queue_for_view)
+    await message.answer("👀 Оберіть чергу для перегляду та керування на кнопках внизу 👇", reply_markup=make_reply_keyboard(rows))
+
+
+@router.message(F.text == "📝 Додати студента", StateFilter("*"))
+async def admin_pick_add_student(message: Message, state: FSMContext, conn, subjects):
+    await state.clear()
+    sessions = queues.list_sessions(conn, ("open", "closed"))
+    if not sessions:
+        await message.answer("Активних черг немає.", reply_markup=get_admin_reply_menu())
+        return
+    rows = [[f"📋 {queue_label(subjects, s)}"] for s in sessions]
+    rows.append(["🔙 В адмін-панель", "🏠 Головне меню"])
+    await state.set_state(AdminPanelState.select_queue_for_add_student)
+    await message.answer("📝 Оберіть чергу, в яку додати студентів, на кнопках внизу 👇", reply_markup=make_reply_keyboard(rows))
+
+
+@router.message(F.text.in_({"🔢 Змінити порядок", "✅ Позначити здачу"}), StateFilter("*"))
+async def admin_pick_order_queue(message: Message, state: FSMContext, conn, subjects):
+    await state.clear()
+    sessions = queues.list_sessions(conn, ("open", "closed"))
+    if not sessions:
+        await message.answer("Активних черг немає.", reply_markup=get_admin_reply_menu())
+        return
+    rows = [[f"📋 {queue_label(subjects, s)}"] for s in sessions]
+    rows.append(["🔙 В адмін-панель", "🏠 Головне меню"])
+    await state.set_state(AdminPanelState.select_queue_for_order)
+    await message.answer("🔢 Оберіть чергу для зміни порядку студентів 👇", reply_markup=make_reply_keyboard(rows))
+
+
+@router.message(F.text == "🔒 Відкрити/закрити запис", StateFilter("*"))
+async def admin_pick_close_queue(message: Message, state: FSMContext, conn, subjects):
+    await state.clear()
+    sessions = queues.list_sessions(conn, ("open", "closed"))
+    if not sessions:
+        await message.answer("Активних черг немає.", reply_markup=get_admin_reply_menu())
+        return
+    rows = [[f"📋 {queue_label(subjects, s)}"] for s in sessions]
+    rows.append(["🔙 В адмін-панель", "🏠 Головне меню"])
+    await state.set_state(AdminPanelState.select_queue_for_close)
+    await message.answer("🔒 Оберіть чергу для відкриття/закриття запису 👇", reply_markup=make_reply_keyboard(rows))
+
+
+# Обробка вибору черги за назвою для відповідного адмін-режиму
+@router.message(AdminPanelState.select_queue_for_view, F.text.startswith("📋 "))
+async def admin_selected_queue_view(message: Message, state: FSMContext, conn, subjects):
+    session = find_session_by_label(conn, subjects, message.text)
+    if not session:
+        return
+    await state.clear()
+    await state.update_data(session_id=session["id"])
+    await open_admin_queue_manager(message, conn, subjects, session["id"])
+
+
+@router.message(AdminPanelState.select_queue_for_add_student, F.text.startswith("📋 "))
+async def admin_selected_queue_add_student(message: Message, state: FSMContext, conn, subjects):
+    session = find_session_by_label(conn, subjects, message.text)
+    if not session:
+        return
+    await state.set_state(AdminPanelState.add_student_names)
+    await state.update_data(session_id=session["id"])
+    await message.answer(
         f"📝 **Додавання студентів у чергу:**\n"
         f"{queue_label(subjects, session)}\n\n"
         "Надішліть одне прізвище та ім'я або **список студентів** (кожне з нового рядка).\n"
         "Можна вказувати номер (наприклад `3. Диновський Денис` — поставить саме на 3 місце).\n\n"
-        "Якщо вказати номер — студент займе саме його, а перед ним утворяться вільні місця."
+        "Якщо вказати номер — студент займе саме його, а перед ним утворяться вільні місця.",
+        reply_markup=make_reply_keyboard([["🔙 Назад до черги"], ["🔙 В адмін-панель"]]),
     )
-    await show(callback, text, make_keyboard([[("Скасувати", "admin")]]))
 
 
-@router.message(AdminAddStudent.names, F.text)
-async def receive_admin_student_names(message: Message, state: FSMContext, conn, subjects):
+@router.message(AdminPanelState.select_queue_for_order, F.text.startswith("📋 "))
+async def admin_selected_queue_order(message: Message, state: FSMContext, conn, subjects):
+    session = find_session_by_label(conn, subjects, message.text)
+    if not session:
+        return
+    await state.set_state(AdminOrderState.picking_student)
+    await state.update_data(session_id=session["id"])
+    await open_admin_student_list(message, conn, subjects, session["id"])
+
+
+@router.message(AdminPanelState.select_queue_for_close, F.text.startswith("📋 "))
+async def admin_selected_queue_close(message: Message, state: FSMContext, conn, subjects):
+    session = find_session_by_label(conn, subjects, message.text)
+    if not session:
+        return
+    make_open = session["status"] == "closed"
+    queues.set_signup_open(conn, message.from_user.id, session["id"], make_open)
+    note = "🔓 Запис відкрито!" if make_open else "🔒 Запис закрито!"
+    await state.clear()
+    await state.update_data(session_id=session["id"])
+    await open_admin_queue_manager(message, conn, subjects, session["id"], note=note)
+
+
+# ---------- Керування обраною чергою (Кнопки менеджера черги) ----------
+
+@router.message(F.text == "➕ Додати студентів", StateFilter("*"))
+async def admin_click_add_students(message: Message, state: FSMContext, conn, subjects):
     data = await state.get_data()
-    session_id = data["session_id"]
+    session_id = data.get("session_id")
+    if not session_id:
+        raise BotError("Чергу не обрано.")
+    session = get_open_session(conn, session_id)
+    await state.set_state(AdminPanelState.add_student_names)
+    await state.update_data(session_id=session_id)
+    await message.answer(
+        f"📝 **Додавання студентів у чергу:**\n"
+        f"{queue_label(subjects, session)}\n\n"
+        "Надішліть одне прізвище та ім'я або **список студентів** (кожне з нового рядка).\n"
+        "Можна вказувати номер (наприклад `3. Диновський Денис` — поставить саме на 3 місце).\n\n"
+        "Якщо вказати номер — студент займе саме його, а перед ним утворяться вільні місця.",
+        reply_markup=make_reply_keyboard([["🔙 Назад до черги"], ["🔙 В адмін-панель"]]),
+    )
+
+
+@router.message(AdminPanelState.add_student_names, F.text)
+async def receive_student_names(message: Message, state: FSMContext, conn, subjects):
+    data = await state.get_data()
+    session_id = data.get("session_id")
+    if message.text in {"🔙 Назад до черги", "🔙 В адмін-панель"}:
+        await state.clear()
+        if session_id and message.text == "🔙 Назад до черги":
+            await state.update_data(session_id=session_id)
+            await open_admin_queue_manager(message, conn, subjects, session_id)
+        else:
+            await admin_panel_open(message, state)
+        return
+
     lines = [line.strip() for line in message.text.split("\n") if line.strip()]
     if not lines:
         await message.answer("Введіть хоча б одне прізвище та ім'я:")
@@ -204,7 +311,6 @@ async def receive_admin_student_names(message: Message, state: FSMContext, conn,
     skipped = []
 
     for raw in lines:
-        # Шукаємо порядковий номер на початку, наприклад "3. Диновський Денис" або "3 Диновський"
         match = re.match(r"^(\d+)[\.\)\-\s]+(.+)$", raw)
         if match:
             requested_pos = int(match.group(1))
@@ -223,525 +329,414 @@ async def receive_admin_student_names(message: Message, state: FSMContext, conn,
             skipped.append(f"{raw} ({e})")
 
     await state.clear()
-    session = get_open_session(conn, session_id)
+    await state.update_data(session_id=session_id)
     result_text = f"✅ Додано студентів: {len(added)}\n"
     if added:
         result_text += "\n".join(added[:15]) + ("\n..." if len(added) > 15 else "")
     if skipped:
         result_text += "\n\n⚠️ Пропущено (помилка або вже в черзі):\n" + "\n".join(skipped[:10])
 
-    await message.answer(
-        result_text,
-        reply_markup=make_keyboard([
-            [("Переглянути чергу", f"go:view:{session_id}")],
-            [("Додати ще", f"go:add_student:{session_id}")],
-            BACK_TO_PANEL,
-        ])
-    )
+    await open_admin_queue_manager(message, conn, subjects, session_id, note=result_text)
 
 
-
-# ---------- Відкриття / закриття запису ----------
-
-async def ask_toggle_signup(callback, conn, subjects, session_id: int):
+@router.message(F.text.in_({"🔒 Закрити запис", "🔓 Відкрити запис"}), StateFilter("*"))
+async def toggle_signup_in_manager(message: Message, state: FSMContext, conn, subjects):
+    data = await state.get_data()
+    session_id = data.get("session_id")
+    if not session_id:
+        raise BotError("Чергу не обрано.")
     session = get_open_session(conn, session_id)
     make_open = session["status"] == "closed"
-    action = "Відкрити" if make_open else "Закрити"
-    await show(callback, f"{action} запис до черги?\n{queue_label(subjects, session)}", make_keyboard([
-        [(f"Так, {action.lower()}", f"sgy:{session_id}:{int(make_open)}")],
-        [("Скасувати", "admin")],
-    ]))
+    queues.set_signup_open(conn, message.from_user.id, session_id, make_open)
+    note = "🔓 Запис відкрито!" if make_open else "🔒 Запис закрито!"
+    await open_admin_queue_manager(message, conn, subjects, session_id, note=note)
 
 
-@router.callback_query(F.data.startswith("sgy:"))
-async def toggle_signup(callback: CallbackQuery, conn, subjects):
-    session_id, make_open = int(arg(callback)), arg(callback, 2) == "1"
-    queues.set_signup_open(conn, callback.from_user.id, session_id, make_open)
-    await show_manager(callback, conn, subjects, session_id)
+@router.message(F.text == "🔢 Керувати студентами", StateFilter("*"))
+async def start_managing_students(message: Message, state: FSMContext, conn, subjects):
+    data = await state.get_data()
+    session_id = data.get("session_id")
+    if not session_id:
+        raise BotError("Чергу не обрано.")
+    await state.set_state(AdminOrderState.picking_student)
+    await state.update_data(session_id=session_id)
+    await open_admin_student_list(message, conn, subjects, session_id)
 
 
-# ---------- Зміна порядку ----------
-
-async def show_student_list(callback, conn, subjects, session_id: int):
-    session = get_open_session(conn, session_id)
+@router.message(AdminOrderState.picking_student, F.text.startswith("👤 "))
+async def select_student_from_list(message: Message, state: FSMContext, conn, subjects):
+    data = await state.get_data()
+    session_id = data.get("session_id")
     entries = queues.get_entries(conn, session_id)
-    rows = [[(format_entry(e, show_id=True), f"ae:{e['id']}")] for e in entries]
-    text = format_queue(subjects, session, entries, show_id=True) + "\n\nОберіть студента:"
-    await show(callback, text, make_keyboard(rows + [[("Назад", f"go:view:{session_id}")]]))
-
-
-def entry_screen(conn, subjects, entry_id: int):
-    entry = queues.get_entry(conn, entry_id)
-    if entry is None or entry["status"] != "active":
-        raise BotError("Запис не знайдено або він уже неактивний.")
-    session = get_open_session(conn, entry["session_id"])
-    entries = queues.get_entries(conn, session["id"])
-    lines = [format_entry(e, marked=e["id"] == entry_id, show_id=True) for e in entries]
-    subject, teacher = session_names(subjects, session)
-
-    user = None
-    if entry["user_id"]:
-        user = conn.execute("SELECT * FROM users WHERE id = ?", (entry["user_id"],)).fetchone()
-
-    header_parts = [f"📚 {subject}, {teacher}"]
-    if user:
-        tg_info = f"ID: {user['telegram_id']}" if user["telegram_id"] and user["telegram_id"] > 0 else "внесено старостою"
-        status_info = "⛔ Заблокований" if user.get("is_blocked") else "✅ Активний"
-        header_parts.append(f"👤 Обрано: {user['full_name']} [{tg_info}] — {status_info}")
-
-    text = "\n".join(header_parts) + "\n\n" + "\n".join(lines) + "\n\nОберіть дію:"
-    rows = [
-        [("⬆️ Перемістити вище", f"au:{entry_id}"), ("⬇️ Перемістити нижче", f"ad:{entry_id}")],
-        [("🔢 Перемістити на місце…", f"ag:{entry_id}")],
-    ]
-    if user:
-        block_text = "🟢 Розблокувати" if user.get("is_blocked") else "⛔ Заблокувати"
-        rows.append([("✏️ Змінити ім'я", f"an:{entry_id}"), (block_text, f"ab:{entry_id}")])
-    rows.extend([
-        [("✅ Позначити «Здав»", f"ax:{entry_id}")],
-        [("❌ Видалити з черги", f"ar:{entry_id}")],
-        [("📋 До списку", f"go:order:{session['id']}")],
-    ])
-    return text, make_keyboard(rows)
-
-
-@router.callback_query(F.data.startswith("ae:"))
-async def open_entry(callback: CallbackQuery, conn, subjects):
-    await show(callback, *entry_screen(conn, subjects, int(arg(callback))))
-
-
-@router.callback_query(F.data.startswith("au:"))
-async def entry_up(callback: CallbackQuery, conn, subjects):
-    entry_id = int(arg(callback))
-    queues.move_up(conn, callback.from_user.id, entry_id)
-    await show(callback, *entry_screen(conn, subjects, entry_id))
-
-
-@router.callback_query(F.data.startswith("ad:"))
-async def entry_down(callback: CallbackQuery, conn, subjects):
-    entry_id = int(arg(callback))
-    queues.move_down(conn, callback.from_user.id, entry_id)
-    await show(callback, *entry_screen(conn, subjects, entry_id))
-
-
-@router.callback_query(F.data.startswith("ag:"))
-async def ask_position(callback: CallbackQuery, state: FSMContext, conn):
-    entry_id = int(arg(callback))
-    entry = queues.get_entry(conn, entry_id)
-    if entry is None or entry["status"] != "active":
-        raise BotError("Запис не знайдено або він уже неактивний.")
-    await state.set_state(MoveTo.position)
-    await state.update_data(entry_id=entry_id)
-    await show(callback, f"Введіть нову позицію для студента (1–100):\n"
-               f"Якщо вказати номер більший за поточний список — перед ним утворяться вільні місця.",
-               make_keyboard([[("Скасувати", f"ae:{entry_id}")]]))
-
-
-@router.message(MoveTo.position, F.text)
-async def move_to_position(message: Message, state: FSMContext, conn, subjects):
-    if not message.text.strip().isdigit():
-        await message.answer("Введіть число, наприклад 3:")
+    raw = message.text[2:].strip()
+    match = re.match(r"^(\d+)[\.\)\-\s]+(.+)$", raw)
+    entry = None
+    if match:
+        pos = int(match.group(1))
+        for e in entries:
+            if e["position"] == pos:
+                entry = e
+                break
+    if not entry:
+        for e in entries:
+            if e["full_name"] and e["full_name"] in raw:
+                entry = e
+                break
+    if not entry:
+        await message.answer("Не вдалося знайти запис. Оберіть зі списку на кнопках внизу 👇")
         return
-    entry_id = (await state.get_data())["entry_id"]
-    try:
-        queues.move_entry(conn, message.from_user.id, entry_id, int(message.text))
-    except BotError as error:
-        await message.answer(f"{error}\nСпробуйте ще раз:")
+
+    await state.set_state(AdminOrderState.managing_entry)
+    await state.update_data(session_id=session_id, entry_id=entry["id"])
+    await open_admin_student_manager(message, conn, subjects, entry["id"])
+
+
+@router.message(F.text == "🔙 До списку студентів", StateFilter("*"))
+async def back_to_students_list(message: Message, state: FSMContext, conn, subjects):
+    data = await state.get_data()
+    session_id = data.get("session_id")
+    if not session_id:
+        await admin_panel_open(message, state)
         return
-    await state.clear()
-    text, markup = entry_screen(conn, subjects, entry_id)
-    await message.answer(text, reply_markup=markup)
+    await state.set_state(AdminOrderState.picking_student)
+    await state.update_data(session_id=session_id)
+    await open_admin_student_list(message, conn, subjects, session_id)
 
 
-# ---------- Зміна імені студента старостою ----------
+# ---------- Дії над обраним студентом (Нижні кнопки) ----------
 
-@router.callback_query(F.data.startswith("an:"))
-async def ask_rename_student(callback: CallbackQuery, state: FSMContext, conn):
-    entry_id = int(arg(callback))
-    entry = queues.get_entry(conn, entry_id)
-    if entry is None or entry["status"] != "active" or not entry["user_id"]:
-        raise BotError("Запис не знайдено або він уже неактивний.")
-    user = conn.execute("SELECT * FROM users WHERE id = ?", (entry["user_id"],)).fetchone()
-    if not user:
-        raise BotError("Користувача не знайдено.")
-    await state.set_state(AdminRenameStudent.name)
-    await state.update_data(entry_id=entry_id, user_id=user["id"])
-    tg_id = f" (ID: {user['telegram_id']})" if user["telegram_id"] and user["telegram_id"] > 0 else ""
-    await show(
-        callback,
-        f"Введіть нове ім'я для студента «{user['full_name']}»{tg_id}:\n"
-        "Формат: Прізвище Ім'я (наприклад: Шевченко Тарас)",
-        make_keyboard([[("Скасувати", f"ae:{entry_id}")]])
+@router.message(F.text == "⬆️ Вище", StateFilter("*"))
+async def student_move_up(message: Message, state: FSMContext, conn, subjects):
+    data = await state.get_data()
+    entry_id = data.get("entry_id")
+    if not entry_id:
+        raise BotError("Студента не обрано.")
+    queues.move_up(conn, message.from_user.id, entry_id)
+    await open_admin_student_manager(message, conn, subjects, entry_id, note="⬆️ Переміщено вище.")
+
+
+@router.message(F.text == "⬇️ Нижче", StateFilter("*"))
+async def student_move_down(message: Message, state: FSMContext, conn, subjects):
+    data = await state.get_data()
+    entry_id = data.get("entry_id")
+    if not entry_id:
+        raise BotError("Студента не обрано.")
+    queues.move_down(conn, message.from_user.id, entry_id)
+    await open_admin_student_manager(message, conn, subjects, entry_id, note="⬇️ Переміщено нижче.")
+
+
+@router.message(F.text == "🔢 Задати номер", StateFilter("*"))
+async def student_ask_number(message: Message, state: FSMContext):
+    data = await state.get_data()
+    entry_id = data.get("entry_id")
+    if not entry_id:
+        raise BotError("Студента не обрано.")
+    await state.set_state(AdminOrderState.entering_number)
+    await message.answer(
+        "Введіть бажаний номер для студента (1–100):\n"
+        "Якщо номер більший за поточний список — перед ним утворяться вільні місця.",
+        reply_markup=make_reply_keyboard([["🔙 Скасувати"]]),
     )
 
 
-@router.message(AdminRenameStudent.name, F.text)
-async def receive_student_new_name(message: Message, state: FSMContext, conn, subjects):
+@router.message(AdminOrderState.entering_number, F.text)
+async def student_receive_number(message: Message, state: FSMContext, conn, subjects):
     data = await state.get_data()
-    entry_id = data["entry_id"]
-    user_id = data["user_id"]
+    entry_id = data.get("entry_id")
+    if message.text == "🔙 Скасувати":
+        await state.set_state(AdminOrderState.managing_entry)
+        await open_admin_student_manager(message, conn, subjects, entry_id)
+        return
+    if not message.text.strip().isdigit():
+        await message.answer("Введіть число або натисніть «🔙 Скасувати»:")
+        return
+    pos = int(message.text.strip())
+    try:
+        queues.move_entry(conn, message.from_user.id, entry_id, pos)
+    except BotError as err:
+        await message.answer(f"{err}\nСпробуйте ще раз:")
+        return
+    await state.set_state(AdminOrderState.managing_entry)
+    await open_admin_student_manager(message, conn, subjects, entry_id, note=f"🔢 Позицію змінено на {pos}.")
+
+
+@router.message(F.text == "✏️ Змінити ім'я", StateFilter("*"))
+async def student_ask_rename(message: Message, state: FSMContext, conn):
+    data = await state.get_data()
+    entry_id = data.get("entry_id")
+    if not entry_id:
+        raise BotError("Студента не обрано.")
+    entry = queues.get_entry(conn, entry_id)
+    user = conn.execute("SELECT * FROM users WHERE id = ?", (entry["user_id"],)).fetchone() if entry["user_id"] else None
+    if not user:
+        raise BotError("Користувача не знайдено.")
+    await state.set_state(AdminOrderState.entering_name)
+    await state.update_data(user_id=user["id"])
+    await message.answer(
+        f"Введіть нове ПІБ для студента «{user['full_name']}» (наприклад: Шевченко Тарас):",
+        reply_markup=make_reply_keyboard([["🔙 Скасувати"]]),
+    )
+
+
+@router.message(AdminOrderState.entering_name, F.text)
+async def student_receive_rename(message: Message, state: FSMContext, conn, subjects):
+    data = await state.get_data()
+    entry_id = data.get("entry_id")
+    user_id = data.get("user_id")
+    if message.text == "🔙 Скасувати":
+        await state.set_state(AdminOrderState.managing_entry)
+        await open_admin_student_manager(message, conn, subjects, entry_id)
+        return
     new_name = message.text.strip()
     try:
         updated_user = users.admin_rename_user(conn, user_id, new_name)
-    except BotError as error:
-        await message.answer(f"{error}\nСпробуйте ще раз:")
+    except BotError as err:
+        await message.answer(f"{err}\nСпробуйте ще раз:")
         return
-    await state.clear()
-    await message.answer(f"✅ Ім'я змінено на «{updated_user['full_name']}».")
-    try:
-        text, markup = entry_screen(conn, subjects, entry_id)
-        await message.answer(text, reply_markup=markup)
-    except BotError:
-        await message.answer("Адмін-панель:", reply_markup=panel_keyboard())
+    await state.set_state(AdminOrderState.managing_entry)
+    await open_admin_student_manager(message, conn, subjects, entry_id, note=f"✅ Ім'я змінено на «{updated_user['full_name']}».")
 
 
-# ---------- Блокування / розблокування студента ----------
-
-@router.callback_query(F.data.startswith("ab:"))
-async def toggle_block_student(callback: CallbackQuery, conn, subjects):
-    entry_id = int(arg(callback))
+@router.message(F.text.in_({"⛔ Заблокувати", "🟢 Розблокувати"}), StateFilter("*"))
+async def student_toggle_block(message: Message, state: FSMContext, conn, subjects):
+    data = await state.get_data()
+    entry_id = data.get("entry_id")
+    session_id = data.get("session_id")
+    if not entry_id:
+        raise BotError("Студента не обрано.")
     entry = queues.get_entry(conn, entry_id)
-    if entry is None or entry["status"] != "active" or not entry["user_id"]:
-        raise BotError("Запис не знайдено або він уже неактивний.")
-    user = conn.execute("SELECT * FROM users WHERE id = ?", (entry["user_id"],)).fetchone()
+    user = conn.execute("SELECT * FROM users WHERE id = ?", (entry["user_id"],)).fetchone() if entry["user_id"] else None
     if not user:
         raise BotError("Користувача не знайдено.")
-
-    new_blocked_state = users.toggle_block_user(conn, user["id"])
-    tg_id_str = f" [ID: {user['telegram_id']}]" if user["telegram_id"] and user["telegram_id"] > 0 else ""
-    if new_blocked_state:
-        queues.remove_user_from_all_queues(conn, callback.from_user.id, user["id"])
-        await show(
-            callback,
-            f"⛔ Студента «{user['full_name']}»{tg_id_str} заблоковано та видалено з усіх черг.\n"
-            "Він більше не зможе записуватися в черги.",
-            make_keyboard([
-                [("До списку студентів", f"go:order:{entry['session_id']}")],
-                BACK_TO_PANEL[0]
-            ])
+    new_state = users.toggle_block_user(conn, user["id"])
+    if new_state:
+        queues.remove_user_from_all_queues(conn, message.from_user.id, user["id"])
+        await state.set_state(AdminOrderState.picking_student)
+        await open_admin_student_list(
+            message, conn, subjects, session_id,
+            note=f"⛔ Студента «{user['full_name']}» заблоковано та знято з усіх черг.",
         )
     else:
-        await show(
-            callback,
-            f"🟢 Студента «{user['full_name']}»{tg_id_str} розблоковано.",
-            make_keyboard([
-                [("Назад до студента", f"ae:{entry_id}")],
-                BACK_TO_PANEL[0]
-            ])
+        await open_admin_student_manager(
+            message, conn, subjects, entry_id,
+            note=f"🟢 Студента «{user['full_name']}» розблоковано.",
         )
 
 
-@router.callback_query(F.data.startswith("ax:"))
-async def ask_done(callback: CallbackQuery, conn):
-    entry_id = int(arg(callback))
-    await show(callback, "Позначити студента як такого, що здав роботу? Він зникне з активної черги.",
-               make_keyboard([[("Так, здав", f"axy:{entry_id}")], [("Скасувати", f"ae:{entry_id}")]]))
+@router.message(F.text == "✅ Позначити «Здав»", StateFilter("*"))
+async def student_mark_passed_by_admin(message: Message, state: FSMContext, conn, subjects):
+    data = await state.get_data()
+    entry_id = data.get("entry_id")
+    session_id = data.get("session_id")
+    if not entry_id:
+        raise BotError("Студента не обрано.")
+    queues.mark_done(conn, message.from_user.id, entry_id)
+    await state.set_state(AdminOrderState.picking_student)
+    await open_admin_student_list(message, conn, subjects, session_id, note="✅ Позначено: здав! Запис видалено з черги.")
 
 
-@router.callback_query(F.data.startswith("axy:"))
-async def confirm_done(callback: CallbackQuery, conn, subjects):
-    entry_id = int(arg(callback))
-    session_id = queues.get_entry(conn, entry_id)["session_id"]
-    queues.mark_done(conn, callback.from_user.id, entry_id)
-    await show_student_list(callback, conn, subjects, session_id)
+@router.message(F.text == "❌ Видалити з черги", StateFilter("*"))
+async def student_remove_by_admin(message: Message, state: FSMContext, conn, subjects):
+    data = await state.get_data()
+    entry_id = data.get("entry_id")
+    session_id = data.get("session_id")
+    if not entry_id:
+        raise BotError("Студента не обрано.")
+    queues.remove_entry(conn, message.from_user.id, entry_id)
+    await state.set_state(AdminOrderState.picking_student)
+    await open_admin_student_list(message, conn, subjects, session_id, note="❌ Запис видалено з черги.")
 
 
-@router.callback_query(F.data.startswith("ar:"))
-async def ask_remove(callback: CallbackQuery):
-    entry_id = int(arg(callback))
-    await show(callback, "Видалити запис з черги? Дію не можна скасувати.",
-               make_keyboard([[("Так, видалити", f"ary:{entry_id}")], [("Скасувати", f"ae:{entry_id}")]]))
+# ---------- Завершення та архівування черги ----------
 
-
-@router.callback_query(F.data.startswith("ary:"))
-async def confirm_remove(callback: CallbackQuery, conn, subjects):
-    entry_id = int(arg(callback))
-    session_id = queues.get_entry(conn, entry_id)["session_id"]
-    queues.remove_entry(conn, callback.from_user.id, entry_id)
-    await show_student_list(callback, conn, subjects, session_id)
-
-
-# ---------- Завершення заняття ----------
-
-async def show_finish_menu(callback, conn, subjects, session_id: int):
+@router.message(F.text == "📦 Завершити чергу", StateFilter("*"))
+async def ask_finish_queue(message: Message, state: FSMContext, conn, subjects):
+    data = await state.get_data()
+    session_id = data.get("session_id")
+    if not session_id:
+        raise BotError("Чергу не обрано.")
     session = get_open_session(conn, session_id)
-    await show(callback, f"Завершити заняття?\n{queue_label(subjects, session)}", make_keyboard([
-        [("Завершити й архівувати", f"fx:a:{session_id}")],
-        [("Створити нову чергу", f"fx:n:{session_id}")],
-        [("Створити нову чергу з перенесенням студентів", f"fc:{session_id}")],
-        [("Скасувати", "admin")],
-    ]))
-
-
-@router.callback_query(F.data.startswith("fx:"))
-async def ask_finish(callback: CallbackQuery, conn):
-    mode, session_id = arg(callback), int(arg(callback, 2))
-    get_open_session(conn, session_id)
-    text = ("Архівувати чергу? Усі, хто не здав, залишаться в історії без перенесення."
-            if mode == "a" else
-            "Архівувати чергу й створити нову порожню чергу?")
-    await show(callback, text, make_keyboard([
-        [("Підтвердити", f"fxy:{mode}:{session_id}")], [("Скасувати", "admin")],
-    ]))
-
-
-@router.callback_query(F.data.startswith("fxy:"))
-async def confirm_finish(callback: CallbackQuery, conn):
-    mode, session_id = arg(callback), int(arg(callback, 2))
-    new_id = queues.finish_session(conn, callback.from_user.id, session_id, create_new=mode == "n")
-    text = "Чергу архівовано." if new_id is None else f"Чергу архівовано. Нову чергу створено (№{new_id})."
-    await show(callback, text, make_keyboard([BACK_TO_PANEL]))
-
-
-# ---------- Перенесення студентів ----------
-
-@router.callback_query(F.data.startswith("fc:"))
-async def start_carry_from_menu(callback: CallbackQuery, conn, subjects, state: FSMContext):
-    await start_carry(callback, conn, subjects, state, int(arg(callback)))
-
-
-async def start_carry(callback, conn, subjects, state: FSMContext, session_id: int):
-    get_open_session(conn, session_id)
-    await state.set_state(Carry.selecting)
-    await state.update_data(session_id=session_id, selected=[], assigned={})
-    await show_carry_selection(callback, conn, state)
-
-
-async def show_carry_selection(callback, conn, state: FSMContext):
-    data = await state.get_data()
-    entries = [e for e in queues.get_entries(conn, data["session_id"]) if e["user_id"]]
     rows = [
-        [(("✅ " if e["id"] in data["selected"] else "") + format_entry(e), f"cs:{e['id']}")]
-        for e in entries
+        ["📦 Завершити й архівувати"],
+        ["📦 Нова черга (порожня)"],
+        ["🔙 Назад до черги"],
     ]
-    rows += [[("Далі", "cn")], [("Скасувати", "admin")]]
-    await show(callback, "Оберіть студентів, яких потрібно перенести на наступне заняття:",
-               make_keyboard(rows))
-
-
-@router.callback_query(Carry.selecting, F.data.startswith("cs:"))
-async def toggle_carry(callback: CallbackQuery, conn, state: FSMContext):
-    entry_id = int(arg(callback))
-    selected = (await state.get_data())["selected"]
-    selected = [i for i in selected if i != entry_id] if entry_id in selected else selected + [entry_id]
-    await state.update_data(selected=selected)
-    await show_carry_selection(callback, conn, state)
-
-
-@router.callback_query(Carry.selecting, F.data == "cn")
-async def carry_next(callback: CallbackQuery, conn, state: FSMContext):
-    if not (await state.get_data())["selected"]:
-        raise BotError("Оберіть хоча б одного студента.")
-    await state.set_state(Carry.positions)
-    await ask_next_position(callback.bot, callback.from_user.id, conn, state)
-
-
-def student_name(conn, session_id: int, entry_id: int) -> str:
-    entries = queues.get_entries(conn, session_id)
-    return next(e["full_name"] for e in entries if e["id"] == entry_id)
-
-
-async def ask_next_position(bot, chat_id: int, conn, state: FSMContext):
-    data = await state.get_data()
-    pending = [i for i in data["selected"] if str(i) not in data["assigned"]]
-    if not pending:
-        await show_carry_preview(bot, chat_id, conn, state)
-        return
-    name = student_name(conn, data["session_id"], pending[0])
-    await bot.send_message(
-        chat_id,
-        f"Введіть позицію для «{name}» у новій черзі (1–{MAX_POSITION}).\n"
-        "Вільні місця між перенесеними залишаться для нових студентів.",
-        reply_markup=make_keyboard([[("Скасувати", "admin")]]),
+    await message.answer(
+        f"Завершити заняття?\n{queue_label(subjects, session)}\n\nОберіть дію на кнопках внизу 👇",
+        reply_markup=make_reply_keyboard(rows),
     )
 
 
-@router.message(Carry.positions, F.text)
-async def receive_position(message: Message, conn, state: FSMContext):
-    text = message.text.strip()
+@router.message(F.text == "📦 Завершити й архівувати", StateFilter("*"))
+async def confirm_finish_archive(message: Message, state: FSMContext, conn):
     data = await state.get_data()
-    if not text.isdigit() or not 1 <= int(text) <= MAX_POSITION:
-        await message.answer(f"Введіть число від 1 до {MAX_POSITION}:")
-        return
-    if int(text) in data["assigned"].values():
-        await message.answer("Ця позиція вже зайнята іншим перенесеним студентом. Оберіть іншу:")
-        return
-    pending = [i for i in data["selected"] if str(i) not in data["assigned"]]
-    data["assigned"][str(pending[0])] = int(text)  # ключі JSON-сховища — рядки
-    await state.update_data(assigned=data["assigned"])
-    await ask_next_position(message.bot, message.chat.id, conn, state)
-
-
-async def show_carry_preview(bot, chat_id: int, conn, state: FSMContext):
-    data = await state.get_data()
-    by_position = {pos: int(eid) for eid, pos in data["assigned"].items()}
-    lines = []
-    for position in range(1, max(by_position) + 1):
-        entry_id = by_position.get(position)
-        name = student_name(conn, data["session_id"], entry_id) if entry_id else "Новий студент"
-        lines.append(f"{position}. {name}")
-    await bot.send_message(
-        chat_id,
-        "Нова черга буде такою:\n" + "\n".join(lines) + "\n\nАрхівувати стару чергу й створити нову?",
-        reply_markup=make_keyboard([[("Підтвердити", "cy")], [("Скасувати", "admin")]]),
-    )
-
-
-@router.callback_query(Carry.positions, F.data == "cy")
-async def confirm_carry(callback: CallbackQuery, conn, state: FSMContext):
-    data = await state.get_data()
-    carry = {int(eid): pos for eid, pos in data["assigned"].items()}
-    new_id = queues.finish_session(
-        conn, callback.from_user.id, data["session_id"], create_new=True, carry=carry
-    )
+    session_id = data.get("session_id")
+    queues.finish_session(conn, message.from_user.id, session_id, create_new=False)
     await state.clear()
-    await show(callback, f"Готово. Стару чергу архівовано, нову створено (№{new_id}).",
-               make_keyboard([[("Відкрити нову чергу", f"go:view:{new_id}")], BACK_TO_PANEL]))
+    await message.answer("✅ Чергу успішно архівовано.", reply_markup=get_admin_reply_menu())
 
 
-# ---------- Історія ----------
+@router.message(F.text == "📦 Нова черга (порожня)", StateFilter("*"))
+async def confirm_finish_new(message: Message, state: FSMContext, conn, subjects):
+    data = await state.get_data()
+    session_id = data.get("session_id")
+    new_id = queues.finish_session(conn, message.from_user.id, session_id, create_new=True)
+    await state.clear()
+    await state.update_data(session_id=new_id)
+    await open_admin_queue_manager(message, conn, subjects, new_id, note=f"✅ Чергу архівовано. Нову чергу створено (№{new_id})!")
 
-@router.message(F.text == "📦 Історія черг")
-@router.callback_query(F.data == "ah")
-async def history_list(event, conn, subjects):
+
+# ---------- Історія черг ----------
+
+@router.message(F.text.in_({"📦 Історія черг", "🔙 До списку історії"}), StateFilter("*"))
+async def history_list(message: Message, state: FSMContext, conn, subjects):
+    await state.clear()
     sessions = queues.list_sessions(conn, ("archived",))[:15]
     if not sessions:
-        text = "Історія порожня."
-        if isinstance(event, Message):
-            await event.answer(text)
-        else:
-            await show(event, text)
+        await message.answer("Історія порожня.", reply_markup=get_admin_reply_menu())
         return
-    rows = [[(f"№{s['id']} {queue_label(subjects, s)} ({s['closed_at'][:10]})", f"ahs:{s['id']}")]
-            for s in sessions]
-    if isinstance(event, Message):
-        await event.answer("Історія черг:", reply_markup=make_keyboard(rows))
-    else:
-        await show(event, "Історія черг:", make_keyboard(rows))
+    rows = [[f"📦 №{s['id']} {queue_label(subjects, s)}"] for s in sessions]
+    rows.append(["🔙 В адмін-панель", "🏠 Головне меню"])
+    await state.set_state(AdminManageState.history_view)
+    await message.answer("Історія черг. Оберіть чергу для перегляду деталей 👇", reply_markup=make_reply_keyboard(rows))
 
 
-HISTORY_MARK = {"completed": "✅ здав", "transferred": "↪ перенесено", "removed": "✖ не здав / видалено",
-                "left": "вийшов із черги"}
+HISTORY_MARK = {
+    "completed": "✅ здав",
+    "transferred": "↪ перенесено",
+    "removed": "✖ не здав / видалено",
+    "left": "вийшов із черги",
+}
 
 
-@router.callback_query(F.data.startswith("ahs:"))
-async def history_details(callback: CallbackQuery, conn, subjects):
-    session = queues.get_session(conn, int(arg(callback)))
-    if session is None:
+@router.message(AdminManageState.history_view, F.text.startswith("📦 №"))
+async def history_details_view(message: Message, state: FSMContext, conn, subjects):
+    match = re.match(r"^📦 №(\d+)", message.text)
+    if not match:
+        return
+    session_id = int(match.group(1))
+    session = queues.get_session(conn, session_id)
+    if not session:
         raise BotError("Чергу не знайдено.")
-    lines = [f"{r['full_name']} — {HISTORY_MARK[r['status']]}" for r in queues.get_history(conn, session["id"])]
+    lines = [f"{r['full_name']} — {HISTORY_MARK.get(r['status'], r['status'])}" for r in queues.get_history(conn, session_id)]
     header = format_queue(subjects, session, [])
     body = "\n".join(lines) or "Записів немає."
-    await show(callback, header.replace("Черга порожня.", "") + body, make_keyboard([[("Назад", "ah")]]))
-
-
-# ---------- Керування адміністраторами ----------
-
-@router.message(F.text == "👥 Адміністратори")
-@router.callback_query(F.data == "adm")
-async def admins_menu(event):
-    rows = [
-        [("Список адміністраторів", "adl")],
-        [("Додати адміністратора", "ada")],
-        [("Видалити адміністратора", "adr")],
-    ]
-    if isinstance(event, Message):
-        await event.answer("Керування адміністраторами:", reply_markup=make_keyboard(rows))
-    else:
-        await show(event, "Керування адміністраторами:", make_keyboard(rows))
-
-
-def admin_label(row) -> str:
-    return f"{row['full_name'] or 'без реєстрації'} ({row['telegram_id']})"
-
-
-@router.callback_query(F.data == "adl")
-async def admins_list(callback: CallbackQuery, conn):
-    text = "Адміністратори:\n" + "\n".join(admin_label(r) for r in admins.list_admins(conn))
-    await show(callback, text, make_keyboard([[("Назад", "adm")]]))
-
-
-@router.callback_query(F.data == "ada")
-async def ask_admin_id(callback: CallbackQuery, state: FSMContext):
-    await state.set_state(AddAdmin.telegram_id)
-    await show(callback, "Введіть числовий Telegram ID нового адміністратора:",
-               make_keyboard([[("Скасувати", "adm")]]))
-
-
-@router.message(AddAdmin.telegram_id, F.text)
-async def receive_admin_id(message: Message, state: FSMContext, conn):
-    text = message.text.strip()
-    if not text.isdigit() or int(text) <= 0:
-        await message.answer("Telegram ID — це число. Спробуйте ще раз:")
-        return
-    if admins.is_admin(conn, int(text)):
-        await message.answer("Цей користувач уже є адміністратором. Введіть інший ID:")
-        return
-    await state.clear()
-    await message.answer(f"Додати адміністратора з ID {text}?", reply_markup=make_keyboard([
-        [("Підтвердити", f"ady:{text}")], [("Скасувати", "adm")],
-    ]))
-
-
-@router.callback_query(F.data.startswith("ady:"))
-async def confirm_add_admin(callback: CallbackQuery, conn):
-    admins.add_admin(conn, callback.from_user.id, int(arg(callback)))
-    await show(callback, "Адміністратора додано.", make_keyboard([[("Назад", "adm")]]))
-
-
-@router.callback_query(F.data == "adr")
-async def choose_admin_to_remove(callback: CallbackQuery, conn):
-    rows = [[(admin_label(r), f"adx:{r['telegram_id']}")] for r in admins.list_admins(conn)]
-    await show(callback, "Кого видалити з адміністраторів?", make_keyboard(rows + [[("Назад", "adm")]]))
-
-
-@router.callback_query(F.data.startswith("adx:"))
-async def ask_remove_admin(callback: CallbackQuery):
-    target = int(arg(callback))
-    await show(callback, f"Забрати права адміністратора в {target}?", make_keyboard([
-        [("Так, видалити", f"adxy:{target}")], [("Скасувати", "adm")],
-    ]))
-
-
-@router.callback_query(F.data.startswith("adxy:"))
-async def confirm_remove_admin(callback: CallbackQuery, conn):
-    admins.remove_admin(conn, callback.from_user.id, int(arg(callback)))
-    await show(callback, "Права адміністратора видалено.", make_keyboard([[("Назад", "adm")]]))
+    text = header.replace("Черга порожня.", "") + body
+    rows = [["🔙 До списку історії", "🔙 В адмін-панель"]]
+    await message.answer(text, reply_markup=make_reply_keyboard(rows))
 
 
 # ---------- Заблоковані студенти ----------
 
-@router.message(F.text == "⛔ Заблоковані")
-@router.callback_query(F.data == "blist")
-async def show_blocked_list(event, conn):
+@router.message(F.text == "⛔ Заблоковані", StateFilter("*"))
+async def show_blocked_list(message: Message, state: FSMContext, conn):
+    await state.clear()
     blocked = users.list_blocked_users(conn)
     if not blocked:
-        text = "Заблокованих користувачів немає."
-        if isinstance(event, Message):
-            await event.answer(text)
-        else:
-            await show(event, text)
+        await message.answer("Заблокованих користувачів немає.", reply_markup=get_admin_reply_menu())
         return
     rows = []
     for u in blocked:
-        tg_id_str = f" [ID: {u['telegram_id']}]" if u["telegram_id"] and u["telegram_id"] > 0 else ""
-        rows.append([(f"🟢 Розблокувати {u['full_name']}{tg_id_str}", f"unblock:{u['id']}")])
-    text = "⛔ Список заблокованих користувачів:\nНатисніть на студента, щоб розблокувати:"
-    if isinstance(event, Message):
-        await event.answer(text, reply_markup=make_keyboard(rows))
-    else:
-        await show(event, text, make_keyboard(rows))
-
-
-@router.callback_query(F.data.startswith("unblock:"))
-async def unblock_user_handler(callback: CallbackQuery, conn):
-    user_id = int(arg(callback))
-    users.toggle_block_user(conn, user_id)
-    user = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
-    name = user["full_name"] if user else f"ID {user_id}"
-    await show(
-        callback,
-        f"🟢 Студента «{name}» успішно розблоковано.",
-        make_keyboard([[("Список заблокованих", "blist")], BACK_TO_PANEL[0]])
+        tg_id_str = f" (ID: {u['telegram_id']})" if u["telegram_id"] and u["telegram_id"] > 0 else ""
+        rows.append([f"🟢 Розблокувати: {u['full_name']}{tg_id_str}"])
+    rows.append(["🔙 В адмін-панель", "🏠 Головне меню"])
+    await message.answer(
+        "⛔ **Список заблокованих користувачів:**\nНатисніть на кнопку студента внизу, щоб розблокувати його 👇",
+        reply_markup=make_reply_keyboard(rows),
     )
 
+
+@router.message(F.text.startswith("🟢 Розблокувати: "), StateFilter("*"))
+async def unblock_student_click(message: Message, state: FSMContext, conn):
+    raw = message.text.replace("🟢 Розблокувати: ", "").strip()
+    match = re.search(r"\(ID: (\d+)\)", raw)
+    user = None
+    if match:
+        tg_id = int(match.group(1))
+        user = users.get_user(conn, tg_id)
+    if not user:
+        name = re.sub(r"\(ID: \d+\)", "", raw).strip()
+        user = conn.execute("SELECT * FROM users WHERE full_name = ? AND is_blocked = TRUE", (name,)).fetchone()
+    if not user:
+        raise BotError("Студента не знайдено.")
+    users.toggle_block_user(conn, user["id"])
+    await message.answer(f"🟢 Студента «{user['full_name']}» успішно розблоковано!")
+    await show_blocked_list(message, state, conn)
+
+
+# ---------- Керування адміністраторами ----------
+
+@router.message(F.text == "👥 Адміністратори", StateFilter("*"))
+async def admins_menu(message: Message, state: FSMContext):
+    await state.clear()
+    rows = [
+        ["📋 Список адміністраторів", "➕ Додати адміністратора"],
+        ["❌ Видалити адміністратора", "🔙 В адмін-панель"],
+    ]
+    await message.answer("Керування адміністраторами. Оберіть дію на кнопках внизу 👇", reply_markup=make_reply_keyboard(rows))
+
+
+@router.message(F.text == "📋 Список адміністраторів", StateFilter("*"))
+async def list_admins_message(message: Message, conn):
+    adm_list = admins.list_admins(conn)
+    lines = ["👥 **Адміністратори:**"]
+    for r in adm_list:
+        name = r["full_name"] or "без реєстрації"
+        lines.append(f"• {name} (`{r['telegram_id']}`)")
+    rows = [
+        ["➕ Додати адміністратора", "❌ Видалити адміністратора"],
+        ["🔙 В адмін-панель", "🏠 Головне меню"],
+    ]
+    await message.answer("\n".join(lines), reply_markup=make_reply_keyboard(rows))
+
+
+@router.message(F.text == "➕ Додати адміністратора", StateFilter("*"))
+async def ask_admin_id(message: Message, state: FSMContext):
+    await state.set_state(AdminManageState.add_admin_id)
+    rows = [["🔙 Скасувати", "🔙 В адмін-панель"]]
+    await message.answer("Введіть числовий Telegram ID нового адміністратора:", reply_markup=make_reply_keyboard(rows))
+
+
+@router.message(AdminManageState.add_admin_id, F.text)
+async def receive_admin_id(message: Message, state: FSMContext, conn):
+    if message.text in {"🔙 Скасувати", "🔙 В адмін-панель"}:
+        await admins_menu(message, state)
+        return
+    text = message.text.strip()
+    if not text.isdigit() or int(text) <= 0:
+        await message.answer("Telegram ID — це число. Спробуйте ще раз або натисніть «🔙 Скасувати»:")
+        return
+    new_admin_id = int(text)
+    if admins.is_admin(conn, new_admin_id):
+        await message.answer("Цей користувач уже є адміністратором. Введіть інший ID:")
+        return
+    admins.add_admin(conn, message.from_user.id, new_admin_id)
+    await state.clear()
+    await message.answer(f"✅ Адміністратора з ID `{new_admin_id}` успішно додано!")
+    await list_admins_message(message, conn)
+
+
+@router.message(F.text == "❌ Видалити адміністратора", StateFilter("*"))
+async def choose_admin_to_remove(message: Message, state: FSMContext, conn):
+    adm_list = admins.list_admins(conn)
+    rows = []
+    for r in adm_list:
+        if r["telegram_id"] == message.from_user.id:
+            continue  # Не можна видалити самого себе
+        name = r["full_name"] or "без реєстрації"
+        rows.append([f"❌ Видалити: {name} ({r['telegram_id']})"])
+    rows.append(["🔙 Скасувати", "🔙 В адмін-панель"])
+    await state.set_state(AdminManageState.select_admin_to_remove)
+    await message.answer("Оберіть адміністратора для видалення на кнопках внизу 👇", reply_markup=make_reply_keyboard(rows))
+
+
+@router.message(AdminManageState.select_admin_to_remove, F.text.startswith("❌ Видалити: "))
+async def confirm_remove_admin_text(message: Message, state: FSMContext, conn):
+    match = re.search(r"\((\d+)\)$", message.text)
+    if not match:
+        return
+    target_id = int(match.group(1))
+    admins.remove_admin(conn, message.from_user.id, target_id)
+    await state.clear()
+    await message.answer(f"✅ Права адміністратора для ID `{target_id}` видалено.")
+    await list_admins_message(message, conn)

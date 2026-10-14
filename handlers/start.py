@@ -40,7 +40,7 @@ def main_menu(conn, telegram_id: int):
 
 
 
-@router.message(Command("start"))
+@router.message(Command("start"), StateFilter("*"))
 async def start(message: Message, state: FSMContext, conn):
     await state.clear()
     if users.get_user(conn, message.from_user.id):
@@ -70,7 +70,7 @@ async def register(message: Message, state: FSMContext, conn):
     )
 
 
-@router.message(F.text == "🏠 Головне меню")
+@router.message(F.text == "🏠 Головне меню", StateFilter("*"))
 async def reply_main_menu(message: Message, state: FSMContext, conn):
     await state.clear()
     if not users.get_user(conn, message.from_user.id):

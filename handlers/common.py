@@ -12,7 +12,7 @@ from aiogram.types import (
     ReplyKeyboardMarkup,
 )
 
-from services import admins
+from services import admins, queues
 from services.errors import BotError
 from subjects import find_subject, find_teacher
 
@@ -25,6 +25,14 @@ def make_keyboard(rows: list[list[tuple[str, str]]]) -> InlineKeyboardMarkup:
     """rows: [[(текст кнопки, callback_data), ...], ...]"""
     return InlineKeyboardMarkup(
         inline_keyboard=[[InlineKeyboardButton(text=t, callback_data=d) for t, d in row] for row in rows]
+    )
+
+
+def make_reply_keyboard(rows: list[list[str]]) -> ReplyKeyboardMarkup:
+    """Створює нижню клавіатуру зі списку рядків кнопок."""
+    return ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text=t) for t in row] for row in rows],
+        resize_keyboard=True,
     )
 
 
@@ -50,6 +58,55 @@ def get_admin_reply_menu() -> ReplyKeyboardMarkup:
         [KeyboardButton(text="👥 Адміністратори"), KeyboardButton(text="🏠 Головне меню")],
     ]
     return ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True)
+
+
+def get_queues_reply_menu(sessions: list, subjects: list[dict], back_text: str = "🏠 Головне меню") -> ReplyKeyboardMarkup:
+    """Нижня клавіатура зі списком черг."""
+    rows = []
+    for s in sessions:
+        rows.append([f"📋 {queue_label(subjects, s)}"])
+    rows.append(["🔄 Оновити список"])
+    rows.append([back_text])
+    return make_reply_keyboard(rows)
+
+
+def get_queue_view_reply_menu(conn, session_id: int, telegram_id: int, is_open: bool = True) -> ReplyKeyboardMarkup:
+    """Нижня клавіатура під час перегляду черги."""
+    is_in_queue = queues.get_user_position(conn, telegram_id, session_id) is not None
+    is_adm = admins.is_admin(conn, telegram_id)
+    rows = []
+    if is_in_queue:
+        rows.append(["🔄 Помінятися місцем", "📍 Моє місце"])
+        rows.append(["✅ Здав", "❌ Не здав"])
+        rows.append(["🚪 Покинути чергу", "🔄 Оновити"])
+    else:
+        if is_open:
+            rows.append(["📝 Записатися в чергу", "🔄 Оновити"])
+        else:
+            rows.append(["🔄 Оновити"])
+
+    if is_adm:
+        rows.append(["⚡ Керувати цією чергою"])
+
+    rows.append(["🔙 До списку черг", "🏠 Головне меню"])
+    return make_reply_keyboard(rows)
+
+
+def find_session_by_label(conn, subjects: list[dict], text: str):
+    """Знаходить сесію черги за текстом кнопки або назвою."""
+    cleaned = text.strip()
+    if cleaned.startswith("📋 "):
+        cleaned = cleaned[3:].strip()
+    elif cleaned.startswith("⚡ "):
+        cleaned = cleaned[3:].strip()
+    sessions = queues.list_sessions(conn, ("open", "closed", "archived"))
+    for s in sessions:
+        lbl = queue_label(subjects, s).strip()
+        cleaned_lbl = lbl.replace(" 🔒", "").strip()
+        cleaned_target = cleaned.replace(" 🔒", "").strip()
+        if cleaned == lbl or cleaned_target == cleaned_lbl or cleaned_target.startswith(cleaned_lbl):
+            return s
+    return None
 
 
 
