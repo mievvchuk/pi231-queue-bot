@@ -319,13 +319,29 @@ def move_entry(conn, actor_id: int, entry_id: int, new_position: int) -> None:
     with transaction(conn):
         require_admin(conn, actor_id)
         entry = _require_active_entry(conn, entry_id)
-        ids = _ordered_ids(conn, entry["session_id"])
-        if not 1 <= new_position <= len(ids):
-            raise BotError(f"Позиція має бути від 1 до {len(ids)}.")
-        ids.remove(entry_id)
-        ids.insert(new_position - 1, entry_id)
-        _set_order(conn, entry["session_id"], ids)
+        session_id = entry["session_id"]
+        if not 1 <= new_position <= 100:
+            raise BotError("Позиція має бути від 1 до 100.")
+        
+        entries = get_entries(conn, session_id)
+        # Якщо нова позиція більша за поточну довжину черги, доповнюємо пустими слотами
+        if new_position > len(entries):
+            for p in range(len(entries) + 1, new_position):
+                conn.execute(
+                    "INSERT INTO queue_entries (session_id, user_id, position) VALUES (?, NULL, ?)",
+                    (session_id, p),
+                )
+            ids = _ordered_ids(conn, session_id)
+            ids.remove(entry_id)
+            ids.append(entry_id)
+        else:
+            ids = _ordered_ids(conn, session_id)
+            ids.remove(entry_id)
+            ids.insert(new_position - 1, entry_id)
+
+        _set_order(conn, session_id, ids)
         log_action(conn, actor_id, "move_entry", f"{entry_id} -> {new_position}")
+
 
 
 def move_up(conn, actor_id: int, entry_id: int) -> None:

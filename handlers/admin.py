@@ -267,11 +267,12 @@ async def ask_position(callback: CallbackQuery, state: FSMContext, conn):
     entry = queues.get_entry(conn, entry_id)
     if entry is None or entry["status"] != "active":
         raise BotError("Запис не знайдено або він уже неактивний.")
-    total = len(queues.get_entries(conn, entry["session_id"]))
     await state.set_state(MoveTo.position)
     await state.update_data(entry_id=entry_id)
-    await show(callback, f"Введіть нову позицію (1–{total}):",
+    await show(callback, f"Введіть нову позицію для студента (1–100):\n"
+               f"Якщо вказати номер більший за поточний список — перед ним утворяться вільні місця.",
                make_keyboard([[("Скасувати", f"ae:{entry_id}")]]))
+
 
 
 @router.message(MoveTo.position, F.text)
