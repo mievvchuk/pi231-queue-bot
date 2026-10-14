@@ -47,6 +47,9 @@ async def main() -> None:
 
     bot = Bot(config.get_bot_token())
     await run_web_server()
+    if getattr(config, "ALERTS_TOKEN", None):
+        from services.alerts import start_alerts_checker
+        asyncio.create_task(start_alerts_checker(bot, conn, config.ALERTS_TOKEN))
     await dp.start_polling(bot)
 
 

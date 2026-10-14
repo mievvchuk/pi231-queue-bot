@@ -19,6 +19,7 @@ DATABASE_URL = os.getenv(
     "postgresql://neondb_owner:npg_LhRQsAB7i0If@ep-morning-base-b9my7fky-pooler.c-7.eu-central-1.aws.neon.tech/neondb?sslmode=require"
 )
 SUBJECTS_PATH = os.getenv("SUBJECTS_PATH", "subjects.json")
+ALERTS_TOKEN = os.getenv("ALERTS_TOKEN", "e99b53d5fed806f150b79df3a19c8293d73cac28ab2203")
 
 
 

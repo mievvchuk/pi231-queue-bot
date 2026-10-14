@@ -155,11 +155,20 @@ def queue_label(subjects: list[dict], session) -> str:
 
 
 def format_queue(subjects: list[dict], session, entries, my_telegram_id: int | None = None, show_id: bool = False) -> str:
+    from services.alerts import get_alert_status
+
+    lines = []
+    if get_alert_status():
+        lines.append("🚨 ПОВІТРЯНА ТРИВОГА У М. ХМЕЛЬНИЦЬКИЙ!")
+        lines.append("Заняття призупинено, чергу збережено до наступної пари.")
+        lines.append("")
+
     subject, teacher = session_names(subjects, session)
-    lines = [subject, teacher]
+    lines.extend([subject, teacher])
     if session["lesson_title"]:
         lines.append(f"Заняття: {session['lesson_title']}")
-    lines.append(f"Статус: {STATUS_TEXT[session['status']]}")
+    status_str = "🚨 тривога (черга збережена)" if get_alert_status() else STATUS_TEXT[session['status']]
+    lines.append(f"Статус: {status_str}")
     lines.append("")
     for row in entries:
         lines.append(format_entry(row, my_telegram_id, show_id=show_id))
