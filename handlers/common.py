@@ -228,3 +228,21 @@ class Guard(BaseMiddleware):
                 await event.bot.send_message(user.id, text)
         except TelegramAPIError:
             log.exception("Cannot deliver error message")
+
+
+async def notify_admins_queue_opened(bot, conn, creator_id: int, creator_name: str, subject_name: str, teacher_name: str) -> None:
+    """Сповіщає всіх адміністраторів про відкриття нової черги."""
+    admin_list = admins.list_admins(conn)
+    text = (
+        f"📢 **Відкрито нову чергу!**\n\n"
+        f"👤 Створив(-ла): **{creator_name}**\n"
+        f"📚 Предмет: **{subject_name}**\n"
+        f"👨‍🏫 Викладач: **{teacher_name}**\n\n"
+        f"Чергу відкрито для запису студентів."
+    )
+    for adm in admin_list:
+        adm_id = adm["telegram_id"]
+        if adm_id == creator_id:
+            continue  # Не дублюємо самому творцю, якщо це адмін
+        with suppress(Exception):
+            await bot.send_message(adm_id, text)

@@ -16,6 +16,7 @@ from handlers.common import (
     get_reply_menu,
     make_keyboard,
     make_reply_keyboard,
+    notify_admins_queue_opened,
     queue_label,
     session_names,
     show,
@@ -561,10 +562,17 @@ async def new_queue_subject_selected(message: Message, state: FSMContext, conn, 
     if not matched_sub:
         return
     if len(matched_sub["teachers"]) == 1:
+        teacher = matched_sub["teachers"][0]
         try:
-            session_id = queues.create_queue(conn, message.from_user.id, matched_sub["id"], matched_sub["teachers"][0]["id"])
+            session_id = queues.create_queue(conn, message.from_user.id, matched_sub["id"], teacher["id"])
             await state.clear()
             await state.update_data(session_id=session_id)
+            user = users.get_user(conn, message.from_user.id)
+            creator_name = user["full_name"] if user else (message.from_user.full_name or "Студент")
+            await notify_admins_queue_opened(
+                message.bot, conn, message.from_user.id, creator_name,
+                matched_sub["name"], teacher["name"]
+            )
             await open_queue_screen(message, conn, subjects, session_id, note="🎉 Чергу успішно створено!")
         except BotError as err:
             await state.clear()
@@ -594,6 +602,12 @@ async def new_queue_teacher_selected(message: Message, state: FSMContext, conn, 
         session_id = queues.create_queue(conn, message.from_user.id, matched_sub["id"], matched_teacher["id"])
         await state.clear()
         await state.update_data(session_id=session_id)
+        user = users.get_user(conn, message.from_user.id)
+        creator_name = user["full_name"] if user else (message.from_user.full_name or "Студент")
+        await notify_admins_queue_opened(
+            message.bot, conn, message.from_user.id, creator_name,
+            matched_sub["name"], matched_teacher["name"]
+        )
         await open_queue_screen(message, conn, subjects, session_id, note="🎉 Чергу успішно створено!")
     except BotError as err:
         await state.clear()
