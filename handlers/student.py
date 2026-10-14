@@ -133,12 +133,17 @@ async def back_to_queues_list(message: Message, state: FSMContext, conn, subject
 
 @router.message(F.text.startswith("📋 "), StateFilter("*"))
 async def select_queue_by_button(message: Message, state: FSMContext, conn, subjects):
-    session = find_session_by_label(conn, subjects, message.text)
-    if not session:
-        return
     current_state = await state.get_state()
     # Якщо адмін обирає чергу в адмін-режимі, пропускаємо до admin.py
     if current_state and current_state.startswith("AdminPanelState"):
+        return
+    session = find_session_by_label(conn, subjects, message.text)
+    if not session:
+        sessions = queues.list_sessions(conn, ("open", "closed"))
+        await message.answer(
+            "⚠️ Чергу не знайдено або її закрито. Оберіть зі списку активних черг 👇",
+            reply_markup=get_queues_reply_menu(sessions, subjects),
+        )
         return
     await state.clear()
     await state.update_data(session_id=session["id"])

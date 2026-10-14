@@ -222,6 +222,7 @@ async def admin_pick_close_queue(message: Message, state: FSMContext, conn, subj
 async def admin_selected_queue_view(message: Message, state: FSMContext, conn, subjects):
     session = find_session_by_label(conn, subjects, message.text)
     if not session:
+        await message.answer("⚠️ Чергу не знайдено. Оберіть зі списку на кнопках внизу 👇")
         return
     await state.clear()
     await state.update_data(session_id=session["id"])
@@ -232,6 +233,7 @@ async def admin_selected_queue_view(message: Message, state: FSMContext, conn, s
 async def admin_selected_queue_add_student(message: Message, state: FSMContext, conn, subjects):
     session = find_session_by_label(conn, subjects, message.text)
     if not session:
+        await message.answer("⚠️ Чергу не знайдено. Оберіть зі списку на кнопках внизу 👇")
         return
     await state.set_state(AdminPanelState.add_student_names)
     await state.update_data(session_id=session["id"])
@@ -249,6 +251,7 @@ async def admin_selected_queue_add_student(message: Message, state: FSMContext, 
 async def admin_selected_queue_order(message: Message, state: FSMContext, conn, subjects):
     session = find_session_by_label(conn, subjects, message.text)
     if not session:
+        await message.answer("⚠️ Чергу не знайдено. Оберіть зі списку на кнопках внизу 👇")
         return
     await state.set_state(AdminOrderState.picking_student)
     await state.update_data(session_id=session["id"])
@@ -259,6 +262,7 @@ async def admin_selected_queue_order(message: Message, state: FSMContext, conn, 
 async def admin_selected_queue_close(message: Message, state: FSMContext, conn, subjects):
     session = find_session_by_label(conn, subjects, message.text)
     if not session:
+        await message.answer("⚠️ Чергу не знайдено. Оберіть зі списку на кнопках внизу 👇")
         return
     make_open = session["status"] == "closed"
     queues.set_signup_open(conn, message.from_user.id, session["id"], make_open)

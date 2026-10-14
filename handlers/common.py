@@ -1,4 +1,5 @@
 import logging
+import re
 from contextlib import suppress
 
 from aiogram import BaseMiddleware
@@ -92,20 +93,51 @@ def get_queue_view_reply_menu(conn, session_id: int, telegram_id: int, is_open: 
     return make_reply_keyboard(rows)
 
 
+def normalize_text(text: str) -> str:
+    """Нормалізує текст для надійного порівняння назв черг та викладачів."""
+    t = text.lower()
+    for ch in ("📋", "🔒", "⚡", "📦", "👤", "✅", "❌", "👉"):
+        t = t.replace(ch, "")
+    t = t.replace("є", "е").replace("ё", "е").replace("і", "i").replace("ї", "i").replace("и", "i")
+    t = t.replace("—", "-").replace("–", "-").replace("−", "-")
+    t = re.sub(r"[^\w\s\-]", " ", t)
+    t = re.sub(r"\s+", " ", t).strip()
+    return t
+
+
 def find_session_by_label(conn, subjects: list[dict], text: str):
-    """Знаходить сесію черги за текстом кнопки або назвою."""
-    cleaned = text.strip()
-    if cleaned.startswith("📋 "):
-        cleaned = cleaned[3:].strip()
-    elif cleaned.startswith("⚡ "):
-        cleaned = cleaned[3:].strip()
+    """Знаходить сесію черги за текстом кнопки або назвою з гнучкою нормалізацією."""
+    norm_input = normalize_text(text)
+    if not norm_input:
+        return None
     sessions = queues.list_sessions(conn, ("open", "closed", "archived"))
+
+    # 1. Точний збіг нормалізованого підпису
     for s in sessions:
-        lbl = queue_label(subjects, s).strip()
-        cleaned_lbl = lbl.replace(" 🔒", "").strip()
-        cleaned_target = cleaned.replace(" 🔒", "").strip()
-        if cleaned == lbl or cleaned_target == cleaned_lbl or cleaned_target.startswith(cleaned_lbl):
+        lbl = queue_label(subjects, s)
+        norm_lbl = normalize_text(lbl)
+        if norm_input == norm_lbl or norm_input.startswith(norm_lbl) or norm_lbl.startswith(norm_input):
             return s
+
+    # 2. Пошук за прізвищем викладача та предметом
+    for s in sessions:
+        sub_name, teacher_name = session_names(subjects, s)
+        t_norm = normalize_text(teacher_name)
+        s_norm = normalize_text(sub_name)
+
+        t_surname = t_norm.split()[0] if t_norm else ""
+        if t_surname and t_surname in norm_input:
+            sub_words = [w for w in s_norm.split() if len(w) > 3]
+            if not sub_words or any(w in norm_input for w in sub_words):
+                return s
+
+    # 3. Резервний пошук за назвою предмета
+    for s in sessions:
+        sub_name, _ = session_names(subjects, s)
+        s_norm = normalize_text(sub_name)
+        if s_norm and (s_norm in norm_input or norm_input in s_norm):
+            return s
+
     return None
 
 
