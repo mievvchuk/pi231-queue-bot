@@ -246,3 +246,20 @@ async def notify_admins_queue_opened(bot, conn, creator_id: int, creator_name: s
             continue  # Не дублюємо самому творцю, якщо це адмін
         with suppress(Exception):
             await bot.send_message(adm_id, text)
+
+
+async def notify_admins_user_registered(bot, conn, user_row, username: str | None = None) -> None:
+    """Сповіщає всіх адміністраторів про реєстрацію нового студента."""
+    admin_list = admins.list_admins(conn)
+    username_part = f" (@{username})" if username else ""
+    text = (
+        f"👤 **Новий користувач зареєструвався в боті!**\n\n"
+        f"• **ПІБ:** {user_row['full_name']}\n"
+        f"• **Telegram ID:** `{user_row['telegram_id']}`{username_part}"
+    )
+    for adm in admin_list:
+        adm_id = adm["telegram_id"]
+        if adm_id == user_row["telegram_id"]:
+            continue  # Не дублюємо самому користувачу, якщо він уже в адмінах
+        with suppress(Exception):
+            await bot.send_message(adm_id, text)

@@ -4,7 +4,12 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, Message
 
-from handlers.common import get_reply_menu, make_keyboard, show
+from handlers.common import (
+    get_reply_menu,
+    make_keyboard,
+    notify_admins_user_registered,
+    show,
+)
 from services import admins, users
 from services.errors import BotError
 
@@ -78,11 +83,14 @@ async def start(message: Message, state: FSMContext, conn):
 @router.message(NameForm.registration, F.text)
 async def register(message: Message, state: FSMContext, conn):
     try:
-        users.register_user(conn, message.from_user.id, message.text)
+        new_user = users.register_user(conn, message.from_user.id, message.text)
     except BotError as error:
         await message.answer(f"{error}\nСпробуйте ще раз:")
         return
     await state.clear()
+    await notify_admins_user_registered(
+        message.bot, conn, new_user, username=message.from_user.username
+    )
     await message.answer(
         "✅ Реєстрацію завершено!\nГоловне меню. Оберіть дію на клавіатурі внизу 👇",
         reply_markup=get_reply_menu(conn, message.from_user.id),
