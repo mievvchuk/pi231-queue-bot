@@ -1,3 +1,5 @@
+from contextlib import suppress
+
 from aiogram import F, Router
 from aiogram.filters import StateFilter
 from aiogram.fsm.context import FSMContext
@@ -5,7 +7,7 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, Message
 
 from handlers.common import format_queue, make_keyboard, queue_label, session_names, show
-from services import admins, queues
+from services import admins, queues, users
 from services.errors import BotError
 from subjects import find_subject
 
@@ -220,6 +222,11 @@ async def show_queue(callback, conn, subjects, session_id: int, note: str = ""):
     rows = []
     if is_adm:
         rows.append([("⚡ Керувати чергою / Студенти", f"go:order:{session_id}")])
+
+    in_queue = queues.get_user_position(conn, callback.from_user.id, session_id) is not None
+    if in_queue:
+        rows.append([("🔄 Помінятися місцем", f"sw_start:{session_id}")])
+
     rows.extend([
         [("Оновити список", f"vq:{session_id}"), ("Моє місце", f"mp:{session_id}")],
         [("Здав", f"sd:{session_id}"), ("Не здав", f"sn:{session_id}")],
@@ -227,6 +234,178 @@ async def show_queue(callback, conn, subjects, session_id: int, note: str = ""):
         [("Назад", "view")],
     ])
     await show(callback, text, make_keyboard(rows))
+
+
+# ---------- Обмін місцями між студентами ----------
+
+@router.callback_query(F.data.startswith("sw_start:"))
+async def swap_choose_student(callback: CallbackQuery, conn, subjects):
+    session_id = int(callback.data.split(":")[1])
+    my_pos = queues.get_user_position(conn, callback.from_user.id, session_id)
+    if my_pos is None:
+        raise BotError("Ви не записані в цю чергу.")
+
+    entries = queues.get_entries(conn, session_id)
+    # Тільки інші реальні студенти з Telegram ID
+    candidates = [
+        e for e in entries
+        if e["user_id"] and e["telegram_id"] and e["telegram_id"] > 0 and e["telegram_id"] != callback.from_user.id
+    ]
+    if not candidates:
+        await show(
+            callback,
+            "У цій черзі немає інших зареєстрованих студентів, з якими можна помінятися.",
+            make_keyboard([[("Назад", f"vq:{session_id}")]])
+        )
+        return
+
+    rows = [[(f"{e['position']}. {e['full_name']}", f"sw_ask:{session_id}:{e['id']}")] for e in candidates]
+    rows.append([("Назад", f"vq:{session_id}")])
+    await show(callback, "Оберіть студента, якому запропонувати обмін місцями:", make_keyboard(rows))
+
+
+@router.callback_query(F.data.startswith("sw_ask:"))
+async def swap_confirm_prompt(callback: CallbackQuery, conn, subjects):
+    _, session_id, target_entry_id = callback.data.split(":")
+    session_id, target_entry_id = int(session_id), int(target_entry_id)
+
+    my_pos = queues.get_user_position(conn, callback.from_user.id, session_id)
+    if my_pos is None:
+        raise BotError("Ви не записані в цю чергу.")
+
+    target = queues.get_entry(conn, target_entry_id)
+    if not target or target["status"] != "active":
+        raise BotError("Цього студента вже немає в активній черзі.")
+
+    target_user = conn.execute("SELECT full_name FROM users WHERE id = ?", (target["user_id"],)).fetchone()
+    target_name = target_user["full_name"] if target_user else "Студент"
+
+    text = (
+        f"🔄 Запропонувати обмін місцями?\n\n"
+        f"👤 Студент: **{target_name}** (місце {target['position']})\n"
+        f"Ваше поточне місце: **{my_pos}**\n\n"
+        f"Студенту надійде сповіщення в боті. Якщо він погодиться — ваші місця автоматично поміняються."
+    )
+    rows = [
+        [("Так, надіслати запит", f"sw_send:{session_id}:{target_entry_id}")],
+        [("Скасувати", f"vq:{session_id}")],
+    ]
+    await show(callback, text, make_keyboard(rows))
+
+
+@router.callback_query(F.data.startswith("sw_send:"))
+async def swap_send_request(callback: CallbackQuery, conn, subjects):
+    _, session_id, target_entry_id = callback.data.split(":")
+    session_id, target_entry_id = int(session_id), int(target_entry_id)
+
+    session = get_session_or_fail(conn, session_id)
+    my_entry = queues._own_active_entry(conn, callback.from_user.id, session_id)
+    target = queues.get_entry(conn, target_entry_id)
+    if not target or target["status"] != "active":
+        raise BotError("Цього студента вже немає в активній черзі.")
+
+    target_user = conn.execute("SELECT * FROM users WHERE id = ?", (target["user_id"],)).fetchone()
+    if not target_user or not target_user["telegram_id"] or target_user["telegram_id"] <= 0:
+        raise BotError("Цей студент ще не підключив свій Telegram.")
+
+    sender_user = users.get_user(conn, callback.from_user.id)
+    sender_name = sender_user["full_name"] if sender_user else "Студент"
+    subject, teacher = session_names(subjects, session)
+
+    invite_text = (
+        f"🔄 **Пропозиція обміну місцями в черзі!**\n\n"
+        f"Студент **{sender_name}** (місце {my_entry['position']}) пропонує помінятися з вами місцями:\n"
+        f"📚 **{subject} — {teacher}**\n\n"
+        f"• Ваше поточне місце: **{target['position']}**\n"
+        f"• Нове місце після обміну: **{my_entry['position']}**\n\n"
+        f"Погодитися на обмін?"
+    )
+    invite_keyboard = make_keyboard([
+        [
+            ("✅ Погодитися", f"sw_yes:{my_entry['id']}:{target['id']}"),
+            ("❌ Відхилити", f"sw_no:{my_entry['id']}:{target['id']}")
+        ]
+    ])
+
+    try:
+        await callback.bot.send_message(target_user["telegram_id"], invite_text, reply_markup=invite_keyboard)
+    except Exception:
+        raise BotError("Не вдалося надіслати запит студенту (можливо, він заблокував бота).")
+
+    await show(
+        callback,
+        f"✅ Запит надіслано студенту {target_user['full_name']}!\nЯк тільки він відповість, ви отримаєте сповіщення.",
+        make_keyboard([[("Повернутися до черги", f"vq:{session_id}")]])
+    )
+
+
+@router.callback_query(F.data.startswith("sw_yes:"))
+async def swap_accept(callback: CallbackQuery, conn, subjects):
+    _, sender_entry_id, target_entry_id = callback.data.split(":")
+    sender_entry_id, target_entry_id = int(sender_entry_id), int(target_entry_id)
+
+    target_entry = queues.get_entry(conn, target_entry_id)
+    if not target_entry or target_entry["status"] != "active":
+        raise BotError("Цей запис уже неактивний або чергу змінено.")
+
+    target_user = conn.execute("SELECT * FROM users WHERE id = ?", (target_entry["user_id"],)).fetchone()
+    if not target_user or target_user["telegram_id"] != callback.from_user.id:
+        raise BotError("Ця пропозиція призначена для іншого студента.")
+
+    sender_entry = queues.get_entry(conn, sender_entry_id)
+    if not sender_entry or sender_entry["status"] != "active":
+        raise BotError("Студент, який надсилав запит, уже вийшов з черги або змінив позицію.")
+
+    session = get_session_or_fail(conn, target_entry["session_id"])
+    subject, teacher = session_names(subjects, session)
+    sender_user = conn.execute("SELECT * FROM users WHERE id = ?", (sender_entry["user_id"],)).fetchone()
+
+    # Виконуємо обмін у базі
+    new_sender_pos, new_target_pos = queues.swap_entries(conn, sender_entry_id, target_entry_id)
+
+    # Оновлюємо екран для студента, що погодився
+    await show(
+        callback,
+        f"🎉 Ви успішно обмінялися місцями з **{sender_user['full_name']}**!\n"
+        f"📚 {subject} — {teacher}\n"
+        f"Ваше нове місце: **{new_target_pos}**",
+        make_keyboard([[("Переглянути чергу", f"vq:{session['id']}")], BACK_TO_MENU])
+    )
+
+    # Надсилаємо сповіщення студенту, який пропонував обмін
+    if sender_user and sender_user["telegram_id"] and sender_user["telegram_id"] > 0:
+        with suppress(Exception):
+            await callback.bot.send_message(
+                sender_user["telegram_id"],
+                f"🎉 Студент **{target_user['full_name']}** погодився на обмін місцями!\n"
+                f"📚 {subject} — {teacher}\n"
+                f"Ваше нове місце: **{new_sender_pos}**",
+                reply_markup=make_keyboard([[("Переглянути чергу", f"vq:{session['id']}")], BACK_TO_MENU])
+            )
+
+
+@router.callback_query(F.data.startswith("sw_no:"))
+async def swap_decline(callback: CallbackQuery, conn, subjects):
+    _, sender_entry_id, target_entry_id = callback.data.split(":")
+    sender_entry_id, target_entry_id = int(sender_entry_id), int(target_entry_id)
+
+    target_entry = queues.get_entry(conn, target_entry_id)
+    target_user = conn.execute("SELECT * FROM users WHERE id = ?", (target_entry["user_id"],)).fetchone() if target_entry else None
+    if target_user and target_user["telegram_id"] != callback.from_user.id:
+        raise BotError("Ця пропозиція призначена для іншого студента.")
+
+    sender_entry = queues.get_entry(conn, sender_entry_id)
+    sender_user = conn.execute("SELECT * FROM users WHERE id = ?", (sender_entry["user_id"],)).fetchone() if sender_entry else None
+
+    await show(callback, "❌ Ви відхилили пропозицію обміну місцями.")
+
+    if sender_user and sender_user["telegram_id"] and sender_user["telegram_id"] > 0:
+        target_name = target_user["full_name"] if target_user else "Студент"
+        with suppress(Exception):
+            await callback.bot.send_message(
+                sender_user["telegram_id"],
+                f"❌ Студент **{target_name}** відхилив вашу пропозицію обміну місцями."
+            )
 
 
 @router.callback_query(F.data.startswith("lv:"))
