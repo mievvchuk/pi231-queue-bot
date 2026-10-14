@@ -151,11 +151,25 @@ class PGCursorWrapper:
 
 class PGConnectionWrapper:
     """Обгортка над з'єднанням psycopg, що надає інтерфейс sqlite3.Connection
-    (автоматично трансформує '?' в '%s' та підтримує lastrowid)."""
+    (автоматично трансформує '?' в '%s', підтримує lastrowid та автоперепідключення)."""
 
-    def __init__(self, raw_conn):
+    def __init__(self, raw_conn, clean_url: str):
         self.raw = raw_conn
+        self.clean_url = clean_url
         self._init_schema()
+
+    def _ensure_connected(self):
+        try:
+            if self.raw.closed:
+                self.raw = psycopg.connect(self.clean_url, autocommit=True)
+            else:
+                self.raw.execute("SELECT 1")
+        except Exception:
+            try:
+                self.raw.close()
+            except Exception:
+                pass
+            self.raw = psycopg.connect(self.clean_url, autocommit=True)
 
     def _init_schema(self):
         with self.raw.cursor() as cur:
@@ -164,9 +178,9 @@ class PGConnectionWrapper:
         self.raw.commit()
 
     def execute(self, sql: str, params: tuple = ()):
+        self._ensure_connected()
         # Замінюємо ? на %s для psycopg
         pg_sql = sql.replace("?", "%s")
-        # CURRENT_TIMESTAMP в SQLite і PG збігаються
         is_insert = pg_sql.strip().upper().startswith("INSERT INTO")
         lastrowid = None
 
@@ -187,7 +201,10 @@ class PGConnectionWrapper:
         return PGCursorWrapper(cur, lastrowid=lastrowid)
 
     def close(self):
-        self.raw.close()
+        try:
+            self.raw.close()
+        except Exception:
+            pass
 
 
 def connect(db_target: str):
@@ -199,7 +216,7 @@ def connect(db_target: str):
         # Neon вимагає SSL
         clean_url = db_target.replace("&channel_binding=require", "")
         raw = psycopg.connect(clean_url, autocommit=True)
-        return PGConnectionWrapper(raw)
+        return PGConnectionWrapper(raw, clean_url)
 
     conn = sqlite3.connect(db_target, timeout=10, isolation_level=None)
     conn.row_factory = sqlite3.Row

@@ -165,9 +165,9 @@ def format_queue(subjects: list[dict], session, entries, my_telegram_id: int | N
 
     subject, teacher = session_names(subjects, session)
     lines.extend([subject, teacher])
-    if session["lesson_title"]:
+    if session.get("lesson_title"):
         lines.append(f"Заняття: {session['lesson_title']}")
-    status_str = "🚨 тривога (черга збережена)" if get_alert_status() else STATUS_TEXT[session['status']]
+    status_str = "🚨 тривога (черга збережена)" if get_alert_status() else STATUS_TEXT.get(session.get("status"), str(session.get("status")))
     lines.append(f"Статус: {status_str}")
     lines.append("")
     for row in entries:
@@ -178,14 +178,14 @@ def format_queue(subjects: list[dict], session, entries, my_telegram_id: int | N
 
 
 def format_entry(row, my_telegram_id: int | None = None, marked: bool = False, show_id: bool = False) -> str:
-    name = row["full_name"] or "— вільне місце —"
-    is_me = my_telegram_id is not None and row["telegram_id"] == my_telegram_id
+    name = row.get("full_name") or "— вільне місце —"
+    is_me = my_telegram_id is not None and row.get("telegram_id") == my_telegram_id
     prefix = "👉 " if is_me or marked else ""
     suffix = " (ви)" if is_me else ""
     id_part = ""
-    if show_id and row["telegram_id"] and row["telegram_id"] > 0:
+    if show_id and row.get("telegram_id") and row["telegram_id"] > 0:
         id_part = f" [ID: {row['telegram_id']}]"
-    return f"{prefix}{row['position']}. {name}{suffix}{id_part}"
+    return f"{prefix}{row.get('position', '?')}. {name}{suffix}{id_part}"
 
 
 
@@ -216,7 +216,8 @@ class Guard(BaseMiddleware):
             log.exception("Telegram API error")
         except Exception as error:
             log.exception(f"Unexpected error in handler: {error}")
-            await self.notify(event, "⚠️ Виникла технічна помилка. Будь ласка, спробуйте /start або 🏠 Головне меню.")
+            err_details = f"{type(error).__name__}: {error}"
+            await self.notify(event, f"⚠️ Помилка: {err_details}\nСпробуйте /start або 🏠 Головне меню.")
 
     @staticmethod
     async def notify(event, text: str) -> None:
