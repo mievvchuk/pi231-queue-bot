@@ -22,8 +22,8 @@ PICK_TITLES = {
     "done": "Позначити здачу",
     "transfer": "Перенести студентів",
     "close": "Закрити/відкрити запис",
-    "finish": "Завершити заняття",
 }
+
 
 
 
@@ -88,11 +88,11 @@ def panel_keyboard():
         [("Позначити здачу", "pick:done")],
         [("Перенести студентів", "pick:transfer")],
         [("Закрити запис", "pick:close")],
-        [("Завершити заняття", "pick:finish")],
         [("Історія черг", "ah")],
         [("Керування адміністраторами", "adm")],
         [("Головне меню", "menu")],
     ])
+
 
 
 
@@ -138,10 +138,10 @@ async def show_manager(callback, conn, subjects, session_id: int):
         [("Додати студентів у чергу", f"go:add_student:{session_id}")],
         [("Змінити порядок", f"go:order:{session_id}")],
         [("Закрити/відкрити запис", f"go:close:{session_id}")],
-        [("Завершити заняття", f"go:finish:{session_id}")],
         [("Назад", "pick:view")],
     ]
     await show(callback, text, make_keyboard(rows))
+
 
 
 async def start_admin_add_student(callback: CallbackQuery, conn, subjects, state: FSMContext, session_id: int):
