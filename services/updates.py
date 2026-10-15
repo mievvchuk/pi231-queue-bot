@@ -52,7 +52,7 @@ def mark_version_sent(conn, version: str, description: str) -> None:
 
 def get_active_user_ids(conn) -> list[int]:
     rows = conn.execute(
-        "SELECT telegram_id FROM users WHERE telegram_id > 0 AND (is_blocked IS NULL OR is_blocked = FALSE OR is_blocked = 0)"
+        "SELECT telegram_id FROM users WHERE telegram_id > 0 AND is_blocked IS NOT TRUE"
     ).fetchall()
     return [r["telegram_id"] for r in rows if r["telegram_id"] and r["telegram_id"] > 0]
 
