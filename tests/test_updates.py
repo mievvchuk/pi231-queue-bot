@@ -52,3 +52,19 @@ async def test_check_and_broadcast_updates(conn, make_user):
     bot.send_message.reset_mock()
     await check_and_broadcast_updates(bot, conn)
     assert bot.send_message.call_count == 0
+
+
+def test_alert_state_storage(conn):
+    from services.alerts import get_stored_alert_status, set_stored_alert_status
+
+    # Initially None
+    assert get_stored_alert_status(conn) is None
+
+    # Set True
+    set_stored_alert_status(conn, True)
+    assert get_stored_alert_status(conn) is True
+
+    # Set False
+    set_stored_alert_status(conn, False)
+    assert get_stored_alert_status(conn) is False
+

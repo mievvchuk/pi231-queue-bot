@@ -123,10 +123,78 @@ async def broadcast_alert_status(bot: Bot, db_target: str, is_active: bool):
             await asyncio.sleep(0.05)  # плавне надсилання без блокування rate-limit
 
 
+def ensure_state_table(conn) -> None:
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS bot_state (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL,
+            updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+        )"""
+    )
+
+
+def get_stored_alert_status(conn) -> bool | None:
+    try:
+        ensure_state_table(conn)
+        row = conn.execute("SELECT value FROM bot_state WHERE key = 'alert_active'").fetchone()
+        if row is not None:
+            return row["value"] == "1"
+    except Exception as e:
+        log.warning(f"Error reading alert status from DB: {e}")
+    return None
+
+
+def set_stored_alert_status(conn, is_active: bool) -> None:
+    try:
+        ensure_state_table(conn)
+        conn.execute(
+            """INSERT INTO bot_state (key, value, updated_at)
+               VALUES ('alert_active', ?, CURRENT_TIMESTAMP)
+               ON CONFLICT (key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP""",
+            ("1" if is_active else "0",),
+        )
+    except Exception as e:
+        log.warning(f"Error saving alert status to DB: {e}")
+
+
 async def start_alerts_checker(bot: Bot, db_target: str, token: str, interval_sec: int = 30):
     """Фонова задача перевірки повітряної тривоги по Хмельницькому."""
     global IS_KHMELNYTSKYI_ALERT_ACTIVE
     log.info("Starting Khmelnytskyi Air Raid Alert checker...")
+
+    # Ініціалізуємо стан із БД
+    stored_status: bool | None = None
+    try:
+        conn = db.connect(db_target)
+        try:
+            stored_status = get_stored_alert_status(conn)
+        finally:
+            with suppress(Exception):
+                conn.close()
+    except Exception as e:
+        log.warning(f"Could not load initial alert status from DB: {e}")
+
+    if stored_status is not None:
+        IS_KHMELNYTSKYI_ALERT_ACTIVE = stored_status
+        log.info(f"Loaded alert status from DB: {stored_status}")
+    else:
+        # Перший запуск: визначаємо поточний стан тривоги без спаму розсилкою
+        try:
+            alerts = await fetch_active_alerts(token)
+            if alerts is not None:
+                IS_KHMELNYTSKYI_ALERT_ACTIVE = is_khmelnytskyi_alert(alerts)
+                try:
+                    conn = db.connect(db_target)
+                    try:
+                        set_stored_alert_status(conn, IS_KHMELNYTSKYI_ALERT_ACTIVE)
+                    finally:
+                        with suppress(Exception):
+                            conn.close()
+                except Exception:
+                    pass
+                log.info(f"Initialized alert status to {IS_KHMELNYTSKYI_ALERT_ACTIVE} without broadcasting")
+        except Exception as e:
+            log.warning(f"Error initializing alert status on startup: {e}")
 
     while True:
         try:
@@ -134,6 +202,12 @@ async def start_alerts_checker(bot: Bot, db_target: str, token: str, interval_se
                 # Поза навчальними годинами (з 16:40 до 08:00) моніторинг не тривожить студентів
                 if IS_KHMELNYTSKYI_ALERT_ACTIVE:
                     IS_KHMELNYTSKYI_ALERT_ACTIVE = False
+                    with suppress(Exception):
+                        conn = db.connect(db_target)
+                        try:
+                            set_stored_alert_status(conn, False)
+                        finally:
+                            conn.close()
                 await asyncio.sleep(interval_sec)
                 continue
 
@@ -143,6 +217,15 @@ async def start_alerts_checker(bot: Bot, db_target: str, token: str, interval_se
                 if new_status != IS_KHMELNYTSKYI_ALERT_ACTIVE:
                     IS_KHMELNYTSKYI_ALERT_ACTIVE = new_status
                     log.info(f"Khmelnytskyi alert status changed to: {new_status}")
+
+                    # Зберігаємо новий стан у БД
+                    with suppress(Exception):
+                        conn = db.connect(db_target)
+                        try:
+                            set_stored_alert_status(conn, new_status)
+                        finally:
+                            conn.close()
+
                     await broadcast_alert_status(bot, db_target, new_status)
         except Exception as e:
             log.exception(f"Unexpected error in alerts checker: {e}")
