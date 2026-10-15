@@ -1405,15 +1405,22 @@ async def toggle_maintenance(message: Message, state: FSMContext, conn):
     admins.log_action(conn, message.from_user.id, "toggle_maintenance", f"active={new_state}")
 
     if new_state:
+        from services.maintenance import broadcast_maintenance_notice
+        await message.answer("⏳ Розсилаю сповіщення про техроботи та приховую кнопки у студентів...")
+        succ, err = await broadcast_maintenance_notice(message.bot, conn, end_t)
         status_txt = (
             f"🛠 <b>Режим техробіт УВІМКНЕНО!</b> (орієнтовно до {end_t})\n\n"
-            f"• Доступ до запису та відкриття черг заблоковано.\n"
-            f"• Кнопки у звичайних користувачів деактивовано."
+            f"• Сповіщення доставлено: <b>{succ}</b> користувачам (помилок: {err})\n"
+            f"• Доступ до запису заблоковано, кнопки у студентів деактивовано."
         )
     else:
+        from services.maintenance import broadcast_maintenance_end
+        await message.answer("⏳ Розсилаю сповіщення про завершення робіт та повертаю кнопки студентам...")
+        succ, err = await broadcast_maintenance_end(message.bot, conn)
         status_txt = (
             "🟢 <b>Режим техробіт ВИМКНЕНО!</b>\n\n"
-            "Бот знову працює у штатному режимі для всіх користувачів."
+            f"• Сповіщення доставлено: <b>{succ}</b> користувачам (помилок: {err})\n"
+            f"• Бот знову працює у штатному режимі, кнопки меню відновлено!"
         )
 
     await message.answer(

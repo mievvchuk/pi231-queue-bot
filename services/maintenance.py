@@ -89,3 +89,29 @@ async def broadcast_maintenance_notice(bot: Bot, conn, end_time: str = "20:15") 
             log.warning(f"Не вдалося надіслати сповіщення про техроботи {uid}: {e}")
             errors += 1
     return success, errors
+
+
+async def broadcast_maintenance_end(bot: Bot, conn) -> tuple[int, int]:
+    """Сповіщає всіх користувачів про завершення техробіт та повертає їм кнопки меню."""
+    import asyncio
+    from services.updates import get_active_user_ids
+    from handlers.common import get_reply_menu
+
+    uids = get_active_user_ids(conn)
+    text = (
+        "🟢 <b>Технічні роботи завершено!</b>\n\n"
+        "Бот знову працює у звичайному режимі.\n"
+        "Всі функції та запис до черг відкрито, кнопки меню відновлено! 👇"
+    )
+    success = 0
+    errors = 0
+
+    for uid in uids:
+        try:
+            await bot.send_message(uid, text, reply_markup=get_reply_menu(conn, uid))
+            success += 1
+            await asyncio.sleep(0.05)
+        except Exception as e:
+            log.warning(f"Не вдалося надіслати сповіщення про завершення техробіт {uid}: {e}")
+            errors += 1
+    return success, errors

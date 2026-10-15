@@ -238,3 +238,111 @@ async def confirm_recognition(callback: CallbackQuery, conn):
         f"✅ <b>Успішно збережено замін: {saved_count}!</b>\n"
         "Вони вже враховані в розкладі занять."
     )
+
+
+# ---------- Статус системи ----------
+
+@router.message(Command("status"), StateFilter("*"))
+async def show_bot_status(message: Message, conn):
+    from bot import BOT_VERSION
+    from services import maintenance, updates
+    from zoneinfo import ZoneInfo
+    from datetime import datetime
+
+    uids = updates.get_active_user_ids(conn)
+    reps = replacements.get_replacements(conn, group_name=config.STUDENT_GROUP)
+    is_maint = maintenance.is_maintenance_active(conn)
+    end_t = maintenance.get_maintenance_end_time(conn)
+
+    maint_status = f"🔴 Увімкнено (до {end_t})" if is_maint else "🟢 Вимкнено (штатний режим)"
+    now_str = datetime.now(ZoneInfo(config.TIMEZONE)).strftime("%d.%m.%Y %H:%M:%S")
+
+    prov = "Вимкнено"
+    if config.RECOGNITION_API_KEY:
+        prov = "Groq (qwen/qwen3.8-27b)" if config.RECOGNITION_API_KEY.startswith("gsk_") else "OpenAI (gpt-4o-mini)"
+
+    text = (
+        f"🟢 <b>Статус системи</b>\n\n"
+        f"• <b>Версія бота:</b> <code>{BOT_VERSION}</code>\n"
+        f"• <b>Група:</b> {html.escape(config.STUDENT_GROUP)}\n"
+        f"• <b>Режим техробіт:</b> {maint_status}\n"
+        f"• <b>База даних:</b> Підключено (OK)\n"
+        f"• <b>Активних користувачів:</b> {len(uids)}\n"
+        f"• <b>Збережених замін:</b> {len(reps)}\n"
+        f"• <b>Серверний час:</b> <code>{now_str}</code> ({config.TIMEZONE})\n"
+        f"• <b>Розпізнавання фото:</b> {prov}"
+    )
+    await message.answer(text)
+
+
+# ---------- Завантаження та вивантаження файлу розкладу ----------
+
+@router.message(Command("get_schedule"), StateFilter("*"))
+@router.message(Command("export_schedule"), StateFilter("*"))
+async def export_schedule_file(message: Message, conn):
+    import os
+    from aiogram.types import FSInputFile
+
+    if not admins.is_admin(conn, message.from_user.id):
+        raise BotError("Ця функція доступна лише адміністраторам.")
+
+    if not os.path.exists(config.SCHEDULE_PATH):
+        raise BotError("Файл розкладу не знайдено.")
+
+    file = FSInputFile(config.SCHEDULE_PATH, filename="schedule.json")
+    await message.answer_document(
+        file,
+        caption=(
+            "📄 <b>Файл базового розкладу schedule.json</b>\n\n"
+            "<b>Як оновити розклад:</b>\n"
+            "1. Завантажте цей файл на пристрій.\n"
+            "2. Відредагуйте пари для кожного дня (monday–friday).\n"
+            "3. Надішліть збережений файл <code>schedule.json</code> прямо в цей чат.\n\n"
+            "Бот автоматично збереже його та оновить розклад для всієї групи!"
+        ),
+    )
+
+
+@router.message(F.document)
+async def handle_document_upload(message: Message, conn):
+    import json
+    import os
+
+    doc = message.document
+    if not doc or not doc.file_name:
+        return
+    if not admins.is_admin(conn, message.from_user.id):
+        return
+
+    if doc.file_name.lower().endswith(".json"):
+        bot = message.bot
+        file = await bot.get_file(doc.file_id)
+        stream = io.BytesIO()
+        await bot.download_file(file.file_path, destination=stream)
+        raw_bytes = stream.getvalue()
+
+        try:
+            parsed = json.loads(raw_bytes.decode("utf-8"))
+            if not isinstance(parsed, dict):
+                raise ValueError("Корінь JSON має бути об'єктом із днями тижня (monday, tuesday, etc.).")
+
+            days_found = [d for d in schedule.DAY_KEYS if d in parsed]
+            if not days_found:
+                raise ValueError("У файлі не знайдено жодного дня тижня (monday, tuesday, etc.).")
+
+            with open(config.SCHEDULE_PATH, "w", encoding="utf-8") as f:
+                json.dump(parsed, f, ensure_ascii=False, indent=2)
+
+            admins.log_action(conn, message.from_user.id, "upload_schedule", f"file={doc.file_name}")
+            await message.answer(
+                f"✅ <b>Розклад успішно завантажено та оновлено!</b>\n\n"
+                f"• Знайдено днів: <b>{len(days_found)}</b> ({', '.join(days_found)})\n"
+                f"• Новий розклад одразу доступний у командах /today, /tomorrow, /week та кнопці «📅 Розклад»."
+            )
+        except Exception as e:
+            log.exception(f"Error parsing uploaded schedule JSON: {e}")
+            await message.answer(
+                f"⚠️ <b>Помилка у файлі JSON:</b> {html.escape(str(e))}\n\n"
+                "Перевірте структуру файлу або скористайтеся /get_schedule як шаблоном."
+            )
+
