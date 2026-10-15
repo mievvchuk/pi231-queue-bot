@@ -58,10 +58,8 @@ def get_week_type(dt: date) -> str:
     return "denominator" if week_num % 2 == 0 else "numerator"
 
 
-def get_base_schedule(schedule_data: dict, dt: date) -> list[dict]:
-    day_key = dt.strftime("%A").lower()
+def get_base_schedule_for_day(schedule_data: dict, day_key: str, w_type: str) -> list[dict]:
     day_content = schedule_data.get(day_key, [])
-    w_type = get_week_type(dt)
 
     if isinstance(day_content, dict):
         raw_list = day_content.get(w_type) or day_content.get("regular") or []
@@ -108,10 +106,25 @@ def get_base_schedule(schedule_data: dict, dt: date) -> list[dict]:
     return filtered
 
 
+def get_base_schedule(schedule_data: dict, dt: date) -> list[dict]:
+    day_key = dt.strftime("%A").lower()
+    w_type = get_week_type(dt)
+    return get_base_schedule_for_day(schedule_data, day_key, w_type)
+
+
 def get_actual_schedule(conn, schedule_data: dict, dt: date, group_name: str = "ПІ-231") -> tuple[list[dict], list[dict]]:
     date_str = dt.isoformat()
     replacements = get_replacements(conn, date=date_str, group_name=group_name)
-    base = get_base_schedule(schedule_data, dt)
+
+    from services.working_days import get_working_saturday
+    ws = get_working_saturday(conn, date_str) if conn else None
+
+    if ws:
+        effective_day_key = ws["replaces_day"]
+        effective_w_type = ws.get("week_type") or get_week_type(dt)
+        base = get_base_schedule_for_day(schedule_data, effective_day_key, effective_w_type)
+    else:
+        base = get_base_schedule(schedule_data, dt)
 
     rep_map = {int(r["lesson_number"]): r for r in replacements}
     actual_lessons = []
@@ -160,7 +173,19 @@ def format_schedule_for_date(conn, schedule_data: dict, dt: date, group_name: st
     w_type_uk = "Знаменник" if w_type == "denominator" else "Чисельник"
 
     date_formatted = dt.strftime("%d.%m.%Y")
-    header = f"📅 <b>{day_uk}, {date_formatted}</b> ({w_type_uk})"
+    from services.working_days import get_working_saturday, DAY_NAMES_UK as WS_DAY_NAMES
+    date_str = dt.isoformat()
+    ws = get_working_saturday(conn, date_str) if conn else None
+
+    if ws:
+        rep_day_uk = WS_DAY_NAMES.get(ws["replaces_day"], ws["replaces_day"].capitalize())
+        ws_wtype_uk = "Знаменник" if (ws.get("week_type") or w_type) == "denominator" else "Чисельник"
+        header = (
+            f"📅 <b>{day_uk}, {date_formatted}</b> ({ws_wtype_uk})\n"
+            f"🏢 <b>Робоча субота за розкладом: {rep_day_uk}</b>"
+        )
+    else:
+        header = f"📅 <b>{day_uk}, {date_formatted}</b> ({w_type_uk})"
 
     lessons, replacements = get_actual_schedule(conn, schedule_data, dt, group_name)
     if not lessons:

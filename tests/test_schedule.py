@@ -141,6 +141,7 @@ def test_admin_schedule_keyboards():
     sch_button_texts = [btn.text for row in sch_menu.keyboard for btn in row]
     assert "📥 Отримати schedule.json" in sch_button_texts
     assert "📤 Завантажити розклад" in sch_button_texts
+    assert "🏢 Робоча субота" in sch_button_texts
     assert "🗑 Очистити всі заміни" in sch_button_texts
     assert "🟢 Статус системи" in sch_button_texts
     assert "🔙 В адмін-панель" in sch_button_texts
@@ -213,4 +214,73 @@ def test_replacement_correction_menus_and_helpers():
     assert "🗑 Видалити цю заміну" in i_btns
     assert "🔙 До списку замін" in i_btns
     assert "✅ Готово (до збереження)" in i_btns
+
+
+def test_working_saturdays_flow(conn):
+    from services import working_days
+
+    sat_date = datetime.date(2026, 10, 17)
+    sat_str = sat_date.isoformat()
+
+    # Initially not working
+    assert working_days.get_working_saturday(conn, sat_str) is None
+
+    # Set Saturday as working for Monday
+    working_days.set_working_saturday(conn, sat_str, "monday", week_type="denominator")
+    ws = working_days.get_working_saturday(conn, sat_str)
+    assert ws is not None
+    assert ws["replaces_day"] == "monday"
+    assert ws["week_type"] == "denominator"
+
+    # Schedule integration
+    sch_data = {
+        "monday": [
+            {"number": 1, "subject": "Математичний аналіз", "teacher": "Т1", "room": "101"},
+            {"number": 2, "subject": "КПЗ", "teacher": "Т2", "room": "102"},
+        ],
+        "saturday": [],
+    }
+
+    # Before replacements: Saturday has Monday's lessons!
+    actual, reps = schedule.get_actual_schedule(conn, sch_data, sat_date, "ПІ-231")
+    assert len(actual) == 2
+    assert actual[0]["subject"] == "Математичний аналіз"
+    assert actual[1]["subject"] == "КПЗ"
+
+    # Add a replacement specifically on that Saturday!
+    replacements.save_replacement(conn, {
+        "date": sat_str,
+        "group_name": "ПІ-231",
+        "lesson_number": 2,
+        "old_subject": "КПЗ",
+        "new_subject": "Машинне навчання (Заміна)",
+        "teacher": "Барабаш Д.С.",
+        "room": "305",
+    })
+
+    # After replacement: lesson 2 is replaced on Saturday!
+    actual_after, reps_after = schedule.get_actual_schedule(conn, sch_data, sat_date, "ПІ-231")
+    assert len(actual_after) == 2
+    assert actual_after[1]["subject"] == "Машинне навчання (Заміна)"
+    assert actual_after[1]["is_replacement"] is True
+
+    # Formatting shows Saturday as working day with replaced day info
+    text = schedule.format_schedule_for_date(conn, sch_data, sat_date, "ПІ-231")
+    assert "Робоча субота за розкладом: Понеділок" in text
+    assert "Машинне навчання (Заміна)" in text
+    assert "ЗАМІНА" in text
+
+    # Change day: Monday -> Tuesday
+    sch_data["tuesday"] = [{"number": 1, "subject": "Бази даних", "teacher": "Т3", "room": "103"}]
+    working_days.set_working_saturday(conn, sat_str, "tuesday")
+    ws_updated = working_days.get_working_saturday(conn, sat_str)
+    assert ws_updated["replaces_day"] == "tuesday"
+
+    # Revert / Remove working Saturday
+    working_days.remove_working_saturday(conn, sat_str)
+    assert working_days.get_working_saturday(conn, sat_str) is None
+
+    # After removal, Saturday is back to day off (replacements remain, but base lessons are gone)
+    actual_rev, reps_rev = schedule.get_actual_schedule(conn, sch_data, sat_date, "ПІ-231")
+    assert all(l["is_replacement"] for l in actual_rev)
 
