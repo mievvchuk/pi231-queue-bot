@@ -507,11 +507,13 @@ async def admin_confirm_delete_user(message: Message, state: FSMContext, conn):
 
 
 @router.message(F.text == "⚙️ Налаштування", StateFilter("*"))
-async def admin_category_settings(message: Message, state: FSMContext):
+async def admin_category_settings(message: Message, state: FSMContext, conn=None):
+    from services.maintenance import is_maintenance_active
+    is_maint = is_maintenance_active(conn) if conn else False
     await state.set_state(AdminPanelState.in_settings_menu)
     await message.answer(
         "⚙️ <b>Налаштування</b>\n\nОберіть розділ нижче 👇",
-        reply_markup=get_admin_settings_menu(),
+        reply_markup=get_admin_settings_menu(is_maintenance=is_maint),
     )
 
 
@@ -1203,7 +1205,8 @@ async def show_blocked_list(message: Message, state: FSMContext, conn):
     await state.clear()
     blocked = users.list_blocked_users(conn)
     if not blocked:
-        await message.answer("Заблокованих користувачів немає.", reply_markup=get_admin_settings_menu())
+        from services.maintenance import is_maintenance_active
+        await message.answer("Заблокованих користувачів немає.", reply_markup=get_admin_settings_menu(is_maintenance=is_maintenance_active(conn)))
         return
     rows = []
     for u in blocked[:8]:
@@ -1381,9 +1384,39 @@ async def perform_broadcast(message: Message, state: FSMContext, conn):
     success, errors = await broadcast_message_to_users(message.bot, uids, text)
     admins.log_action(conn, message.from_user.id, "manual_broadcast", f"success={success} errors={errors}")
     await state.clear()
+    from services.maintenance import is_maintenance_active
     await message.answer(
         f"✅ <b>Розсилку успішно завершено!</b>\n\n"
         f"• Доставлено: <b>{success}</b>\n"
         f"• Помилок: <b>{errors}</b>",
-        reply_markup=get_admin_settings_menu(),
+        reply_markup=get_admin_settings_menu(is_maintenance=is_maintenance_active(conn)),
+    )
+
+
+# ---------- Режим технічних робіт ----------
+
+@router.message(F.text.in_({"🛠 Увімкнути техроботи", "🟢 Вимкнути техроботи"}), StateFilter("*"))
+async def toggle_maintenance(message: Message, state: FSMContext, conn):
+    from services.maintenance import get_maintenance_end_time, is_maintenance_active, set_maintenance_mode
+    cur = is_maintenance_active(conn)
+    new_state = not cur
+    set_maintenance_mode(conn, new_state, "20:15")
+    end_t = get_maintenance_end_time(conn)
+    admins.log_action(conn, message.from_user.id, "toggle_maintenance", f"active={new_state}")
+
+    if new_state:
+        status_txt = (
+            f"🛠 <b>Режим техробіт УВІМКНЕНО!</b> (орієнтовно до {end_t})\n\n"
+            f"• Доступ до запису та відкриття черг заблоковано.\n"
+            f"• Кнопки у звичайних користувачів деактивовано."
+        )
+    else:
+        status_txt = (
+            "🟢 <b>Режим техробіт ВИМКНЕНО!</b>\n\n"
+            "Бот знову працює у штатному режимі для всіх користувачів."
+        )
+
+    await message.answer(
+        status_txt,
+        reply_markup=get_admin_settings_menu(is_maintenance=new_state),
     )

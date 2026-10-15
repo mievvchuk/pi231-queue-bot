@@ -124,11 +124,13 @@ def get_admin_students_menu() -> ReplyKeyboardMarkup:
     ])
 
 
-def get_admin_settings_menu() -> ReplyKeyboardMarkup:
+def get_admin_settings_menu(is_maintenance: bool = False) -> ReplyKeyboardMarkup:
     """Вкладене меню адміна: Налаштування."""
+    maint_btn = "🟢 Вимкнути техроботи" if is_maintenance else "🛠 Увімкнути техроботи"
     return make_reply_keyboard([
         ["👥 Адміністратори", "⛔ Заблоковані"],
-        ["📢 Оголошення для всіх", "🔙 Назад"],
+        [maint_btn, "📢 Оголошення для всіх"],
+        ["🔙 Назад"],
     ])
 
 
@@ -404,6 +406,32 @@ class Guard(BaseMiddleware):
     """Підтверджує натискання кнопки та перетворює помилки на повідомлення."""
 
     async def __call__(self, handler, event, data):
+        conn = data.get("conn")
+        if conn:
+            from services.maintenance import (
+                get_maintenance_end_time,
+                get_maintenance_message,
+                is_maintenance_active,
+            )
+            if is_maintenance_active(conn):
+                user = getattr(event, "from_user", None)
+                user_id = user.id if user else None
+                is_adm = admins.is_admin(conn, user_id) if user_id else False
+                if not is_adm:
+                    end_time = get_maintenance_end_time(conn)
+                    if isinstance(event, CallbackQuery):
+                        with suppress(TelegramBadRequest):
+                            await event.answer(
+                                f"🛠 Бот на технічних роботах (орієнтовно до {end_time}). Кнопки деактивовано.",
+                                show_alert=True,
+                            )
+                        return
+                    elif isinstance(event, Message):
+                        msg_text = get_maintenance_message(end_time)
+                        from aiogram.types import ReplyKeyboardRemove
+                        await event.answer(msg_text, reply_markup=ReplyKeyboardRemove())
+                        return
+
         if isinstance(event, CallbackQuery):
             with suppress(TelegramBadRequest):
                 await event.answer()

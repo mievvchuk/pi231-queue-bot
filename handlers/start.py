@@ -73,6 +73,16 @@ def main_menu(conn, telegram_id: int):
 @router.message(Command("start"), StateFilter("*"))
 async def start(message: Message, state: FSMContext, conn):
     await state.clear()
+    from services.maintenance import get_maintenance_end_time, is_maintenance_active
+    if is_maintenance_active(conn):
+        end_t = get_maintenance_end_time(conn)
+        await message.answer(
+            f"🛠 <b>Увага: увімкнено режим технічних робіт (до {end_t})!</b>\n"
+            f"Для студентів доступ та кнопки тимчасово деактивовано.\n"
+            f"Ви маєте повний доступ як адміністратор.",
+            reply_markup=get_reply_menu(conn, message.from_user.id),
+        )
+        return
     if users.get_user(conn, message.from_user.id):
         await message.answer(
             "Головне меню. Оберіть дію на клавіатурі внизу 👇",

@@ -113,6 +113,11 @@ def join_queue(conn: sqlite3.Connection, telegram_id: int, session_id: int,
     """Повертає (місце студента, усього в черзі).
     position=None — у кінець; інакше студент вставляється на вибраний номер."""
     with transaction(conn):
+        from services.maintenance import get_maintenance_end_time, is_maintenance_active
+        if is_maintenance_active(conn):
+            end_t = get_maintenance_end_time(conn)
+            raise BotError(f"🛠 Зараз тривають технічні роботи (орієнтовно до {end_t}). Запис до черги закрито.")
+
         session = _require_session(conn, session_id, statuses=("open", "closed"))
         if session["status"] != "open":
             raise BotError("Запис до цієї черги закрито.")
@@ -240,6 +245,11 @@ def create_queue(conn: sqlite3.Connection, telegram_id: int, subject_id: int,
                  teacher_id: int, lesson_title: str = "", queue_type: str = "lesson") -> int:
     """Будь-який зареєстрований студент може відкрити чергу."""
     with transaction(conn):
+        from services.maintenance import get_maintenance_end_time, is_maintenance_active
+        if is_maintenance_active(conn):
+            end_t = get_maintenance_end_time(conn)
+            raise BotError(f"🛠 Зараз тривають технічні роботи (орієнтовно до {end_t}). Відкриття нових черг тимчасово заблоковано.")
+
         if conn.execute("SELECT 1 FROM users WHERE telegram_id = ?", (telegram_id,)).fetchone() is None:
             raise BotError("Спочатку зареєструйтесь: /start")
         return _insert_session(conn, subject_id, teacher_id, lesson_title.strip(), queue_type=queue_type)
