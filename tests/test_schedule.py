@@ -104,3 +104,28 @@ def test_actual_schedule_with_replacements(conn):
     text = schedule.format_schedule_for_date(conn, sch_data, test_dt, "ПІ-231")
     assert "ЗАМІНА" in text
     assert "Новий Предмет 2" in text
+
+
+def test_lesson_number_and_expansions():
+    from services.recognition import expand_subject, expand_teacher, normalize_lesson_pair
+
+    # 1-2 уроки -> 1 пара
+    assert normalize_lesson_pair(1, "1-2") == 1
+    # 3-4 уроки -> 2 пара
+    assert normalize_lesson_pair(2, "3-4") == 2
+    # 5-6 уроки -> 3 пара!
+    assert normalize_lesson_pair(3, "5-6") == 3
+    assert normalize_lesson_pair("5-6") == 3
+    # 7-8 уроки -> 4 пара!
+    assert normalize_lesson_pair(4, "7-8") == 4
+    assert normalize_lesson_pair("7-8") == 4
+
+    # Subject abbreviations expansion
+    assert "Людино-машинна взаємодія" in expand_subject("ЛМВ")
+    assert "Конструювання програмного забезпечення" in expand_subject("КПЗ")
+    assert "Машинне навчання" in expand_subject("МН")
+
+    # Teacher expansion
+    assert expand_teacher("Кондратюк") == "Кондратюк Є.С."
+    assert expand_teacher("Когут") == "Когут В.С."
+
