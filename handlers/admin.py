@@ -319,11 +319,12 @@ async def render_working_saturday_panel(event: Message | CallbackQuery, conn, sa
         )
         kb = [
             [
-                InlineKeyboardButton(text="✏️ Змінити день тижня", callback_data=f"ws_pick:{date_str}"),
-                InlineKeyboardButton(text="🔄 Тип тижня", callback_data=f"ws_par:{date_str}"),
+                InlineKeyboardButton(text="📢 Оголосити групі", callback_data=f"ws_bc_prompt:{date_str}"),
+                InlineKeyboardButton(text="👀 Переглянути розклад", callback_data=f"ws_view:{date_str}"),
             ],
             [
-                InlineKeyboardButton(text="👀 Переглянути розклад суботи", callback_data=f"ws_view:{date_str}"),
+                InlineKeyboardButton(text="✏️ Змінити день тижня", callback_data=f"ws_pick:{date_str}"),
+                InlineKeyboardButton(text="🔄 Тип тижня", callback_data=f"ws_par:{date_str}"),
             ],
             [
                 InlineKeyboardButton(text="🏖 Зробити вихідним (скасувати)", callback_data=f"ws_cancel:{date_str}"),
@@ -508,6 +509,99 @@ async def admin_back_working_saturday(callback: CallbackQuery, conn):
     date_str = callback.data.split(":", 1)[1]
     sat_date = date.fromisoformat(date_str)
     await callback.answer()
+    await render_working_saturday_panel(callback, conn, sat_date)
+
+
+@router.callback_query(F.data.startswith("ws_bc_prompt:"))
+async def admin_broadcast_working_saturday_prompt(callback: CallbackQuery, conn):
+    date_str = callback.data.split(":", 1)[1]
+    from services.working_days import get_working_saturday, DAY_NAMES_UK
+    from services.updates import get_active_user_ids
+    from services import schedule
+    import config
+    sat_date = date.fromisoformat(date_str)
+    date_formatted = sat_date.strftime("%d.%m.%Y")
+    ws = get_working_saturday(conn, date_str)
+    if not ws:
+        await callback.answer("Субота не налаштована як робоча.", show_alert=True)
+        return
+
+    rep_day_uk = DAY_NAMES_UK.get(ws["replaces_day"], ws["replaces_day"].capitalize())
+    w_type = ws.get("week_type") or schedule.get_week_type(sat_date)
+    w_type_uk = "Знаменник" if w_type == "denominator" else "Чисельник"
+
+    sch_data = schedule.load_schedule_data(config.SCHEDULE_PATH)
+    actual_lessons, reps = schedule.get_actual_schedule(conn, sch_data, sat_date, config.STUDENT_GROUP)
+
+    reps_note = f"\n⚠️ <i>Враховано замін: {len(reps)}</i>" if reps else ""
+    announcement_text = (
+        f"📢 <b>Увага! Оголошення щодо робочої суботи</b>\n\n"
+        f"🗓 <b>Субота, {date_formatted}</b> — навчальний день!\n"
+        f"• Навчання проходитиме за розкладом: <b>{rep_day_uk}</b> ({w_type_uk})\n"
+        f"• Кількість пар: <b>{len(actual_lessons)}</b>{reps_note}\n\n"
+        "💡 <i>Актуальний розклад занять та заміни можна переглянути за допомогою кнопки «📅 Розклад» або команди /schedule.</i>"
+    )
+
+    uids = get_active_user_ids(conn)
+    kb = [
+        [
+            InlineKeyboardButton(text=f"✅ Надіслати всім ({len(uids)} студ.)", callback_data=f"ws_bc_send:{date_str}"),
+        ],
+        [
+            InlineKeyboardButton(text="🔙 Скасувати", callback_data=f"ws_back:{date_str}"),
+        ],
+    ]
+    await callback.answer()
+    await callback.message.edit_text(
+        f"👀 <b>Попередній перегляд оголошення:</b>\n\n"
+        f"{announcement_text}\n\n"
+        f"➖➖➖➖➖➖➖➖\n"
+        f"Надіслати це повідомлення всім <b>{len(uids)}</b> користувачам групи?",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=kb),
+    )
+
+
+@router.callback_query(F.data.startswith("ws_bc_send:"))
+async def admin_broadcast_working_saturday_send(callback: CallbackQuery, conn):
+    date_str = callback.data.split(":", 1)[1]
+    from services.working_days import get_working_saturday, DAY_NAMES_UK
+    from services.updates import get_active_user_ids, broadcast_message_to_users
+    from services import schedule
+    import config
+    sat_date = date.fromisoformat(date_str)
+    date_formatted = sat_date.strftime("%d.%m.%Y")
+    ws = get_working_saturday(conn, date_str)
+    if not ws:
+        await callback.answer("Субота не налаштована як робоча.", show_alert=True)
+        return
+
+    rep_day_uk = DAY_NAMES_UK.get(ws["replaces_day"], ws["replaces_day"].capitalize())
+    w_type = ws.get("week_type") or schedule.get_week_type(sat_date)
+    w_type_uk = "Знаменник" if w_type == "denominator" else "Чисельник"
+
+    sch_data = schedule.load_schedule_data(config.SCHEDULE_PATH)
+    actual_lessons, reps = schedule.get_actual_schedule(conn, sch_data, sat_date, config.STUDENT_GROUP)
+    reps_note = f"\n⚠️ <i>Враховано замін: {len(reps)}</i>" if reps else ""
+
+    announcement_text = (
+        f"📢 <b>Увага! Оголошення щодо робочої суботи</b>\n\n"
+        f"🗓 <b>Субота, {date_formatted}</b> — навчальний день!\n"
+        f"• Навчання проходитиме за розкладом: <b>{rep_day_uk}</b> ({w_type_uk})\n"
+        f"• Кількість пар: <b>{len(actual_lessons)}</b>{reps_note}\n\n"
+        "💡 <i>Актуальний розклад занять та заміни можна переглянути за допомогою кнопки «📅 Розклад» або команди /schedule.</i>"
+    )
+
+    uids = get_active_user_ids(conn)
+    await callback.message.edit_text(f"⏳ Розсилаю оголошення для {len(uids)} користувачів...")
+    success, errors = await broadcast_message_to_users(callback.bot, uids, announcement_text)
+    admins.log_action(conn, callback.from_user.id, "broadcast_working_saturday", f"date={date_str} success={success} errors={errors}")
+    await callback.answer("Оголошення надіслано!")
+
+    await callback.message.answer(
+        f"✅ <b>Оголошення успішно надіслано!</b>\n\n"
+        f"• Доставлено: <b>{success}</b>\n"
+        f"• Помилок: <b>{errors}</b>"
+    )
     await render_working_saturday_panel(callback, conn, sat_date)
 
 
