@@ -1,11 +1,15 @@
+import datetime
 import html
 import io
 import logging
+import re
 import uuid
+from zoneinfo import ZoneInfo
 
 from aiogram import F, Router
 from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 import config
@@ -23,6 +27,10 @@ router = Router()
 
 # Тимчасове збереження розпізнаних замін для підтвердження
 _PENDING_RECOGNITIONS: dict[str, list[dict]] = {}
+
+
+class EditReplacementState(StatesGroup):
+    waiting_for_value = State()
 
 
 def get_schedule_data() -> dict:
@@ -164,10 +172,135 @@ async def confirm_clear_replacements(callback: CallbackQuery, conn):
     await callback.message.edit_text(f"✅ Успішно видалено замін: <b>{count}</b>.")
 
 
+FIELD_NAMES_UK = {
+    "lesson_number": "Номер пари",
+    "new_subject": "Новий предмет",
+    "teacher": "Викладач",
+    "room": "Аудиторія",
+    "date": "Дата",
+    "old_subject": "Що знімається (було)",
+}
+
+
+def normalize_date_input(val: str) -> str:
+    val = val.strip()
+    if re.match(r"^\d{4}-\d{2}-\d{2}$", val):
+        return val
+    m = re.match(r"^(\d{1,2})\.(\d{1,2})\.(\d{4})$", val)
+    if m:
+        day, month, year = int(m.group(1)), int(m.group(2)), int(m.group(3))
+        return f"{year:04d}-{month:02d}-{day:02d}"
+    m = re.match(r"^(\d{1,2})\.(\d{1,2})$", val)
+    if m:
+        day, month = int(m.group(1)), int(m.group(2))
+        year = datetime.datetime.now(ZoneInfo(config.TIMEZONE)).year
+        return f"{year:04d}-{month:02d}-{day:02d}"
+    return val
+
+
+def render_main_preview(token: str, reps: list[dict], conf_pct: int | None = None) -> tuple[str, InlineKeyboardMarkup]:
+    if not reps:
+        text = "⚠️ Немає розпізнаних замін для збереження."
+        markup = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="➕ Додати заміну вручну", callback_data=f"rec_add:{token}")],
+                [InlineKeyboardButton(text="❌ Закрити", callback_data=f"rec_rj:{token}")],
+            ]
+        )
+        return text, markup
+
+    cards = [replacements.format_replacement(r) for r in reps]
+    cards_text = "\n\n────────────────\n\n".join(cards)
+    conf_str = f"Точність: ~{conf_pct}%\n\n" if conf_pct is not None else ""
+
+    text = (
+        f"🔍 <b>Розпізнані заміни для групи {html.escape(config.STUDENT_GROUP)}:</b>\n"
+        f"{conf_str}"
+        f"{cards_text}\n\n"
+        "Зберегти ці заміни в розклад?"
+    )
+    markup = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="✅ Підтвердити заміни", callback_data=f"rec_cf:{token}"),
+                InlineKeyboardButton(text="❌ Відхилити", callback_data=f"rec_rj:{token}"),
+            ],
+            [
+                InlineKeyboardButton(text="✏️ Внести корективи", callback_data=f"rec_ed:{token}"),
+            ],
+        ]
+    )
+    return text, markup
+
+
+def render_corrections_menu(token: str, reps: list[dict]) -> tuple[str, InlineKeyboardMarkup]:
+    if not reps:
+        text = "⚠️ Список замін порожній. Ви можете додати заміну вручну:"
+        markup = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="➕ Додати нову заміну", callback_data=f"rec_add:{token}")],
+                [InlineKeyboardButton(text="🔙 Повернутися", callback_data=f"rec_done:{token}")],
+            ]
+        )
+        return text, markup
+
+    text = (
+        f"✏️ <b>Внесення коректив до замін ({len(reps)} шт.):</b>\n\n"
+        "Оберіть заміну зі списку для коригування або додайте нову 👇"
+    )
+    kb = []
+    for idx, r in enumerate(reps):
+        pair = r.get("lesson_number", "?")
+        subj = r.get("new_subject", "Без назви")
+        btn_text = f"Пара {pair}: {subj}"
+        if len(btn_text) > 36:
+            btn_text = btn_text[:33] + "..."
+        kb.append([InlineKeyboardButton(text=f"✏️ {btn_text}", callback_data=f"rec_it:{token}:{idx}")])
+
+    kb.append([InlineKeyboardButton(text="➕ Додати заміну вручну", callback_data=f"rec_add:{token}")])
+    kb.append([InlineKeyboardButton(text="🔙 Готово (до підтвердження)", callback_data=f"rec_done:{token}")])
+    return text, InlineKeyboardMarkup(inline_keyboard=kb)
+
+
+def render_item_edit_menu(token: str, idx: int, r: dict) -> tuple[str, InlineKeyboardMarkup]:
+    card = replacements.format_replacement(r)
+    text = (
+        f"✏️ <b>Редагування заміни #{idx + 1}</b>\n\n"
+        f"{card}\n\n"
+        "Оберіть поле, яке бажаєте змінити 👇"
+    )
+    kb = [
+        [
+            InlineKeyboardButton(text="⏰ Номер пари", callback_data=f"rec_fld:{token}:{idx}:lesson_number"),
+            InlineKeyboardButton(text="📚 Новий предмет", callback_data=f"rec_fld:{token}:{idx}:new_subject"),
+        ],
+        [
+            InlineKeyboardButton(text="👨‍🏫 Викладач", callback_data=f"rec_fld:{token}:{idx}:teacher"),
+            InlineKeyboardButton(text="🚪 Аудиторія", callback_data=f"rec_fld:{token}:{idx}:room"),
+        ],
+        [
+            InlineKeyboardButton(text="📅 Дата", callback_data=f"rec_fld:{token}:{idx}:date"),
+            InlineKeyboardButton(text="❌ Було (що знято)", callback_data=f"rec_fld:{token}:{idx}:old_subject"),
+        ],
+        [
+            InlineKeyboardButton(text="🗑 Видалити цю заміну", callback_data=f"rec_del:{token}:{idx}"),
+            InlineKeyboardButton(text="➕ Додати ще одну", callback_data=f"rec_add:{token}"),
+        ],
+        [
+            InlineKeyboardButton(text="🔙 До списку замін", callback_data=f"rec_ed:{token}"),
+            InlineKeyboardButton(text="✅ Готово (до збереження)", callback_data=f"rec_done:{token}"),
+        ],
+    ]
+    return text, InlineKeyboardMarkup(inline_keyboard=kb)
+
+
 # ---------- Обробка фотографій таблиць замін ----------
 
 @router.message(F.photo)
 async def handle_photo_replacement(message: Message, conn):
+    if not admins.is_admin(conn, message.from_user.id):
+        return
+
     photo = message.photo[-1]
     bot = message.bot
     status_msg = await message.answer("⏳ Отримано фото. Аналізую таблицю замін...")
@@ -183,25 +316,8 @@ async def handle_photo_replacement(message: Message, conn):
         token = str(uuid.uuid4())[:8]
         _PENDING_RECOGNITIONS[token] = reps
 
-        cards = [replacements.format_replacement(r) for r in reps]
-        cards_text = "\n\n────────────────\n\n".join(cards)
         conf_pct = int(result["confidence"] * 100)
-
-        preview_text = (
-            f"🔍 <b>Розпізнано заміни для групи {html.escape(config.STUDENT_GROUP)}!</b>\n"
-            f"Точність: ~{conf_pct}%\n\n"
-            f"{cards_text}\n\n"
-            "Зберегти ці заміни в розклад?"
-        )
-
-        markup = InlineKeyboardMarkup(
-            inline_keyboard=[
-                [
-                    InlineKeyboardButton(text="✅ Підтвердити заміни", callback_data=f"rec_cf:{token}"),
-                    InlineKeyboardButton(text="❌ Відхилити", callback_data=f"rec_rj:{token}"),
-                ]
-            ]
-        )
+        preview_text, markup = render_main_preview(token, reps, conf_pct=conf_pct)
         await status_msg.edit_text(preview_text, reply_markup=markup)
 
     except BotError as err:
@@ -212,7 +328,8 @@ async def handle_photo_replacement(message: Message, conn):
 
 
 @router.callback_query(F.data.startswith("rec_rj:"))
-async def reject_recognition(callback: CallbackQuery):
+async def reject_recognition(callback: CallbackQuery, state: FSMContext):
+    await state.clear()
     token = callback.data.split(":", 1)[1]
     _PENDING_RECOGNITIONS.pop(token, None)
     await callback.answer("Відхилено.")
@@ -220,7 +337,12 @@ async def reject_recognition(callback: CallbackQuery):
 
 
 @router.callback_query(F.data.startswith("rec_cf:"))
-async def confirm_recognition(callback: CallbackQuery, conn):
+async def confirm_recognition(callback: CallbackQuery, state: FSMContext, conn):
+    await state.clear()
+    if not admins.is_admin(conn, callback.from_user.id):
+        await callback.answer("У вас немає прав адміністратора.", show_alert=True)
+        return
+
     token = callback.data.split(":", 1)[1]
     reps = _PENDING_RECOGNITIONS.pop(token, None)
     if not reps:
@@ -238,6 +360,338 @@ async def confirm_recognition(callback: CallbackQuery, conn):
         f"✅ <b>Успішно збережено замін: {saved_count}!</b>\n"
         "Вони вже враховані в розкладі занять."
     )
+
+
+@router.callback_query(F.data.startswith("rec_ed:"))
+async def open_corrections_menu_handler(callback: CallbackQuery, state: FSMContext, conn):
+    await state.clear()
+    if not admins.is_admin(conn, callback.from_user.id):
+        await callback.answer("Тільки для адміністраторів.", show_alert=True)
+        return
+
+    token = callback.data.split(":", 1)[1]
+    reps = _PENDING_RECOGNITIONS.get(token)
+    if reps is None:
+        await callback.answer("Дані застаріли або вже збережені.", show_alert=True)
+        return
+
+    await callback.answer()
+    if len(reps) == 1:
+        text, kb = render_item_edit_menu(token, 0, reps[0])
+    else:
+        text, kb = render_corrections_menu(token, reps)
+    await callback.message.edit_text(text, reply_markup=kb)
+
+
+@router.callback_query(F.data.startswith("rec_it:"))
+async def open_item_edit_handler(callback: CallbackQuery, state: FSMContext, conn):
+    await state.clear()
+    if not admins.is_admin(conn, callback.from_user.id):
+        await callback.answer("Тільки для адміністраторів.", show_alert=True)
+        return
+
+    parts = callback.data.split(":")
+    token, idx_str = parts[1], parts[2]
+    reps = _PENDING_RECOGNITIONS.get(token)
+    if reps is None:
+        await callback.answer("Дані застаріли або вже збережені.", show_alert=True)
+        return
+
+    idx = int(idx_str)
+    if idx >= len(reps):
+        text, kb = render_corrections_menu(token, reps)
+        await callback.message.edit_text(text, reply_markup=kb)
+        return
+
+    await callback.answer()
+    text, kb = render_item_edit_menu(token, idx, reps[idx])
+    await callback.message.edit_text(text, reply_markup=kb)
+
+
+@router.callback_query(F.data.startswith("rec_done:"))
+async def finish_corrections_handler(callback: CallbackQuery, state: FSMContext, conn):
+    await state.clear()
+    if not admins.is_admin(conn, callback.from_user.id):
+        await callback.answer("Тільки для адміністраторів.", show_alert=True)
+        return
+
+    token = callback.data.split(":", 1)[1]
+    reps = _PENDING_RECOGNITIONS.get(token)
+    if reps is None:
+        await callback.answer("Дані застаріли або вже збережені.", show_alert=True)
+        return
+
+    await callback.answer()
+    text, kb = render_main_preview(token, reps)
+    await callback.message.edit_text(text, reply_markup=kb)
+
+
+@router.callback_query(F.data.startswith("rec_fld:"))
+async def edit_field_prompt_handler(callback: CallbackQuery, state: FSMContext, conn):
+    await state.clear()
+    if not admins.is_admin(conn, callback.from_user.id):
+        await callback.answer("Тільки для адміністраторів.", show_alert=True)
+        return
+
+    parts = callback.data.split(":")
+    token, idx_str, field = parts[1], parts[2], parts[3]
+    reps = _PENDING_RECOGNITIONS.get(token)
+    if reps is None:
+        await callback.answer("Дані застаріли або вже збережені.", show_alert=True)
+        return
+
+    idx = int(idx_str)
+    if idx >= len(reps):
+        await callback.answer()
+        text, kb = render_corrections_menu(token, reps)
+        await callback.message.edit_text(text, reply_markup=kb)
+        return
+
+    r = reps[idx]
+    await callback.answer()
+
+    if field == "lesson_number":
+        pair_kb = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(text="1 пара", callback_data=f"rec_sp:{token}:{idx}:1"),
+                    InlineKeyboardButton(text="2 пара", callback_data=f"rec_sp:{token}:{idx}:2"),
+                    InlineKeyboardButton(text="3 пара", callback_data=f"rec_sp:{token}:{idx}:3"),
+                ],
+                [
+                    InlineKeyboardButton(text="4 пара", callback_data=f"rec_sp:{token}:{idx}:4"),
+                    InlineKeyboardButton(text="5 пара", callback_data=f"rec_sp:{token}:{idx}:5"),
+                    InlineKeyboardButton(text="6 пара", callback_data=f"rec_sp:{token}:{idx}:6"),
+                ],
+                [
+                    InlineKeyboardButton(text="🔙 Скасувати", callback_data=f"rec_it:{token}:{idx}"),
+                ],
+            ]
+        )
+        await callback.message.edit_text(
+            f"⏰ <b>Оберіть номер пари для заміни #{idx + 1}:</b>\nПоточна: <b>{r.get('lesson_number')} пара</b>",
+            reply_markup=pair_kb,
+        )
+        return
+
+    if field == "date":
+        today_str = replacements.get_today_key()
+        tom_dt = datetime.datetime.now(ZoneInfo(config.TIMEZONE)) + datetime.timedelta(days=1)
+        tom_str = tom_dt.strftime("%Y-%m-%d")
+        date_kb = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(text=f"📅 Сьогодні ({today_str})", callback_data=f"rec_sd:{token}:{idx}:{today_str}"),
+                ],
+                [
+                    InlineKeyboardButton(text=f"➡️ Завтра ({tom_str})", callback_data=f"rec_sd:{token}:{idx}:{tom_str}"),
+                ],
+                [
+                    InlineKeyboardButton(text="✏️ Ввести іншу дату вручну", callback_data=f"rec_txtdate:{token}:{idx}"),
+                ],
+                [
+                    InlineKeyboardButton(text="🔙 Скасувати", callback_data=f"rec_it:{token}:{idx}"),
+                ],
+            ]
+        )
+        await callback.message.edit_text(
+            f"📅 <b>Оберіть дату для заміни #{idx + 1}:</b>\nПоточна: <code>{r.get('date')}</code>",
+            reply_markup=date_kb,
+        )
+        return
+
+    f_title = FIELD_NAMES_UK.get(field, field)
+    await state.set_state(EditReplacementState.waiting_for_value)
+    await state.update_data(token=token, idx=idx, field=field, message_id=callback.message.message_id)
+
+    cancel_kb = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="↩️ Скасувати", callback_data=f"rec_it:{token}:{idx}")],
+        ]
+    )
+    cur_val = r.get(field) or "не вказано"
+    await callback.message.edit_text(
+        f"✏️ <b>Редагування поля: {f_title}</b> (заміна #{idx + 1})\n\n"
+        f"Поточне значення: <b>{html.escape(str(cur_val))}</b>\n\n"
+        "Надішліть нове значення в цей чат текстовим повідомленням 👇\n"
+        "<i>(надішліть «-» щоб очистити, або натисніть «↩️ Скасувати» нижче)</i>",
+        reply_markup=cancel_kb,
+    )
+
+
+@router.callback_query(F.data.startswith("rec_txtdate:"))
+async def edit_custom_date_prompt(callback: CallbackQuery, state: FSMContext, conn):
+    if not admins.is_admin(conn, callback.from_user.id):
+        await callback.answer("Тільки для адміністраторів.", show_alert=True)
+        return
+
+    parts = callback.data.split(":")
+    token, idx_str = parts[1], parts[2]
+    idx = int(idx_str)
+    reps = _PENDING_RECOGNITIONS.get(token)
+    if reps is None or idx >= len(reps):
+        await callback.answer("Дані застаріли.", show_alert=True)
+        return
+
+    await state.set_state(EditReplacementState.waiting_for_value)
+    await state.update_data(token=token, idx=idx, field="date", message_id=callback.message.message_id)
+
+    cancel_kb = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="↩️ Скасувати", callback_data=f"rec_it:{token}:{idx}")],
+        ]
+    )
+    await callback.answer()
+    await callback.message.edit_text(
+        f"📅 <b>Введіть дату для заміни #{idx + 1}:</b>\n\n"
+        "Формат: <code>РРРР-ММ-ДД</code> (наприклад <code>2026-10-16</code>) або <code>ДД.ММ.РРРР</code>\n\n"
+        "Надішліть дату текстовим повідомленням у чат 👇",
+        reply_markup=cancel_kb,
+    )
+
+
+@router.callback_query(F.data.startswith("rec_sp:"))
+async def set_pair_number_handler(callback: CallbackQuery, conn):
+    if not admins.is_admin(conn, callback.from_user.id):
+        await callback.answer("Тільки для адміністраторів.", show_alert=True)
+        return
+
+    parts = callback.data.split(":")
+    token, idx_str, pair_str = parts[1], parts[2], parts[3]
+    reps = _PENDING_RECOGNITIONS.get(token)
+    if reps is None:
+        await callback.answer("Дані застаріли.", show_alert=True)
+        return
+
+    idx = int(idx_str)
+    if idx >= len(reps):
+        await callback.answer()
+        return
+
+    reps[idx]["lesson_number"] = int(pair_str)
+    await callback.answer(f"Встановлено {pair_str} пару!")
+    text, kb = render_item_edit_menu(token, idx, reps[idx])
+    await callback.message.edit_text(text, reply_markup=kb)
+
+
+@router.callback_query(F.data.startswith("rec_sd:"))
+async def set_date_value_handler(callback: CallbackQuery, conn):
+    if not admins.is_admin(conn, callback.from_user.id):
+        await callback.answer("Тільки для адміністраторів.", show_alert=True)
+        return
+
+    parts = callback.data.split(":")
+    token, idx_str, date_str = parts[1], parts[2], parts[3]
+    reps = _PENDING_RECOGNITIONS.get(token)
+    if reps is None:
+        await callback.answer("Дані застаріли.", show_alert=True)
+        return
+
+    idx = int(idx_str)
+    if idx >= len(reps):
+        await callback.answer()
+        return
+
+    reps[idx]["date"] = date_str
+    await callback.answer(f"Дату встановлено: {date_str}!")
+    text, kb = render_item_edit_menu(token, idx, reps[idx])
+    await callback.message.edit_text(text, reply_markup=kb)
+
+
+@router.callback_query(F.data.startswith("rec_del:"))
+async def delete_replacement_item_handler(callback: CallbackQuery, conn):
+    if not admins.is_admin(conn, callback.from_user.id):
+        await callback.answer("Тільки для адміністраторів.", show_alert=True)
+        return
+
+    parts = callback.data.split(":")
+    token, idx_str = parts[1], parts[2]
+    reps = _PENDING_RECOGNITIONS.get(token)
+    if reps is None:
+        await callback.answer("Дані застаріли.", show_alert=True)
+        return
+
+    idx = int(idx_str)
+    if idx < len(reps):
+        reps.pop(idx)
+        await callback.answer("Заміну видалено!")
+    else:
+        await callback.answer()
+
+    text, kb = render_corrections_menu(token, reps)
+    await callback.message.edit_text(text, reply_markup=kb)
+
+
+@router.callback_query(F.data.startswith("rec_add:"))
+async def add_replacement_item_handler(callback: CallbackQuery, conn):
+    if not admins.is_admin(conn, callback.from_user.id):
+        await callback.answer("Тільки для адміністраторів.", show_alert=True)
+        return
+
+    token = callback.data.split(":", 1)[1]
+    reps = _PENDING_RECOGNITIONS.setdefault(token, [])
+
+    last_pair = reps[-1].get("lesson_number", 0) if reps else 0
+    next_pair = (last_pair + 1) if (isinstance(last_pair, int) and last_pair < 6) else 1
+    default_date = reps[0].get("date") if reps else replacements.get_today_key()
+
+    new_item = {
+        "date": default_date,
+        "group_name": config.STUDENT_GROUP,
+        "lesson_number": next_pair,
+        "new_subject": "Новий предмет",
+        "teacher": "",
+        "room": "",
+        "old_subject": "",
+    }
+    reps.append(new_item)
+    idx = len(reps) - 1
+
+    await callback.answer("Додано заміну!")
+    text, kb = render_item_edit_menu(token, idx, new_item)
+    await callback.message.edit_text(text, reply_markup=kb)
+
+
+@router.message(EditReplacementState.waiting_for_value)
+async def process_field_value_text(message: Message, state: FSMContext, conn):
+    if not admins.is_admin(conn, message.from_user.id):
+        await state.clear()
+        return
+
+    data = await state.get_data()
+    token = data.get("token")
+    idx = data.get("idx")
+    field = data.get("field")
+    await state.clear()
+
+    reps = _PENDING_RECOGNITIONS.get(token)
+    if not reps or idx >= len(reps):
+        await message.answer("⚠️ Дані замін застаріли або не знайдені.")
+        return
+
+    val = message.text.strip()
+    if val.lower() in {"скасувати", "відміна", "/cancel", "cancel"}:
+        await message.answer("Редагування скасовано.")
+        text, kb = render_item_edit_menu(token, idx, reps[idx])
+        await message.answer(text, reply_markup=kb)
+        return
+
+    if val == "-":
+        val = ""
+    else:
+        if field in ("new_subject", "old_subject"):
+            val = recognition.expand_subject(val)
+        elif field == "teacher":
+            val = recognition.expand_teacher(val)
+        elif field == "date":
+            val = normalize_date_input(val)
+
+    reps[idx][field] = val
+    f_title = FIELD_NAMES_UK.get(field, field)
+    await message.answer(f"✅ Поле <b>{f_title}</b> оновлено на: <b>{html.escape(str(val or '—'))}</b>")
+
+    text, kb = render_item_edit_menu(token, idx, reps[idx])
+    await message.answer(text, reply_markup=kb)
 
 
 # ---------- Статус системи ----------

@@ -145,3 +145,72 @@ def test_admin_schedule_keyboards():
     assert "🟢 Статус системи" in sch_button_texts
     assert "🔙 В адмін-панель" in sch_button_texts
 
+
+def test_replacement_correction_menus_and_helpers():
+    from handlers.schedule import (
+        normalize_date_input,
+        render_corrections_menu,
+        render_item_edit_menu,
+        render_main_preview,
+    )
+
+    # Date normalization
+    assert normalize_date_input("2026-10-16") == "2026-10-16"
+    assert normalize_date_input("16.10.2026") == "2026-10-16"
+    assert normalize_date_input("05.02.2026") == "2026-02-05"
+    assert normalize_date_input("16.10").endswith("-10-16")
+
+    token = "testtok1"
+    sample_reps = [
+        {
+            "date": "2026-10-16",
+            "group_name": "ПІ-231",
+            "lesson_number": 3,
+            "new_subject": "Людино-машинна взаємодія (ЛМВ)",
+            "teacher": "Барабаш Д.С.",
+            "room": "305",
+            "old_subject": "Фізичне виховання",
+        },
+        {
+            "date": "2026-10-16",
+            "group_name": "ПІ-231",
+            "lesson_number": 4,
+            "new_subject": "Конструювання ПЗ",
+            "teacher": "Когут В.С.",
+            "room": "402",
+            "old_subject": "",
+        },
+    ]
+
+    # Main preview
+    text, kb = render_main_preview(token, sample_reps, conf_pct=92)
+    assert "Точність: ~92%" in text
+    assert "Людино-машинна взаємодія" in text
+    all_btns = [btn.text for row in kb.inline_keyboard for btn in row]
+    assert "✅ Підтвердити заміни" in all_btns
+    assert "❌ Відхилити" in all_btns
+    assert "✏️ Внести корективи" in all_btns
+
+    # Corrections menu
+    c_text, c_kb = render_corrections_menu(token, sample_reps)
+    assert "Внесення коректив" in c_text
+    c_btns = [btn.text for row in c_kb.inline_keyboard for btn in row]
+    assert any("Пара 3" in b for b in c_btns)
+    assert any("Пара 4" in b for b in c_btns)
+    assert "➕ Додати заміну вручну" in c_btns
+    assert "🔙 Готово (до підтвердження)" in c_btns
+
+    # Single item editor
+    i_text, i_kb = render_item_edit_menu(token, 0, sample_reps[0])
+    assert "Редагування заміни #1" in i_text
+    i_btns = [btn.text for row in i_kb.inline_keyboard for btn in row]
+    assert "⏰ Номер пари" in i_btns
+    assert "📚 Новий предмет" in i_btns
+    assert "👨‍🏫 Викладач" in i_btns
+    assert "🚪 Аудиторія" in i_btns
+    assert "📅 Дата" in i_btns
+    assert "❌ Було (що знято)" in i_btns
+    assert "🗑 Видалити цю заміну" in i_btns
+    assert "🔙 До списку замін" in i_btns
+    assert "✅ Готово (до збереження)" in i_btns
+
