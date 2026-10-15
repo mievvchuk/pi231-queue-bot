@@ -61,10 +61,51 @@ def get_week_type(dt: date) -> str:
 def get_base_schedule(schedule_data: dict, dt: date) -> list[dict]:
     day_key = dt.strftime("%A").lower()
     day_content = schedule_data.get(day_key, [])
-    if isinstance(day_content, list):
-        return day_content
     w_type = get_week_type(dt)
-    return day_content.get(w_type) or day_content.get("regular") or []
+
+    if isinstance(day_content, dict):
+        raw_list = day_content.get(w_type) or day_content.get("regular") or []
+    elif isinstance(day_content, list):
+        raw_list = day_content
+    else:
+        raw_list = []
+
+    filtered = []
+    for item in raw_list:
+        wt = item.get("week_type", "both")
+        if wt not in ("both", w_type):
+            continue
+
+        pair_num = int(item.get("pair") or item.get("number") or 0)
+        teachers_list = item.get("teachers")
+
+        if isinstance(teachers_list, list) and teachers_list:
+            teacher_parts = []
+            for t in teachers_list:
+                name = t.get("name", "")
+                room = t.get("room")
+                if room:
+                    teacher_parts.append(f"{name} ({room})")
+                else:
+                    teacher_parts.append(name)
+            teachers_display = ", ".join(teacher_parts)
+            room_display = ""
+        else:
+            teachers_display = item.get("teacher", "")
+            room_display = item.get("room", "")
+
+        filtered.append({
+            "number": pair_num,
+            "subject": item.get("subject", ""),
+            "teacher": teachers_display,
+            "teachers_raw": teachers_list if isinstance(teachers_list, list) else None,
+            "room": room_display,
+            "lessons": item.get("lessons", ""),
+            "startTime": item.get("startTime", ""),
+            "endTime": item.get("endTime", ""),
+        })
+
+    return filtered
 
 
 def get_actual_schedule(conn, schedule_data: dict, dt: date, group_name: str = "ПІ-231") -> tuple[list[dict], list[dict]]:
@@ -83,7 +124,9 @@ def get_actual_schedule(conn, schedule_data: dict, dt: date, group_name: str = "
                 "number": num,
                 "subject": rep["new_subject"],
                 "teacher": rep.get("teacher") or lesson.get("teacher"),
+                "teachers_raw": None,
                 "room": rep.get("room") or lesson.get("room"),
+                "lessons": lesson.get("lessons", ""),
                 "startTime": lesson.get("startTime", ""),
                 "endTime": lesson.get("endTime", ""),
                 "is_replacement": True,
@@ -98,7 +141,9 @@ def get_actual_schedule(conn, schedule_data: dict, dt: date, group_name: str = "
                 "number": num,
                 "subject": rep["new_subject"],
                 "teacher": rep.get("teacher"),
+                "teachers_raw": None,
                 "room": rep.get("room"),
+                "lessons": "",
                 "startTime": "",
                 "endTime": "",
                 "is_replacement": True,
@@ -124,13 +169,23 @@ def format_schedule_for_date(conn, schedule_data: dict, dt: date, group_name: st
     lines = [header, ""]
     for l in lessons:
         time_part = f" ({l['startTime']}–{l['endTime']})" if l.get("startTime") and l.get("endTime") else ""
+        if not time_part and l.get("lessons"):
+            time_part = f" ({l['lessons']} уроки)"
+
         badge = " ⚠️ <b>[ЗАМІНА]</b>" if l.get("is_replacement") else ""
         lines.append(f"⏰ <b>{l['number']} пара</b>{time_part}{badge}")
         lines.append(f"📚 <b>{html.escape(l.get('subject', ''))}</b>")
-        if l.get("teacher"):
-            lines.append(f"👨‍🏫 {html.escape(l['teacher'])}")
-        if l.get("room"):
-            lines.append(f"🚪 Ауд. {html.escape(l['room'])}")
+
+        if l.get("teachers_raw"):
+            for t in l["teachers_raw"]:
+                t_name = html.escape(t.get("name", ""))
+                t_room = f" (ауд. {html.escape(t['room'])})" if t.get("room") else ""
+                lines.append(f"👨‍🏫 {t_name}{t_room}")
+        else:
+            if l.get("teacher"):
+                lines.append(f"👨‍🏫 {html.escape(l['teacher'])}")
+            if l.get("room"):
+                lines.append(f"🚪 Ауд. {html.escape(l['room'])}")
         lines.append("")
 
     return "\n".join(lines).strip()
