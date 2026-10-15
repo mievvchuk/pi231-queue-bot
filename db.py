@@ -210,16 +210,16 @@ class PGConnectionWrapper:
         lastrowid = None
 
         cur = self.raw.cursor(row_factory=dict_row)
-        if is_insert and "RETURNING" not in pg_sql.upper():
+        tables_without_id = {"bot_updates", "bot_state"}
+        table_match = re.search(r"insert\s+into\s+([a-zA-Z_0-9]+)", pg_sql, re.IGNORECASE)
+        table_name = table_match.group(1).lower() if table_match else ""
+
+        if is_insert and "RETURNING" not in pg_sql.upper() and table_name not in tables_without_id:
             pg_sql_returning = pg_sql.rstrip(" ;") + " RETURNING id"
-            try:
-                cur.execute(pg_sql_returning, params)
-                res = cur.fetchone()
-                if res and "id" in res:
-                    lastrowid = res["id"]
-            except Exception:
-                # Якщо у таблиці немає стовпця id або RETURNING не спрацював
-                cur.execute(pg_sql, params)
+            cur.execute(pg_sql_returning, params)
+            res = cur.fetchone()
+            if res and "id" in res:
+                lastrowid = res["id"]
         else:
             cur.execute(pg_sql, params)
 

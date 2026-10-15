@@ -119,3 +119,18 @@ def test_first_10_positions_and_overflow_flow(conn, make_user):
     pos, total = queues.join_queue(conn, 21, s_id)
     assert pos == 12
     assert total == 12
+
+
+def test_create_duplicate_queue_validation(conn, make_user):
+    make_user(1, "Тест Студент")
+    s_id = queues.create_queue(conn, 1, 1, 1)
+    assert s_id > 0
+
+    existing = queues.find_active_session_by_subject_teacher(conn, 1, 1)
+    assert existing is not None
+    assert existing["id"] == s_id
+
+    with pytest.raises(BotError) as exc_info:
+        queues.create_queue(conn, 1, 1, 1)
+    assert "вже створена" in str(exc_info.value)
+

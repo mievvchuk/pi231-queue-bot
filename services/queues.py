@@ -323,14 +323,37 @@ def add_student_by_admin(conn, actor_id: int, session_id: int, user_id: int, pos
 
 
 
+def find_active_session_by_subject_teacher(conn, subject_id: int, teacher_id: int):
+    """Повертає активну сесію черги (open/closed) для вказаного предмета та викладача або None."""
+    return conn.execute(
+        "SELECT * FROM queue_sessions WHERE subject_id = ? AND teacher_id = ? AND status IN ('open', 'closed')",
+        (subject_id, teacher_id),
+    ).fetchone()
+
+
 def _insert_session(conn, subject_id: int, teacher_id: int, lesson_title: str) -> int:
+    existing = find_active_session_by_subject_teacher(conn, subject_id, teacher_id)
+    if existing:
+        status_text = "відкрита для запису" if existing["status"] == "open" else "закрита для запису"
+        raise BotError(
+            f"⚠️ Черга для цього предмета й викладача вже створена ({status_text})!\n"
+            "Ви можете переглянути її або записатися в меню «📋 Усі черги»."
+        )
+
     try:
         cursor = conn.execute(
             "INSERT INTO queue_sessions (subject_id, teacher_id, lesson_title) VALUES (?, ?, ?)",
             (subject_id, teacher_id, lesson_title),
         )
-    except sqlite3.IntegrityError:
-        raise BotError("Для цього предмета й викладача вже є незавершена черга.")
+    except Exception as e:
+        err_name = type(e).__name__
+        err_msg = str(e).lower()
+        if "integrityerror" in err_name.lower() or "uniqueviolation" in err_name.lower() or "unique" in err_msg:
+            raise BotError(
+                "⚠️ Черга для цього предмета й викладача вже створена!\n"
+                "Ви можете знайти її в меню «📋 Усі черги»."
+            )
+        raise
     return cursor.lastrowid
 
 

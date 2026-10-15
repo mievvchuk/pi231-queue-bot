@@ -612,6 +612,16 @@ async def new_queue_subject_selected(message: Message, state: FSMContext, conn, 
         return
     if len(matched_sub["teachers"]) == 1:
         teacher = matched_sub["teachers"][0]
+        existing = queues.find_active_session_by_subject_teacher(conn, matched_sub["id"], teacher["id"])
+        if existing:
+            await state.clear()
+            status_text = "відкрита для запису" if existing["status"] == "open" else "закрита для запису"
+            await open_queue_screen(
+                message, conn, subjects, existing["id"],
+                note=f"ℹ️ Черга для предмета <b>{matched_sub['name']}</b> ({teacher['name']}) вже створена ({status_text})!"
+            )
+            return
+
         try:
             session_id = queues.create_queue(conn, message.from_user.id, matched_sub["id"], teacher["id"])
             await state.clear()
@@ -656,6 +666,17 @@ async def new_queue_teacher_selected(message: Message, state: FSMContext, conn, 
     matched_teacher = next((t for t in matched_sub["teachers"] if t["name"].lower() == teacher_name.lower()), None)
     if not matched_teacher:
         return
+
+    existing = queues.find_active_session_by_subject_teacher(conn, matched_sub["id"], matched_teacher["id"])
+    if existing:
+        await state.clear()
+        status_text = "відкрита для запису" if existing["status"] == "open" else "закрита для запису"
+        await open_queue_screen(
+            message, conn, subjects, existing["id"],
+            note=f"ℹ️ Черга для предмета <b>{matched_sub['name']}</b> ({matched_teacher['name']}) вже створена ({status_text})!"
+        )
+        return
+
     try:
         session_id = queues.create_queue(conn, message.from_user.id, matched_sub["id"], matched_teacher["id"])
         await state.clear()
