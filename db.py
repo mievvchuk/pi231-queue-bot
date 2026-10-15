@@ -85,9 +85,38 @@ MIGRATIONS = [
         ON queue_sessions (subject_id, teacher_id, queue_type)
         WHERE status IN ('open', 'closed');
     """,
+    """
+    CREATE TABLE IF NOT EXISTS replacements (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        date TEXT NOT NULL,
+        group_name TEXT NOT NULL,
+        lesson_number INTEGER NOT NULL,
+        old_subject TEXT,
+        new_subject TEXT NOT NULL,
+        teacher TEXT,
+        room TEXT,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS ux_replacements_unique
+        ON replacements (date, group_name, lesson_number, new_subject);
+    """,
 ]
 
 PG_SCHEMA = """
+CREATE TABLE IF NOT EXISTS replacements (
+    id SERIAL PRIMARY KEY,
+    date TEXT NOT NULL,
+    group_name TEXT NOT NULL,
+    lesson_number INTEGER NOT NULL,
+    old_subject TEXT,
+    new_subject TEXT NOT NULL,
+    teacher TEXT,
+    room TEXT,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_replacements_unique
+    ON replacements (date, group_name, lesson_number, new_subject);
+
 CREATE TABLE IF NOT EXISTS bot_state (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL,

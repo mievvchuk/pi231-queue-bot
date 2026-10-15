@@ -17,7 +17,7 @@ import os
 from aiohttp import web
 
 
-BOT_VERSION = "v1.6"
+BOT_VERSION = "v1.7"
 
 
 async def healthcheck(request: web.Request) -> web.Response:
@@ -43,17 +43,22 @@ async def main() -> None:
     conn = connect(config.DATABASE_URL)
     init_admins(conn, config.get_initial_admin_ids())
 
+    from handlers import schedule as schedule_handler
+
     # conn і subjects доступні в обробниках як іменовані параметри
     dp = Dispatcher(conn=conn, subjects=load_subjects(config.SUBJECTS_PATH))
     dp.message.outer_middleware(Guard())
     dp.callback_query.outer_middleware(Guard())
-    dp.include_routers(start.router, admin.router, student.router, start.fallback_router)
+    dp.include_routers(start.router, admin.router, schedule_handler.router, student.router, start.fallback_router)
 
     bot = Bot(config.get_bot_token(), default=DefaultBotProperties(parse_mode=ParseMode.HTML))
     await run_web_server()
 
     from services.updates import check_and_broadcast_updates
     asyncio.create_task(check_and_broadcast_updates(bot, conn))
+
+    from services.schedule_notifier import start_schedule_notifier
+    asyncio.create_task(start_schedule_notifier(bot, conn))
 
     if getattr(config, "ALERTS_TOKEN", None):
         from services.alerts import start_alerts_checker

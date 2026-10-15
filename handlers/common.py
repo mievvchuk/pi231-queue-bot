@@ -39,14 +39,24 @@ def make_reply_keyboard(rows: list[list[str]]) -> ReplyKeyboardMarkup:
 
 
 def get_reply_menu(conn, telegram_id: int) -> ReplyKeyboardMarkup:
-    """Головне меню студента: не більше 4-5 основних кнопок."""
+    """Головне меню студента."""
     keyboard = [
         [KeyboardButton(text="📋 Усі черги"), KeyboardButton(text="👥 Мої черги")],
+        [KeyboardButton(text="📅 Розклад"), KeyboardButton(text="🔄 Заміни")],
         [KeyboardButton(text="➕ Відкрити чергу"), KeyboardButton(text="❓ Допомога")],
     ]
     if admins.is_admin(conn, telegram_id):
         keyboard.append([KeyboardButton(text="⚡ Адмін-панель")])
     return ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True)
+
+
+def get_schedule_reply_menu() -> ReplyKeyboardMarkup:
+    """Меню розділу «Розклад»."""
+    return make_reply_keyboard([
+        ["📅 Сьогодні", "➡️ Завтра"],
+        ["🗓 Весь тиждень", "🔄 Активні заміни"],
+        ["🏠 Головне меню"],
+    ])
 
 
 def get_queue_view_reply_menu() -> ReplyKeyboardMarkup:
