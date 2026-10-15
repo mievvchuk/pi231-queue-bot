@@ -129,3 +129,19 @@ def test_lesson_number_and_expansions():
     assert expand_teacher("Кондратюк") == "Кондратюк Є.С."
     assert expand_teacher("Когут") == "Когут В.С."
 
+
+def test_admin_schedule_keyboards():
+    from handlers.common import get_admin_reply_menu, get_admin_schedule_menu
+
+    admin_menu = get_admin_reply_menu()
+    button_texts = [btn.text for row in admin_menu.keyboard for btn in row]
+    assert "📅 Розклад і заміни" in button_texts
+
+    sch_menu = get_admin_schedule_menu()
+    sch_button_texts = [btn.text for row in sch_menu.keyboard for btn in row]
+    assert "📥 Отримати schedule.json" in sch_button_texts
+    assert "📤 Завантажити розклад" in sch_button_texts
+    assert "🗑 Очистити всі заміни" in sch_button_texts
+    assert "🟢 Статус системи" in sch_button_texts
+    assert "🔙 В адмін-панель" in sch_button_texts
+

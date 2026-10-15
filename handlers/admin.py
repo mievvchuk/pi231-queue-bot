@@ -14,6 +14,7 @@ from handlers.common import (
     format_queue,
     get_admin_queues_menu,
     get_admin_reply_menu,
+    get_admin_schedule_menu,
     get_admin_settings_menu,
     get_admin_students_menu,
     get_admin_users_menu,
@@ -63,6 +64,7 @@ class AdminPanelState(StatesGroup):
     in_queues_menu = State()
     in_students_menu = State()
     in_settings_menu = State()
+    in_schedule_menu = State()
     select_queue_for_view = State()
     select_queue_for_add_student = State()
     select_queue_for_order = State()
@@ -220,6 +222,50 @@ async def admin_category_students(message: Message, state: FSMContext):
         "👥 <b>Керування студентами</b>\n\nОберіть дію нижче 👇",
         reply_markup=get_admin_students_menu(),
     )
+
+
+@router.message(F.text == "📅 Розклад і заміни", StateFilter("*"))
+async def admin_category_schedule(message: Message, state: FSMContext):
+    await state.clear()
+    await state.set_state(AdminPanelState.in_schedule_menu)
+    await message.answer(
+        "📅 <b>Керування розкладом та замінами</b>\n\n"
+        "• <b>Отримати schedule.json</b> — завантажити поточний JSON-файл базового розкладу\n"
+        "• <b>Завантажити розклад</b> — інструкція щодо оновлення розкладу через JSON\n"
+        "• <b>Очистити всі заміни</b> — видалити активні заміни пар для групи\n"
+        "• <b>Статус системи</b> — стан бота, бази даних та розпізнавання\n\n"
+        "💡 <i>Ви також можете надіслати в чат фотографію таблиці замін або новий файл <code>schedule.json</code> як документ у будь-який момент!</i>",
+        reply_markup=get_admin_schedule_menu(),
+    )
+
+
+@router.message(F.text == "📥 Отримати schedule.json", StateFilter("*"))
+async def admin_export_schedule_action(message: Message, conn):
+    from handlers.schedule import export_schedule_file
+    await export_schedule_file(message, conn)
+
+
+@router.message(F.text == "📤 Завантажити розклад", StateFilter("*"))
+async def admin_upload_schedule_action(message: Message):
+    await message.answer(
+        "📤 <b>Як оновити розклад занять:</b>\n\n"
+        "1. Натисніть кнопку <b>«📥 Отримати schedule.json»</b> та збережіть файл.\n"
+        "2. Відкрийте файл на телефоні або комп'ютері та внесіть актуальні пари (предмети, аудиторії, викладачів).\n"
+        "3. <b>Надішліть збережений файл <code>schedule.json</code> прямо сюди в чат як документ 📄.</b>\n\n"
+        "Бот автоматично валідує формат JSON і миттєво оновить розклад для всієї групи!"
+    )
+
+
+@router.message(F.text == "🗑 Очистити всі заміни", StateFilter("*"))
+async def admin_clear_replacements_action(message: Message, conn):
+    from handlers.schedule import request_clear_replacements
+    await request_clear_replacements(message, conn)
+
+
+@router.message(F.text == "🟢 Статус системи", StateFilter("*"))
+async def admin_status_action(message: Message, conn):
+    from handlers.schedule import show_bot_status
+    await show_bot_status(message, conn)
 
 
 @router.message(F.text == "👥 Користувачі", StateFilter("*"))
@@ -523,6 +569,7 @@ async def admin_category_settings(message: Message, state: FSMContext, conn=None
         AdminPanelState.in_queues_menu,
         AdminPanelState.in_students_menu,
         AdminPanelState.in_settings_menu,
+        AdminPanelState.in_schedule_menu,
         AdminUserState.in_users_menu,
         AdminUserState.browsing_users,
         AdminPanelState.select_queue_for_view,
