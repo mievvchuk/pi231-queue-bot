@@ -57,7 +57,9 @@ def get_queue_view_reply_menu() -> ReplyKeyboardMarkup:
     ])
 
 
-def get_queue_actions_reply_menu(is_in_queue: bool, is_open: bool = True) -> ReplyKeyboardMarkup:
+def get_queue_actions_reply_menu(
+    is_in_queue: bool, is_open: bool = True, can_pick_number: bool = True
+) -> ReplyKeyboardMarkup:
     """Меню «Дії» залежно від статусу запису студента."""
     if is_in_queue:
         return make_reply_keyboard([
@@ -66,8 +68,13 @@ def get_queue_actions_reply_menu(is_in_queue: bool, is_open: bool = True) -> Rep
             ["🔙 Назад до черги"],
         ])
     if is_open:
+        if can_pick_number:
+            return make_reply_keyboard([
+                ["📝 Стати в кінець", "🔢 Обрати місце"],
+                ["🔙 Назад до черги"],
+            ])
         return make_reply_keyboard([
-            ["📝 Стати в кінець", "🔢 Обрати місце"],
+            ["📝 Стати в кінець"],
             ["🔙 Назад до черги"],
         ])
     return make_reply_keyboard([["🔙 Назад до черги"]])
@@ -121,7 +128,7 @@ def get_admin_settings_menu() -> ReplyKeyboardMarkup:
     """Вкладене меню адміна: Налаштування."""
     return make_reply_keyboard([
         ["👥 Адміністратори", "⛔ Заблоковані"],
-        ["🔙 Назад"],
+        ["📢 Оголошення для всіх", "🔙 Назад"],
     ])
 
 
@@ -224,12 +231,20 @@ def find_session_by_label(conn, subjects: list[dict], text: str):
             if not sub_words or any(w in norm_input for w in sub_words):
                 return s
 
-    # 3. Резервний пошук за назвою предмета
+    # 3. Резервний пошук за назвою предмета (тільки якщо в запиті не вказано іншого викладача)
     for s in sessions:
-        sub_name, _ = session_names(subjects, s)
+        sub_name, teacher_name = session_names(subjects, s)
         s_norm = normalize_text(sub_name)
         if s_norm and (s_norm in norm_input or norm_input in s_norm):
-            return s
+            subject = find_subject(subjects, s["subject_id"])
+            other_teachers = [t for t in subject["teachers"] if t["id"] != s["teacher_id"]] if subject else []
+            has_other_teacher = any(
+                normalize_text(ot["name"]).split()[0] in norm_input
+                for ot in other_teachers
+                if normalize_text(ot["name"]).split()
+            )
+            if not has_other_teacher:
+                return s
 
     return None
 

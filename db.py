@@ -64,9 +64,21 @@ MIGRATIONS = [
     """
     ALTER TABLE users ADD COLUMN is_blocked INTEGER NOT NULL DEFAULT 0;
     """,
+    """
+    CREATE TABLE IF NOT EXISTS bot_updates (
+        version TEXT PRIMARY KEY,
+        description TEXT NOT NULL,
+        sent_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    """,
 ]
 
 PG_SCHEMA = """
+CREATE TABLE IF NOT EXISTS bot_updates (
+    version TEXT PRIMARY KEY,
+    description TEXT NOT NULL,
+    sent_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
 CREATE TABLE IF NOT EXISTS users (
     id SERIAL PRIMARY KEY,
     telegram_id BIGINT NOT NULL UNIQUE,

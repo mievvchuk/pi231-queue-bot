@@ -46,6 +46,15 @@ class AdminOnly(BaseMiddleware):
         return await handler(event, data)
 
 
+async def _is_admin_filter(event, conn) -> bool:
+    user = getattr(event, "from_user", None)
+    if not user:
+        return False
+    return admins.is_admin(conn, user.id)
+
+
+router.callback_query.filter(_is_admin_filter)
+router.message.filter(_is_admin_filter)
 router.callback_query.middleware(AdminOnly())
 router.message.middleware(AdminOnly())
 
@@ -60,6 +69,21 @@ class AdminPanelState(StatesGroup):
     select_queue_for_close = State()
     select_subject_for_report = State()
     add_student_names = State()
+    confirm_finish_queue = State()
+
+
+async def admin_state_filter(message: Message, state: FSMContext) -> bool:
+    current_state = await state.get_state()
+    return bool(
+        current_state
+        and (
+            current_state.startswith("AdminPanelState")
+            or current_state.startswith("AdminOrderState")
+            or current_state.startswith("AdminManageState")
+            or current_state.startswith("AdminUserState")
+            or current_state.startswith("Admin")
+        )
+    )
 
 
 class AdminUserState(StatesGroup):
@@ -84,6 +108,8 @@ class AdminManageState(StatesGroup):
     add_admin_id = State()
     select_admin_to_remove = State()
     history_view = State()
+    entering_broadcast = State()
+    confirming_broadcast = State()
 
 
 def get_open_session(conn, session_id: int):
@@ -651,9 +677,9 @@ async def admin_paginate_report_subjects(message: Message, state: FSMContext, su
     await message.answer("Оберіть предмет зі списку нижче 👇", reply_markup=markup)
 
 
-@router.message(AdminPanelState.select_subject_for_report, F.text.startswith("📊 "))
+@router.message(AdminPanelState.select_subject_for_report, F.text.startswith("📊"))
 async def admin_generate_subject_report(message: Message, state: FSMContext, conn, subjects):
-    raw_name = message.text[2:].strip()
+    raw_name = message.text.removeprefix("📊").strip()
     matched_sub = next((s for s in subjects if s["name"].lower() == raw_name.lower()), None)
     if not matched_sub:
         await message.answer("⚠️ Предмет не знайдено. Оберіть зі списку на кнопках внизу 👇")
@@ -869,13 +895,13 @@ async def admin_paginate_students(message: Message, state: FSMContext, conn, sub
     await open_admin_student_list(message, conn, subjects, session_id, page=page)
 
 
-@router.message(AdminOrderState.picking_student, F.text.startswith("👤 "))
+@router.message(AdminOrderState.picking_student, F.text.startswith("👤"))
 async def select_student_from_list(message: Message, state: FSMContext, conn, subjects):
     data = await state.get_data()
     session_id = data.get("session_id")
     entries = queues.get_entries(conn, session_id)
 
-    raw = message.text[2:].strip()
+    raw = message.text.removeprefix("👤").strip()
     match = re.match(r"^(\d+)[\.\)\-\s]+(.+)$", raw)
     entry = None
     if match:
@@ -911,7 +937,7 @@ async def back_to_students_list(message: Message, state: FSMContext, conn, subje
     await open_admin_student_list(message, conn, subjects, session_id, page=page)
 
 
-@router.message(F.text == "🔙 Назад до черги", StateFilter("*"))
+@router.message(F.text == "🔙 Назад до черги", admin_state_filter)
 async def back_to_queue_manager_from_any(message: Message, state: FSMContext, conn, subjects):
     data = await state.get_data()
     session_id = data.get("session_id")
@@ -1084,6 +1110,7 @@ async def ask_finish_queue(message: Message, state: FSMContext, conn, subjects):
     if not session_id:
         raise BotError("Чергу не обрано.")
     session = get_open_session(conn, session_id)
+    await state.set_state(AdminPanelState.confirm_finish_queue)
     rows = [
         ["📦 Завершити й архівувати"],
         ["📦 Нова черга (порожня)"],
@@ -1289,3 +1316,74 @@ async def confirm_remove_admin_text(message: Message, state: FSMContext, conn):
 async def cancel_remove_admin(message: Message, state: FSMContext):
     await state.clear()
     await admins_menu(message, state)
+
+
+# ---------- Розсилка повідомлень усім користувачам ----------
+
+@router.message(F.text == "📢 Оголошення для всіх", StateFilter("*"))
+async def start_broadcast_flow(message: Message, state: FSMContext, conn):
+    from services.updates import get_active_user_ids
+    uids = get_active_user_ids(conn)
+    await state.set_state(AdminManageState.entering_broadcast)
+    await message.answer(
+        f"📢 <b>Розсилка повідомлення всім користувачам</b>\n\n"
+        f"Зареєстровано активних користувачів: <b>{len(uids)}</b>.\n\n"
+        "Надішліть текст оголошення (підтримується HTML-розмітка: <code>&lt;b&gt;жирний&lt;/b&gt;</code> тощо):\n"
+        "Або натисніть «🔙 Скасувати» нижче 👇",
+        reply_markup=make_reply_keyboard([["🔙 Скасувати"]]),
+    )
+
+
+@router.message(AdminManageState.entering_broadcast, F.text)
+async def preview_broadcast_message(message: Message, state: FSMContext, conn):
+    if message.text in {"🔙 Скасувати", "🔙 Назад", "↩️ Скасувати"}:
+        await state.clear()
+        await admin_category_settings(message, state)
+        return
+    text = message.text.strip()
+    if not text:
+        await message.answer("Введіть текст оголошення або натисніть «🔙 Скасувати»:")
+        return
+
+    from services.updates import get_active_user_ids
+    uids = get_active_user_ids(conn)
+    await state.set_state(AdminManageState.confirming_broadcast)
+    await state.update_data(broadcast_text=text)
+
+    await message.answer(
+        f"👀 <b>Попередній перегляд оголошення:</b>\n\n{text}\n\n"
+        f"➖➖➖➖➖➖➖➖\n"
+        f"Надіслати це повідомлення усім <b>{len(uids)}</b> користувачам?",
+        reply_markup=make_reply_keyboard([["✅ Надіслати всім"], ["🔙 Скасувати"]]),
+    )
+
+
+@router.message(AdminManageState.confirming_broadcast, F.text)
+async def perform_broadcast(message: Message, state: FSMContext, conn):
+    if message.text in {"🔙 Скасувати", "🔙 Назад", "↩️ Скасувати"}:
+        await state.clear()
+        await admin_category_settings(message, state)
+        return
+    if message.text != "✅ Надіслати всім":
+        await message.answer("Оберіть дію на кнопках: «✅ Надіслати всім» або «🔙 Скасувати» 👇")
+        return
+
+    data = await state.get_data()
+    text = data.get("broadcast_text")
+    if not text:
+        await state.clear()
+        await admin_category_settings(message, state)
+        return
+
+    from services.updates import get_active_user_ids, broadcast_message_to_users
+    uids = get_active_user_ids(conn)
+    await message.answer(f"⏳ Розпочинаю розсилку для {len(uids)} користувачів...")
+    success, errors = await broadcast_message_to_users(message.bot, uids, text)
+    admins.log_action(conn, message.from_user.id, "manual_broadcast", f"success={success} errors={errors}")
+    await state.clear()
+    await message.answer(
+        f"✅ <b>Розсилку успішно завершено!</b>\n\n"
+        f"• Доставлено: <b>{success}</b>\n"
+        f"• Помилок: <b>{errors}</b>",
+        reply_markup=get_admin_settings_menu(),
+    )

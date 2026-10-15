@@ -243,7 +243,8 @@ async def show_queue_actions(message: Message, state: FSMContext, conn):
     session = get_session_or_fail(conn, session_id)
     is_in_queue = queues.get_user_position(conn, message.from_user.id, session_id) is not None
     is_open = session["status"] == "open"
-    markup = get_queue_actions_reply_menu(is_in_queue, is_open=is_open)
+    can_pick = not queues.are_first_10_occupied(conn, session_id)
+    markup = get_queue_actions_reply_menu(is_in_queue, is_open=is_open, can_pick_number=can_pick)
     await message.answer("⚙️ <b>Оберіть дію:</b>", reply_markup=markup)
 
 
@@ -325,17 +326,24 @@ async def join_queue_end(message: Message, state: FSMContext, conn, subjects):
 
 
 @router.message(F.text.in_({"🔢 Обрати місце", "🔢 Обрати номер"}), not_admin_state_filter)
-async def ask_specific_number(message: Message, state: FSMContext, conn):
+async def ask_specific_number(message: Message, state: FSMContext, conn, subjects):
     session_id = await ensure_session_id(message, state)
     if not session_id:
         return
     session = get_session_or_fail(conn, session_id)
     if session["status"] != "open":
         raise BotError("Запис у цю чергу закрито.")
+    if queues.are_first_10_occupied(conn, session_id):
+        position, total = queues.join_queue(conn, message.from_user.id, session_id)
+        await open_queue_screen(
+            message, conn, subjects, session_id,
+            note=f"ℹ️ <b>Перші 10 місць уже зайняті.</b>\nВас автоматично записано в кінець черги на місце <b>{position}</b> із {total}.",
+        )
+        return
     await state.set_state(StudentFlow.pick_position)
     await state.update_data(session_id=session_id)
     await message.answer(
-        "🔢 <b>Вибір місця</b>\n\nВведіть бажаний номер у черзі (наприклад 3 чи 7):",
+        "🔢 <b>Вибір місця</b>\n\nВведіть бажаний вільний номер від 1 до 10 (наприклад 3 чи 7):",
         reply_markup=make_reply_keyboard([["🔙 Назад до черги"]]),
     )
 
@@ -594,11 +602,11 @@ async def start_open_queue(message: Message, state: FSMContext, conn, subjects):
     await message.answer("Оберіть предмет для нової черги на кнопках внизу 👇", reply_markup=make_reply_keyboard(rows))
 
 
-@router.message(StudentFlow.creating_queue_subject, F.text.startswith("➕ "))
+@router.message(StudentFlow.creating_queue_subject, F.text.startswith("➕"))
 async def new_queue_subject_selected(message: Message, state: FSMContext, conn, subjects):
     if message.text in {"➕ Додати адміністратора", "➕ Додати студента", "➕ Додати студентів", "➕ Створити чергу", "➕ Відкрити чергу"}:
         return
-    raw_name = message.text[2:].strip()
+    raw_name = message.text.removeprefix("➕").strip()
     matched_sub = next((s for s in subjects if s["name"].lower() == raw_name.lower()), None)
     if not matched_sub:
         return
@@ -626,10 +634,19 @@ async def new_queue_subject_selected(message: Message, state: FSMContext, conn, 
     await message.answer(f"Оберіть викладача для предмета «{matched_sub['name']}» 👇", reply_markup=make_reply_keyboard(rows))
 
 
-@router.message(StudentFlow.creating_queue_teacher, F.text.startswith("👨‍🏫 "))
+@router.message(StudentFlow.creating_queue_teacher, F.text.startswith("👨‍🏫"))
 async def new_queue_teacher_selected(message: Message, state: FSMContext, conn, subjects):
-    raw = message.text[2:].strip()
-    parts = raw.split(" — ")
+    raw = message.text.removeprefix("👨‍🏫").strip()
+    if " — " in raw:
+        parts = raw.split(" — ", 1)
+    elif " - " in raw:
+        parts = raw.split(" - ", 1)
+    elif "–" in raw:
+        parts = raw.split("–", 1)
+    elif "—" in raw:
+        parts = raw.split("—", 1)
+    else:
+        parts = raw.split("-", 1)
     if len(parts) != 2:
         return
     sub_name, teacher_name = parts[0].strip(), parts[1].strip()

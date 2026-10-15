@@ -160,12 +160,30 @@ def _take_slot(conn, entry_id: int, user_id: int) -> None:
     )
 
 
-def _place_user_at(conn, session_id: int, user_id: int, position: int) -> None:
+def are_first_10_occupied(conn: sqlite3.Connection, session_id: int) -> bool:
+    """Перевіряє, чи перші 10 місць черги повністю зайняті реальними студентами."""
+    entries = get_entries(conn, session_id)
+    if len(entries) < 10:
+        return False
+    return all(e["user_id"] is not None for e in entries[:10])
+
+
+def _place_user_at(conn, session_id: int, user_id: int, position: int, allow_shift: bool = False) -> None:
     """Вставляє студента на вибране місце.
-    Якщо вказано номер більше поточної довжини черги — проміжні місця стають вільними слотами.
-    Якщо номер всередині зайнятого списку — наступні зсуваються вниз."""
-    if not 1 <= position <= 100:
-        raise BotError("Оберіть номер від 1 до 100.")
+    Якщо allow_shift=False (для студентів):
+      - Дозволені лише вільні номери від 1 до 10.
+      - Якщо номер уже зайнятий студентом — викидає помилку (заборонено займати вже зайняті номери).
+      - Якщо перші 10 місць уже повністю зайняті — викидає помилку (запис лише в кінець).
+    Якщо allow_shift=True (для старости):
+      - Дозволені номери від 1 до 100, при зайнятості наступні зсуваються вниз."""
+    max_pos = 100 if allow_shift else 10
+    if not 1 <= position <= max_pos:
+        if allow_shift:
+            raise BotError("Оберіть номер від 1 до 100.")
+        raise BotError("Оберіть вільний номер від 1 до 10. Після 10-го місця запис ведеться в кінець черги.")
+
+    if not allow_shift and are_first_10_occupied(conn, session_id):
+        raise BotError("Перші 10 місць уже зайняті. Запис ведеться в кінець черги.")
 
     entries = get_entries(conn, session_id)
     # Якщо вибране місце вже існує і воно пусте (зарезервоване)
@@ -173,29 +191,31 @@ def _place_user_at(conn, session_id: int, user_id: int, position: int) -> None:
         _take_slot(conn, entries[position - 1]["id"], user_id)
         return
 
-    # Якщо вибрали номер більший, ніж зараз є в черзі
-    if position > len(entries):
-        # Доповнюємо чергу пустими слотами до потрібного номера
-        for p in range(len(entries) + 1, position):
-            conn.execute(
-                "INSERT INTO queue_entries (session_id, user_id, position) VALUES (?, NULL, ?)",
-                (session_id, p),
-            )
-        # Вставляємо користувача на бажану позицію
-        conn.execute(
-            "INSERT INTO queue_entries (session_id, user_id, position) VALUES (?, ?, ?)",
-            (session_id, user_id, position),
-        )
+    # Якщо вибране місце вже зайняте студентом
+    if position <= len(entries):
+        if not allow_shift:
+            raise BotError(f"Місце №{position} уже зайняте. Оберіть інший вільний номер.")
+        ids = [e["id"] for e in entries]
+        new_id = conn.execute(
+            "INSERT INTO queue_entries (session_id, user_id, position) VALUES (?, ?, NULL)",
+            (session_id, user_id),
+        ).lastrowid
+        ids.insert(position - 1, new_id)
+        _set_order(conn, session_id, ids)
         return
 
-    # Якщо вклинюємося перед кимось всередині списку
-    ids = [e["id"] for e in entries]
-    new_id = conn.execute(
-        "INSERT INTO queue_entries (session_id, user_id, position) VALUES (?, ?, NULL)",
-        (session_id, user_id),
-    ).lastrowid
-    ids.insert(position - 1, new_id)
-    _set_order(conn, session_id, ids)
+    # Якщо вибрали номер більший, ніж зараз є в черзі
+    # Доповнюємо чергу пустими слотами до потрібного номера
+    for p in range(len(entries) + 1, position):
+        conn.execute(
+            "INSERT INTO queue_entries (session_id, user_id, position) VALUES (?, NULL, ?)",
+            (session_id, p),
+        )
+    # Вставляємо користувача на бажану позицію
+    conn.execute(
+        "INSERT INTO queue_entries (session_id, user_id, position) VALUES (?, ?, ?)",
+        (session_id, user_id, position),
+    )
 
 
 
@@ -292,7 +312,7 @@ def add_student_by_admin(conn, actor_id: int, session_id: int, user_id: int, pos
         if position is None:
             _place_user(conn, session_id, user_id)
         else:
-            _place_user_at(conn, session_id, user_id, position)
+            _place_user_at(conn, session_id, user_id, position, allow_shift=True)
         log_action(conn, actor_id, "admin_add_student", f"user={user_id} session={session_id}")
     
     row = conn.execute(

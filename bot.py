@@ -17,7 +17,7 @@ import os
 from aiohttp import web
 
 
-BOT_VERSION = "v1.3-reconnect"
+BOT_VERSION = "v1.4"
 
 
 async def healthcheck(request: web.Request) -> web.Response:
@@ -43,7 +43,6 @@ async def main() -> None:
     conn = connect(config.DATABASE_URL)
     init_admins(conn, config.get_initial_admin_ids())
 
-
     # conn і subjects доступні в обробниках як іменовані параметри
     dp = Dispatcher(conn=conn, subjects=load_subjects(config.SUBJECTS_PATH))
     dp.message.outer_middleware(Guard())
@@ -52,6 +51,10 @@ async def main() -> None:
 
     bot = Bot(config.get_bot_token(), default=DefaultBotProperties(parse_mode=ParseMode.HTML))
     await run_web_server()
+
+    from services.updates import check_and_broadcast_updates
+    asyncio.create_task(check_and_broadcast_updates(bot, conn))
+
     if getattr(config, "ALERTS_TOKEN", None):
         from services.alerts import start_alerts_checker
         db_target = config.DATABASE_URL or getattr(config, "SQLITE_PATH", "bot.db")

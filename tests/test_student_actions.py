@@ -5,11 +5,11 @@ from services.errors import BotError
 from tests.test_services import ADMIN, entry_id, filled, names, positions, session  # noqa: F401
 
 
-def test_join_at_chosen_position_shifts_others(conn, make_user, filled):
+def test_join_at_occupied_position_is_forbidden(conn, make_user, filled):
     make_user(10, "Новий Студент")
-    assert queues.join_queue(conn, 10, filled, position=2) == (2, 6)
-    assert names(conn, filled)[:3] == ["Петренко Іван", "Новий Студент", "Коваль Андрій"]
-    assert positions(conn, filled) == [1, 2, 3, 4, 5, 6]
+    with pytest.raises(BotError) as exc_info:
+        queues.join_queue(conn, 10, filled, position=2)
+    assert "зайняте" in str(exc_info.value)
 
 
 def test_join_at_end_position_and_invalid_position(conn, make_user, filled):
@@ -17,7 +17,7 @@ def test_join_at_end_position_and_invalid_position(conn, make_user, filled):
     with pytest.raises(BotError):
         queues.join_queue(conn, 10, filled, position=0)
     with pytest.raises(BotError):
-        queues.join_queue(conn, 10, filled, position=7)
+        queues.join_queue(conn, 10, filled, position=11)
     assert queues.join_queue(conn, 10, filled, position=6) == (6, 6)
 
 
@@ -63,10 +63,59 @@ def test_unregistered_user_cannot_open_queue(conn):
         queues.create_queue(conn, 999, 3, 4)
 
 
-def test_empty_queue_is_archived_so_next_one_can_be_opened(conn, make_user):
+def test_empty_queue_stays_open_so_students_can_still_join(conn, make_user):
     make_user(1, "Петренко Іван")
     first = queues.create_queue(conn, 1, 3, 4)
     queues.join_queue(conn, 1, first)
     queues.finish_own_entry(conn, 1, first, passed=True)
-    assert queues.get_session(conn, first)["status"] == "archived"
-    assert queues.create_queue(conn, 1, 3, 4) != first
+    assert queues.get_session(conn, first)["status"] == "open"
+
+
+def test_first_10_positions_and_overflow_flow(conn, make_user):
+    # 1. Порожня черга
+    make_user(1, "Тест Перший")
+    s_id = queues.create_queue(conn, 1, 3, 4)
+    assert not queues.are_first_10_occupied(conn, s_id)
+
+    # 2. Запис під номером 3
+    queues.join_queue(conn, 1, s_id, position=3)
+    assert queues.get_user_position(conn, 1, s_id) == 3
+
+    # 3. Запис під номером 1 (вільне зарезервоване)
+    make_user(2, "Тест Другий")
+    queues.join_queue(conn, 2, s_id, position=1)
+    assert queues.get_user_position(conn, 2, s_id) == 1
+
+    # 4. Спроба записатися під вже зайнятим номером 3 повинна видати помилку
+    make_user(3, "Тест Третій")
+    with pytest.raises(BotError) as exc_info:
+        queues.join_queue(conn, 3, s_id, position=3)
+    assert "зайняте" in str(exc_info.value)
+
+    # 5. Заповнюємо решту місць до 10
+    # Зараз зайняті 1 і 3. Потрібно заповнити 2, 4, 5, 6, 7, 8, 9, 10
+    free_positions = [2, 4, 5, 6, 7, 8, 9, 10]
+    names_list = ["Четвертий", "П'ятий", "Шостий", "Сьомий", "Восьмий", "Дев'ятий", "Десятий", "Одинадцятий"]
+    for idx, pos in enumerate(free_positions):
+        uid = 100 + idx
+        make_user(uid, f"Тест {names_list[idx]}")
+        queues.join_queue(conn, uid, s_id, position=pos)
+
+    assert queues.are_first_10_occupied(conn, s_id)
+
+    # 6. Коли перші 10 зайняті, вказувати номер заборонено
+    make_user(20, "Тест Двадцятий")
+    with pytest.raises(BotError) as exc_info:
+        queues.join_queue(conn, 20, s_id, position=5)
+    assert "Перші 10 місць уже зайняті" in str(exc_info.value)
+
+    # 7. Запис без вказання номера ставить у кінець (на 11-те місце)
+    pos, total = queues.join_queue(conn, 20, s_id)
+    assert pos == 11
+    assert total == 11
+
+    # Наступний стає на 12-те місце
+    make_user(21, "Тест Двадцятьперший")
+    pos, total = queues.join_queue(conn, 21, s_id)
+    assert pos == 12
+    assert total == 12

@@ -117,7 +117,7 @@ def test_move_to_position(conn, filled):
         "Петренко Іван", "Коваль Андрій", "Бондар Дмитро", "Мельник Олег", "Шевченко Максим"
     ]
     with pytest.raises(BotError):
-        queues.move_entry(conn, ADMIN, entry_id(conn, filled, 1), 9)
+        queues.move_entry(conn, ADMIN, entry_id(conn, filled, 1), 101)
 
 
 # 8. Видалення
