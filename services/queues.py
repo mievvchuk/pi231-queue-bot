@@ -237,12 +237,12 @@ def leave_queue(conn: sqlite3.Connection, telegram_id: int, session_id: int) -> 
 
 
 def create_queue(conn: sqlite3.Connection, telegram_id: int, subject_id: int,
-                 teacher_id: int, lesson_title: str = "") -> int:
+                 teacher_id: int, lesson_title: str = "", queue_type: str = "lesson") -> int:
     """Будь-який зареєстрований студент може відкрити чергу."""
     with transaction(conn):
         if conn.execute("SELECT 1 FROM users WHERE telegram_id = ?", (telegram_id,)).fetchone() is None:
             raise BotError("Спочатку зареєструйтесь: /start")
-        return _insert_session(conn, subject_id, teacher_id, lesson_title.strip())
+        return _insert_session(conn, subject_id, teacher_id, lesson_title.strip(), queue_type=queue_type)
 
 
 def finish_own_entry(conn: sqlite3.Connection, telegram_id: int, session_id: int,
@@ -285,10 +285,10 @@ def swap_entries(conn, entry_id_1: int, entry_id_2: int) -> tuple[int, int]:
 
 # ---------- Адмін: керування чергами ----------
 
-def create_session(conn, actor_id: int, subject_id: int, teacher_id: int, lesson_title: str = ""):
+def create_session(conn, actor_id: int, subject_id: int, teacher_id: int, lesson_title: str = "", queue_type: str = "lesson"):
     with transaction(conn):
         require_admin(conn, actor_id)
-        session_id = _insert_session(conn, subject_id, teacher_id, lesson_title.strip())
+        session_id = _insert_session(conn, subject_id, teacher_id, lesson_title.strip(), queue_type=queue_type)
         log_action(conn, actor_id, "create_session", str(session_id))
     return session_id
 
@@ -323,34 +323,41 @@ def add_student_by_admin(conn, actor_id: int, session_id: int, user_id: int, pos
 
 
 
-def find_active_session_by_subject_teacher(conn, subject_id: int, teacher_id: int):
-    """Повертає активну сесію черги (open/closed) для вказаного предмета та викладача або None."""
+def find_active_session_by_subject_teacher(conn, subject_id: int, teacher_id: int, queue_type: str | None = None):
+    """Повертає активну сесію черги (open/closed) для вказаного предмета, викладача і типу або None."""
+    if queue_type is not None:
+        return conn.execute(
+            "SELECT * FROM queue_sessions WHERE subject_id = ? AND teacher_id = ? AND queue_type = ? AND status IN ('open', 'closed')",
+            (subject_id, teacher_id, queue_type),
+        ).fetchone()
     return conn.execute(
         "SELECT * FROM queue_sessions WHERE subject_id = ? AND teacher_id = ? AND status IN ('open', 'closed')",
         (subject_id, teacher_id),
     ).fetchone()
 
 
-def _insert_session(conn, subject_id: int, teacher_id: int, lesson_title: str) -> int:
-    existing = find_active_session_by_subject_teacher(conn, subject_id, teacher_id)
+def _insert_session(conn, subject_id: int, teacher_id: int, lesson_title: str, queue_type: str = "lesson") -> int:
+    existing = find_active_session_by_subject_teacher(conn, subject_id, teacher_id, queue_type)
     if existing:
+        type_label = "на консультацію" if queue_type == "consultation" else "на пару"
         status_text = "відкрита для запису" if existing["status"] == "open" else "закрита для запису"
         raise BotError(
-            f"⚠️ Черга для цього предмета й викладача вже створена ({status_text})!\n"
+            f"⚠️ Черга {type_label} для цього предмета й викладача вже створена ({status_text})!\n"
             "Ви можете переглянути її або записатися в меню «📋 Усі черги»."
         )
 
     try:
         cursor = conn.execute(
-            "INSERT INTO queue_sessions (subject_id, teacher_id, lesson_title) VALUES (?, ?, ?)",
-            (subject_id, teacher_id, lesson_title),
+            "INSERT INTO queue_sessions (subject_id, teacher_id, lesson_title, queue_type) VALUES (?, ?, ?, ?)",
+            (subject_id, teacher_id, lesson_title, queue_type),
         )
     except Exception as e:
         err_name = type(e).__name__
         err_msg = str(e).lower()
         if "integrityerror" in err_name.lower() or "uniqueviolation" in err_name.lower() or "unique" in err_msg:
+            type_label = "на консультацію" if queue_type == "consultation" else "на пару"
             raise BotError(
-                "⚠️ Черга для цього предмета й викладача вже створена!\n"
+                f"⚠️ Черга {type_label} для цього предмета й викладача вже створена!\n"
                 "Ви можете знайти її в меню «📋 Усі черги»."
             )
         raise

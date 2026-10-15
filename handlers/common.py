@@ -260,6 +260,11 @@ def find_session_by_label(conn, subjects: list[dict], text: str):
 
     # 1. Точний збіг нормалізованого підпису
     for s in sessions:
+        s_type = s["queue_type"] if "queue_type" in s.keys() else "lesson"
+        is_consult = "консультац" in norm_input
+        if (s_type == "consultation") != is_consult:
+            continue
+
         lbl = queue_label(subjects, s)
         norm_lbl = normalize_text(lbl)
         if norm_input == norm_lbl or norm_input.startswith(norm_lbl) or norm_lbl.startswith(norm_input):
@@ -267,6 +272,13 @@ def find_session_by_label(conn, subjects: list[dict], text: str):
 
     # 2. Пошук за прізвищем викладача та предметом
     for s in sessions:
+        s_type = s["queue_type"] if "queue_type" in s.keys() else "lesson"
+        is_consult = "консультац" in norm_input
+        if is_consult and s_type != "consultation":
+            continue
+        if not is_consult and s_type == "consultation":
+            continue
+
         sub_name, teacher_name = session_names(subjects, s)
         t_norm = normalize_text(teacher_name)
         s_norm = normalize_text(sub_name)
@@ -279,6 +291,13 @@ def find_session_by_label(conn, subjects: list[dict], text: str):
 
     # 3. Резервний пошук за назвою предмета (тільки якщо в запиті не вказано іншого викладача)
     for s in sessions:
+        s_type = s["queue_type"] if "queue_type" in s.keys() else "lesson"
+        is_consult = "консультац" in norm_input
+        if is_consult and s_type != "consultation":
+            continue
+        if not is_consult and s_type == "consultation":
+            continue
+
         sub_name, teacher_name = session_names(subjects, s)
         s_norm = normalize_text(sub_name)
         if s_norm and (s_norm in norm_input or norm_input in s_norm):
@@ -305,7 +324,9 @@ def session_names(subjects: list[dict], session) -> tuple[str, str]:
 def queue_label(subjects: list[dict], session) -> str:
     subject, teacher = session_names(subjects, session)
     lock = "" if session["status"] == "open" else " 🔒"
-    return f"{subject} — {teacher}{lock}"
+    q_type = session["queue_type"] if "queue_type" in session.keys() else "lesson"
+    type_badge = " 💬 [Консультація]" if q_type == "consultation" else ""
+    return f"{subject} — {teacher}{type_badge}{lock}"
 
 
 def format_queue(subjects: list[dict], session, entries, my_telegram_id: int | None = None, show_id: bool = False) -> str:
@@ -318,7 +339,12 @@ def format_queue(subjects: list[dict], session, entries, my_telegram_id: int | N
         lines.append("")
 
     subject, teacher = session_names(subjects, session)
-    lines.append(f"📋 <b>{html.escape(subject)}</b>")
+    q_type = session["queue_type"] if "queue_type" in session.keys() else "lesson"
+    if q_type == "consultation":
+        lines.append(f"💬 <b>{html.escape(subject)} — Консультація</b>")
+    else:
+        lines.append(f"📋 <b>{html.escape(subject)}</b>")
+    lines.append(f"👨‍🏫 Викладач: <b>{html.escape(teacher)}</b>")
     lesson_title = session["lesson_title"] if "lesson_title" in session.keys() else None
     if lesson_title:
         lines.append(f"Заняття: {html.escape(lesson_title)}")

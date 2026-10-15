@@ -78,6 +78,13 @@ MIGRATIONS = [
         updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
     """,
+    """
+    ALTER TABLE queue_sessions ADD COLUMN queue_type TEXT NOT NULL DEFAULT 'lesson';
+    DROP INDEX IF EXISTS ux_one_unfinished_session;
+    CREATE UNIQUE INDEX IF NOT EXISTS ux_one_unfinished_session
+        ON queue_sessions (subject_id, teacher_id, queue_type)
+        WHERE status IN ('open', 'closed');
+    """,
 ]
 
 PG_SCHEMA = """
@@ -110,13 +117,15 @@ CREATE TABLE IF NOT EXISTS queue_sessions (
     subject_id INTEGER NOT NULL,
     teacher_id INTEGER NOT NULL,
     lesson_title TEXT NOT NULL DEFAULT '',
+    queue_type TEXT NOT NULL DEFAULT 'lesson',
     status TEXT NOT NULL DEFAULT 'open'
         CHECK (status IN ('open', 'closed', 'archived')),
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
     closed_at TIMESTAMP WITH TIME ZONE
 );
+DROP INDEX IF EXISTS ux_one_unfinished_session;
 CREATE UNIQUE INDEX IF NOT EXISTS ux_one_unfinished_session
-    ON queue_sessions (subject_id, teacher_id)
+    ON queue_sessions (subject_id, teacher_id, queue_type)
     WHERE status IN ('open', 'closed');
 
 CREATE TABLE IF NOT EXISTS queue_entries (
@@ -200,6 +209,11 @@ class PGConnectionWrapper:
         with self.raw.cursor() as cur:
             cur.execute(PG_SCHEMA)
             cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_blocked BOOLEAN NOT NULL DEFAULT FALSE;")
+            cur.execute("ALTER TABLE queue_sessions ADD COLUMN IF NOT EXISTS queue_type TEXT NOT NULL DEFAULT 'lesson';")
+            cur.execute("DROP INDEX IF EXISTS ux_one_unfinished_session;")
+            cur.execute("""CREATE UNIQUE INDEX IF NOT EXISTS ux_one_unfinished_session
+                ON queue_sessions (subject_id, teacher_id, queue_type)
+                WHERE status IN ('open', 'closed');""")
         self.raw.commit()
 
     def execute(self, sql: str, params: tuple = ()):

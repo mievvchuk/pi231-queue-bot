@@ -42,6 +42,7 @@ class StudentFlow(StatesGroup):
     pick_position = State()
     choosing_swap_target = State()
     confirm_swap = State()
+    creating_queue_type = State()
     creating_queue_subject = State()
     creating_queue_teacher = State()
 
@@ -665,10 +666,31 @@ async def swap_decline(callback: CallbackQuery, conn, subjects):
 @router.message(F.text.in_({"➕ Відкрити чергу", "➕ Створити чергу"}), not_admin_state_filter)
 async def start_open_queue(message: Message, state: FSMContext, conn, subjects):
     await state.clear()
+    await state.set_state(StudentFlow.creating_queue_type)
+    keyboard = make_reply_keyboard([
+        ["📖 Звичайна пара", "💬 Консультація"],
+        ["🏠 Головне меню"],
+    ])
+    await message.answer("Оберіть тип черги, яку бажаєте відкрити 👇", reply_markup=keyboard)
+
+
+@router.message(StudentFlow.creating_queue_type, F.text.in_({"📖 Звичайна пара", "💬 Консультація"}))
+async def queue_type_selected(message: Message, state: FSMContext, subjects):
+    q_type = "consultation" if "Консультація" in message.text else "lesson"
     await state.set_state(StudentFlow.creating_queue_subject)
+    await state.update_data(queue_type=q_type)
+    type_name = "консультації" if q_type == "consultation" else "пари"
     rows = [[f"➕ {s['name']}"] for s in subjects]
-    rows.append(["🏠 Головне меню"])
-    await message.answer("Оберіть предмет для нової черги на кнопках внизу 👇", reply_markup=make_reply_keyboard(rows))
+    rows.append(["🔙 Назад", "🏠 Головне меню"])
+    await message.answer(
+        f"Оберіть предмет для {type_name} на кнопках внизу 👇",
+        reply_markup=make_reply_keyboard(rows),
+    )
+
+
+@router.message(StudentFlow.creating_queue_subject, F.text == "🔙 Назад")
+async def back_to_queue_type(message: Message, state: FSMContext, conn, subjects):
+    await start_open_queue(message, state, conn, subjects)
 
 
 @router.message(StudentFlow.creating_queue_subject, F.text.startswith("➕"))
@@ -679,29 +701,35 @@ async def new_queue_subject_selected(message: Message, state: FSMContext, conn, 
     matched_sub = next((s for s in subjects if s["name"].lower() == raw_name.lower()), None)
     if not matched_sub:
         return
+
+    data = await state.get_data()
+    q_type = data.get("queue_type", "lesson")
+    type_label = "консультацію" if q_type == "consultation" else "пару"
+    type_badge = " [Консультація]" if q_type == "consultation" else ""
+
     if len(matched_sub["teachers"]) == 1:
         teacher = matched_sub["teachers"][0]
-        existing = queues.find_active_session_by_subject_teacher(conn, matched_sub["id"], teacher["id"])
+        existing = queues.find_active_session_by_subject_teacher(conn, matched_sub["id"], teacher["id"], queue_type=q_type)
         if existing:
             await state.clear()
             status_text = "відкрита для запису" if existing["status"] == "open" else "закрита для запису"
             await open_queue_screen(
                 message, conn, subjects, existing["id"],
-                note=f"ℹ️ Черга для предмета <b>{matched_sub['name']}</b> ({teacher['name']}) вже створена ({status_text})!"
+                note=f"ℹ️ Черга на {type_label} для предмета <b>{matched_sub['name']}</b> ({teacher['name']}) вже створена ({status_text})!"
             )
             return
 
         try:
-            session_id = queues.create_queue(conn, message.from_user.id, matched_sub["id"], teacher["id"])
+            session_id = queues.create_queue(conn, message.from_user.id, matched_sub["id"], teacher["id"], queue_type=q_type)
             await state.clear()
             await state.update_data(session_id=session_id)
             user = users.get_user(conn, message.from_user.id)
             creator_name = user["full_name"] if user else (message.from_user.full_name or "Студент")
             await notify_admins_queue_opened(
                 message.bot, conn, message.from_user.id, creator_name,
-                matched_sub["name"], teacher["name"]
+                matched_sub["name"] + type_badge, teacher["name"]
             )
-            await open_queue_screen(message, conn, subjects, session_id, note="🎉 <b>Чергу успішно створено!</b>")
+            await open_queue_screen(message, conn, subjects, session_id, note=f"🎉 <b>Чергу на {type_label} успішно створено!</b>")
         except BotError as err:
             await state.clear()
             await message.answer(f"{err}", reply_markup=get_reply_menu(conn, message.from_user.id))
@@ -709,8 +737,22 @@ async def new_queue_subject_selected(message: Message, state: FSMContext, conn, 
 
     await state.set_state(StudentFlow.creating_queue_teacher)
     rows = [[f"👨‍🏫 {matched_sub['name']} — {t['name']}"] for t in matched_sub["teachers"]]
-    rows.append(["🏠 Головне меню"])
+    rows.append(["🔙 Назад", "🏠 Головне меню"])
     await message.answer(f"Оберіть викладача для предмета «{matched_sub['name']}» 👇", reply_markup=make_reply_keyboard(rows))
+
+
+@router.message(StudentFlow.creating_queue_teacher, F.text == "🔙 Назад")
+async def back_to_queue_subject(message: Message, state: FSMContext, subjects):
+    data = await state.get_data()
+    q_type = data.get("queue_type", "lesson")
+    type_name = "консультації" if q_type == "consultation" else "пари"
+    await state.set_state(StudentFlow.creating_queue_subject)
+    rows = [[f"➕ {s['name']}"] for s in subjects]
+    rows.append(["🔙 Назад", "🏠 Головне меню"])
+    await message.answer(
+        f"Оберіть предмет для {type_name} на кнопках внизу 👇",
+        reply_markup=make_reply_keyboard(rows),
+    )
 
 
 @router.message(StudentFlow.creating_queue_teacher, F.text.startswith("👨‍🏫"))
@@ -736,27 +778,32 @@ async def new_queue_teacher_selected(message: Message, state: FSMContext, conn, 
     if not matched_teacher:
         return
 
-    existing = queues.find_active_session_by_subject_teacher(conn, matched_sub["id"], matched_teacher["id"])
+    data = await state.get_data()
+    q_type = data.get("queue_type", "lesson")
+    type_label = "консультацію" if q_type == "consultation" else "пару"
+    type_badge = " [Консультація]" if q_type == "consultation" else ""
+
+    existing = queues.find_active_session_by_subject_teacher(conn, matched_sub["id"], matched_teacher["id"], queue_type=q_type)
     if existing:
         await state.clear()
         status_text = "відкрита для запису" if existing["status"] == "open" else "закрита для запису"
         await open_queue_screen(
             message, conn, subjects, existing["id"],
-            note=f"ℹ️ Черга для предмета <b>{matched_sub['name']}</b> ({matched_teacher['name']}) вже створена ({status_text})!"
+            note=f"ℹ️ Черга на {type_label} для предмета <b>{matched_sub['name']}</b> ({matched_teacher['name']}) вже створена ({status_text})!"
         )
         return
 
     try:
-        session_id = queues.create_queue(conn, message.from_user.id, matched_sub["id"], matched_teacher["id"])
+        session_id = queues.create_queue(conn, message.from_user.id, matched_sub["id"], matched_teacher["id"], queue_type=q_type)
         await state.clear()
         await state.update_data(session_id=session_id)
         user = users.get_user(conn, message.from_user.id)
         creator_name = user["full_name"] if user else (message.from_user.full_name or "Студент")
         await notify_admins_queue_opened(
             message.bot, conn, message.from_user.id, creator_name,
-            matched_sub["name"], matched_teacher["name"]
+            matched_sub["name"] + type_badge, matched_teacher["name"]
         )
-        await open_queue_screen(message, conn, subjects, session_id, note="🎉 <b>Чергу успішно створено!</b>")
+        await open_queue_screen(message, conn, subjects, session_id, note=f"🎉 <b>Чергу на {type_label} успішно створено!</b>")
     except BotError as err:
         await state.clear()
         await message.answer(f"{err}", reply_markup=get_reply_menu(conn, message.from_user.id))

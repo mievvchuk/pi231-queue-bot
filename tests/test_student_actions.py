@@ -170,3 +170,41 @@ def test_coursework_grouping_menu(conn, make_user):
     assert any("Курсова робота з КПЗ — Когут" in t for t in cw_button_texts)
 
 
+def test_consultation_queue_support(conn, make_user):
+    from handlers.common import find_session_by_label, queue_label
+    from subjects import load_subjects
+    import config
+
+    subjects = load_subjects(config.SUBJECTS_PATH)
+    make_user(100, "Адмін Тестовий")
+
+    # Створюємо чергу на пару та чергу на консультацію для одного й того ж викладача
+    s_lesson = queues.create_session(conn, 100, 1, 1, queue_type="lesson")
+    s_consult = queues.create_session(conn, 100, 1, 1, queue_type="consultation")
+
+    assert s_lesson != s_consult
+
+    # Перевірка пошуку за типом
+    lesson_session = queues.find_active_session_by_subject_teacher(conn, 1, 1, queue_type="lesson")
+    consult_session = queues.find_active_session_by_subject_teacher(conn, 1, 1, queue_type="consultation")
+
+    assert lesson_session["id"] == s_lesson
+    assert consult_session["id"] == s_consult
+
+    # Повторне створення такого ж типу викликає помилку
+    with pytest.raises(BotError) as exc_info:
+        queues.create_session(conn, 100, 1, 1, queue_type="consultation")
+    assert "консультацію" in str(exc_info.value)
+
+    # Перевірка міток та розпізнавання у find_session_by_label
+    lbl_lesson = queue_label(subjects, lesson_session)
+    lbl_consult = queue_label(subjects, consult_session)
+
+    assert "Консультація" not in lbl_lesson
+    assert "Консультація" in lbl_consult
+
+    assert find_session_by_label(conn, subjects, lbl_lesson)["id"] == s_lesson
+    assert find_session_by_label(conn, subjects, lbl_consult)["id"] == s_consult
+
+
+
