@@ -134,3 +134,39 @@ def test_create_duplicate_queue_validation(conn, make_user):
         queues.create_queue(conn, 1, 1, 1)
     assert "вже створена" in str(exc_info.value)
 
+
+def test_coursework_grouping_menu(conn, make_user):
+    from handlers.common import get_queues_reply_menu, get_coursework_queues_menu
+    from subjects import load_subjects
+    import config
+
+    subjects = load_subjects(config.SUBJECTS_PATH)
+    make_user(100, "Адмін Тестовий")
+
+    # Створюємо звичайну чергу та декілька черг на курсову
+    s_reg = queues.create_session(conn, 100, 1, 1)  # Програмування в Інтернет
+    s_cw1 = queues.create_session(conn, 100, 7, 6)  # Курсова - Атаман
+    s_cw2 = queues.create_session(conn, 100, 7, 1)  # Курсова - Когут
+
+    sessions = queues.list_sessions(conn, ("open", "closed"))
+
+    # Згруповане меню: містить звичайну чергу та 1 кнопку групи курсової
+    menu_grouped = get_queues_reply_menu(sessions, subjects, group_coursework=True)
+    button_texts = [btn.text for row in menu_grouped.keyboard for btn in row]
+    assert any("Програмування в Інтернет" in t for t in button_texts)
+    assert any("📑 Курсова робота з КПЗ" in t for t in button_texts)
+    # Окремі кнопки вчителів курсової не повинні виводитись у згрупованому списку
+    assert not any("Курсова робота з КПЗ — Атаман" in t for t in button_texts)
+
+    # Незгруповане меню (для "Мої черги")
+    menu_ungrouped = get_queues_reply_menu(sessions, subjects, group_coursework=False)
+    button_texts_ungrouped = [btn.text for row in menu_ungrouped.keyboard for btn in row]
+    assert any("Курсова робота з КПЗ — Атаман" in t for t in button_texts_ungrouped)
+
+    # Меню всередині курсової: містить саме черги викладачів курсової
+    cw_menu = get_coursework_queues_menu(sessions, subjects, "Курсова робота з КПЗ")
+    cw_button_texts = [btn.text for row in cw_menu.keyboard for btn in row]
+    assert any("Курсова робота з КПЗ — Атаман" in t for t in cw_button_texts)
+    assert any("Курсова робота з КПЗ — Когут" in t for t in cw_button_texts)
+
+

@@ -12,6 +12,7 @@ from aiogram.types import CallbackQuery, Message
 from handlers.common import (
     find_session_by_label,
     format_queue,
+    get_coursework_queues_menu,
     get_lost_context_menu,
     get_paginated_reply_keyboard,
     get_queue_actions_reply_menu,
@@ -36,6 +37,7 @@ router = Router()
 
 class StudentFlow(StatesGroup):
     browsing_queues = State()
+    browsing_coursework_queues = State()
     browsing_my_queues = State()
     pick_position = State()
     choosing_swap_target = State()
@@ -135,7 +137,7 @@ async def my_queues(message: Message, state: FSMContext, conn, subjects):
     await state.update_data(page=1)
     await message.answer(
         "Ваші черги. Оберіть чергу на кнопках внизу 👇",
-        reply_markup=get_queues_reply_menu(sessions, subjects, page=1),
+        reply_markup=get_queues_reply_menu(sessions, subjects, page=1, group_coursework=False),
     )
 
 
@@ -148,7 +150,7 @@ async def paginate_all_queues(message: Message, state: FSMContext, conn, subject
     await state.update_data(page=page)
     await message.answer(
         "Оберіть чергу на кнопках внизу 👇",
-        reply_markup=get_queues_reply_menu(sessions, subjects, page=page),
+        reply_markup=get_queues_reply_menu(sessions, subjects, page=page, group_coursework=True),
     )
 
 
@@ -161,7 +163,7 @@ async def paginate_my_queues(message: Message, state: FSMContext, conn, subjects
     await state.update_data(page=page)
     await message.answer(
         "Ваші черги. Оберіть чергу на кнопках внизу 👇",
-        reply_markup=get_queues_reply_menu(sessions, subjects, page=page),
+        reply_markup=get_queues_reply_menu(sessions, subjects, page=page, group_coursework=False),
     )
 
 
@@ -175,7 +177,7 @@ async def refresh_all_queues_list(message: Message, state: FSMContext, conn, sub
         return
     await message.answer(
         "Список черг оновлено 👇",
-        reply_markup=get_queues_reply_menu(sessions, subjects, page=page),
+        reply_markup=get_queues_reply_menu(sessions, subjects, page=page, group_coursework=True),
     )
 
 
@@ -189,7 +191,74 @@ async def refresh_my_queues_list(message: Message, state: FSMContext, conn, subj
         return
     await message.answer(
         "Ваші черги оновлено 👇",
-        reply_markup=get_queues_reply_menu(sessions, subjects, page=page),
+        reply_markup=get_queues_reply_menu(sessions, subjects, page=page, group_coursework=False),
+    )
+
+
+def is_coursework_group_button(message: Message) -> bool:
+    if not message.text:
+        return False
+    t = message.text.strip()
+    if t.startswith("📋 ") or t.startswith("➕ ") or t.startswith("👨‍🏫 "):
+        return False
+    if t.startswith("📑") or t.startswith("🎓") or t.startswith("📚"):
+        return True
+    return "курсов" in t.lower()
+
+
+@router.message(is_coursework_group_button, not_admin_state_filter)
+async def open_coursework_group(message: Message, state: FSMContext, conn, subjects):
+    raw = message.text
+    for prefix in ("📑", "🎓", "📚"):
+        raw = raw.removeprefix(prefix)
+    cw_name = raw.strip()
+
+    sessions = queues.list_sessions(conn, ("open", "closed"))
+    cw_sessions = [s for s in sessions if session_names(subjects, s)[0].lower() == cw_name.lower()]
+    if not cw_sessions:
+        cw_sessions = [s for s in sessions if "курсов" in session_names(subjects, s)[0].lower()]
+        if cw_sessions:
+            cw_name = session_names(subjects, cw_sessions[0])[0]
+
+    if not cw_sessions:
+        await message.answer(
+            f"Зараз немає активних черг для курсових робіт.",
+            reply_markup=get_queues_reply_menu(sessions, subjects, group_coursework=True),
+        )
+        return
+
+    await state.set_state(StudentFlow.browsing_coursework_queues)
+    await state.update_data(coursework_name=cw_name, page=1)
+    await message.answer(
+        f"📚 <b>{html.escape(cw_name)}</b>\n\n"
+        "Оберіть викладача для перегляду черги 👇",
+        reply_markup=get_coursework_queues_menu(sessions, subjects, cw_name, page=1),
+    )
+
+
+@router.message(StudentFlow.browsing_coursework_queues, F.text.in_({"⬅️", "➡️"}))
+async def paginate_coursework_queues(message: Message, state: FSMContext, conn, subjects):
+    data = await state.get_data()
+    cw_name = data.get("coursework_name", "Курсова робота з КПЗ")
+    sessions = queues.list_sessions(conn, ("open", "closed"))
+    page = data.get("page", 1)
+    page = (page - 1) if message.text == "⬅️" else (page + 1)
+    await state.update_data(page=page)
+    await message.answer(
+        f"Черги для «{html.escape(cw_name)}». Оберіть викладача 👇",
+        reply_markup=get_coursework_queues_menu(sessions, subjects, cw_name, page=page),
+    )
+
+
+@router.message(F.text.in_({"🔄 Оновити список", "🔄 Оновити"}), StudentFlow.browsing_coursework_queues)
+async def refresh_coursework_queues_list(message: Message, state: FSMContext, conn, subjects):
+    data = await state.get_data()
+    cw_name = data.get("coursework_name", "Курсова робота з КПЗ")
+    sessions = queues.list_sessions(conn, ("open", "closed"))
+    page = data.get("page", 1)
+    await message.answer(
+        f"Список черг для «{html.escape(cw_name)}» оновлено 👇",
+        reply_markup=get_coursework_queues_menu(sessions, subjects, cw_name, page=page),
     )
 
 

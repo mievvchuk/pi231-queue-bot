@@ -179,13 +179,59 @@ def get_queues_reply_menu(
     sessions: list,
     subjects: list[dict],
     page: int = 1,
-    back_text: str = "🏠 Головне меню"
+    back_text: str = "🏠 Головне меню",
+    group_coursework: bool = True,
 ) -> ReplyKeyboardMarkup:
-    """Нижня клавіатура зі списком черг з пагінацією по 8 штук."""
-    page_items, current_page, total_pages = paginate(sessions, page, per_page=8)
-    rows = [[f"📋 {queue_label(subjects, s)}"] for s in page_items]
+    """Нижня клавіатура зі списком черг з пагінацією по 8 штук.
+    Якщо group_coursework=True, черги курсових робіт групуються в окрему кнопку."""
+    item_rows = []
+    if group_coursework:
+        regular_sessions = []
+        coursework_map = {}
+        for s in sessions:
+            sub_name, _ = session_names(subjects, s)
+            if "курсов" in sub_name.lower():
+                coursework_map.setdefault(sub_name, []).append(s)
+            else:
+                regular_sessions.append(s)
+
+        for s in regular_sessions:
+            item_rows.append([f"📋 {queue_label(subjects, s)}"])
+
+        for cw_name in sorted(coursework_map.keys()):
+            item_rows.append([f"📑 {cw_name}"])
+    else:
+        for s in sessions:
+            item_rows.append([f"📋 {queue_label(subjects, s)}"])
+
+    page_items, current_page, total_pages = paginate(item_rows, page, per_page=8)
     return get_paginated_reply_keyboard(
-        rows,
+        page_items,
+        page=current_page,
+        total_pages=total_pages,
+        back_text=back_text,
+        extra_row=["🔄 Оновити"],
+    )
+
+
+def get_coursework_queues_menu(
+    sessions: list,
+    subjects: list[dict],
+    subject_name: str,
+    page: int = 1,
+    back_text: str = "🔙 До списку черг",
+) -> ReplyKeyboardMarkup:
+    """Нижня клавіатура зі списком викладачів конкретної курсової роботи."""
+    cw_sessions = []
+    for s in sessions:
+        sub_name, _ = session_names(subjects, s)
+        if sub_name.lower() == subject_name.lower() or "курсов" in sub_name.lower():
+            cw_sessions.append(s)
+
+    item_rows = [[f"📋 {queue_label(subjects, s)}"] for s in cw_sessions]
+    page_items, current_page, total_pages = paginate(item_rows, page, per_page=8)
+    return get_paginated_reply_keyboard(
+        page_items,
         page=current_page,
         total_pages=total_pages,
         back_text=back_text,
