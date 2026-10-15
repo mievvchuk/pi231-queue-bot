@@ -100,9 +100,25 @@ MIGRATIONS = [
     CREATE UNIQUE INDEX IF NOT EXISTS ux_replacements_unique
         ON replacements (date, group_name, lesson_number, new_subject);
     """,
+    """
+    CREATE TABLE IF NOT EXISTS working_saturdays (
+        date TEXT PRIMARY KEY,
+        replaces_day TEXT NOT NULL,
+        week_type TEXT,
+        description TEXT,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    """,
 ]
 
 PG_SCHEMA = """
+CREATE TABLE IF NOT EXISTS working_saturdays (
+    date TEXT PRIMARY KEY,
+    replaces_day TEXT NOT NULL,
+    week_type TEXT,
+    description TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
 CREATE TABLE IF NOT EXISTS replacements (
     id SERIAL PRIMARY KEY,
     date TEXT NOT NULL,
@@ -249,16 +265,24 @@ class PGConnectionWrapper:
         lastrowid = None
 
         cur = self.raw.cursor(row_factory=dict_row)
-        tables_without_id = {"bot_updates", "bot_state"}
+        tables_without_id = {"bot_updates", "bot_state", "working_saturdays"}
         table_match = re.search(r"insert\s+into\s+([a-zA-Z_0-9]+)", pg_sql, re.IGNORECASE)
         table_name = table_match.group(1).lower() if table_match else ""
 
         if is_insert and "RETURNING" not in pg_sql.upper() and table_name not in tables_without_id:
-            pg_sql_returning = pg_sql.rstrip(" ;") + " RETURNING id"
-            cur.execute(pg_sql_returning, params)
-            res = cur.fetchone()
-            if res and "id" in res:
-                lastrowid = res["id"]
+            try:
+                pg_sql_returning = pg_sql.rstrip(" ;") + " RETURNING id"
+                cur.execute(pg_sql_returning, params)
+                res = cur.fetchone()
+                if res and "id" in res:
+                    lastrowid = res["id"]
+            except Exception as e:
+                err_str = str(e).lower()
+                if 'column "id" does not exist' in err_str or "undefinedcolumn" in err_str:
+                    tables_without_id.add(table_name)
+                    cur.execute(pg_sql, params)
+                else:
+                    raise
         else:
             cur.execute(pg_sql, params)
 
