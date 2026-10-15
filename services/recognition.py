@@ -15,7 +15,7 @@ async def recognize_replacements_from_image(image_bytes: bytes, group_name: str 
     if not api_key or config.RECOGNITION_PROVIDER == "disabled":
         raise BotError(
             "⚠️ Автоматичне розпізнавання фото наразі вимкнено (не налаштовано RECOGNITION_API_KEY в .env).\n"
-            "Зверніться до адміністратора для активації ключа OpenAI."
+            "Зверніться до адміністратора для активації ключа Groq або OpenAI."
         )
 
     b64_image = base64.b64encode(image_bytes).decode("utf-8")
@@ -38,13 +38,22 @@ async def recognize_replacements_from_image(image_bytes: bytes, group_name: str 
         "Якщо групу не знайдено або це не таблиця замін, поверни replacements як порожній масив []."
     )
 
-    url = "https://api.openai.com/v1/chat/completions"
+    if api_key.startswith("gsk_"):
+        url = "https://api.groq.com/openai/v1/chat/completions"
+        model_name = "qwen/qwen3.8-27b"
+        provider_name = "Groq"
+    else:
+        url = "https://api.openai.com/v1/chat/completions"
+        model_name = "gpt-4o-mini"
+        provider_name = "OpenAI"
+
     headers = {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
+        "User-Agent": "radiant-hertz/1.0",
     }
     payload = {
-        "model": "gpt-4o-mini",
+        "model": model_name,
         "messages": [
             {
                 "role": "user",
@@ -66,15 +75,15 @@ async def recognize_replacements_from_image(image_bytes: bytes, group_name: str 
             async with session.post(url, headers=headers, json=payload, timeout=aiohttp.ClientTimeout(total=45)) as resp:
                 if resp.status != 200:
                     err_body = await resp.text()
-                    log.error(f"OpenAI API error {resp.status}: {err_body}")
-                    raise BotError(f"Помилка OpenAI API ({resp.status}). Спробуйте пізніше або надішліть чіткіше фото.")
+                    log.error(f"{provider_name} API error {resp.status}: {err_body}")
+                    raise BotError(f"Помилка {provider_name} API ({resp.status}). Спробуйте пізніше або надішліть чіткіше фото.")
                 data = await resp.json()
                 content = data["choices"][0]["message"]["content"]
                 result = json.loads(content)
     except BotError:
         raise
     except Exception as e:
-        log.exception(f"Error calling OpenAI API for recognition: {e}")
+        log.exception(f"Error calling {provider_name} API for recognition: {e}")
         raise BotError(f"Не вдалося обробити зображення: {e}")
 
     date_str = result.get("date")
