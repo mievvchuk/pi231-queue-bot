@@ -123,10 +123,6 @@ CREATE TABLE IF NOT EXISTS queue_sessions (
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
     closed_at TIMESTAMP WITH TIME ZONE
 );
-DROP INDEX IF EXISTS ux_one_unfinished_session;
-CREATE UNIQUE INDEX IF NOT EXISTS ux_one_unfinished_session
-    ON queue_sessions (subject_id, teacher_id, queue_type)
-    WHERE status IN ('open', 'closed');
 
 CREATE TABLE IF NOT EXISTS queue_entries (
     id SERIAL PRIMARY KEY,
