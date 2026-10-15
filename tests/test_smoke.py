@@ -10,10 +10,11 @@ from subjects import load_subjects
 
 def test_subjects_json_is_valid():
     subjects = load_subjects(config.SUBJECTS_PATH)
-    assert len(subjects) == 6
+    assert len(subjects) == 7
     by_name = {s["name"]: [t["name"] for t in s["teachers"]] for s in subjects}
     assert by_name["Машинне навчання"] == ["Барабаш Д.С."]
     assert len(by_name["Людино-машинна взаємодія"]) == 2
+    assert len(by_name["Курсова робота з КПЗ"]) == 5
     assert not any("Фізичне" in name for name in by_name)
 
 

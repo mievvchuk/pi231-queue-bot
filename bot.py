@@ -17,7 +17,7 @@ import os
 from aiohttp import web
 
 
-BOT_VERSION = "v1.4"
+BOT_VERSION = "v1.5"
 
 
 async def healthcheck(request: web.Request) -> web.Response:
