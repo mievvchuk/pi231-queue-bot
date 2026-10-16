@@ -1,3 +1,4 @@
+import asyncio
 import datetime
 import html
 import io
@@ -361,11 +362,20 @@ async def confirm_recognition(callback: CallbackQuery, state: FSMContext, conn):
 
     admins.log_action(conn, callback.from_user.id, "save_replacements", f"count={saved_count}, date={target_date}, archived={archived_count}")
     await callback.answer("Заміни збережено!")
+
+    broadcast_info = ""
+    if saved_count > 0:
+        from services.updates import broadcast_message_to_users, get_active_user_ids
+        broadcast_text = replacements.format_replacements_broadcast(reps, target_date or "")
+        uids = get_active_user_ids(conn)
+        asyncio.create_task(broadcast_message_to_users(callback.bot, uids, broadcast_text))
+        broadcast_info = f"\n📢 Сповіщення автоматично надіслано студентам ({len(uids)} користувачів)."
+
     arch_info = f"\n📦 Попередніх замін автоматично архівовано: <b>{archived_count}</b>." if archived_count > 0 else ""
     await callback.message.edit_text(
         f"✅ <b>Успішно збережено замін: {saved_count}!</b>\n"
         f"📅 Дата: <code>{target_date}</code>\n"
-        f"Вони вже враховані в розкладі занять.{arch_info}"
+        f"Вони вже враховані в розкладі занять.{broadcast_info}{arch_info}"
     )
 
 

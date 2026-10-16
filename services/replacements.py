@@ -109,3 +109,26 @@ def format_replacement(item: dict) -> str:
         f"👨‍🏫 <b>Викладач:</b> {teacher}\n"
         f"🚪 <b>Аудиторія:</b> {room}"
     )
+
+
+def format_replacements_broadcast(items: list[dict], date_str: str) -> str:
+    """Форматує гарне спільне повідомлення для автоматичної розсилки всій групі."""
+    lines = [
+        "📢 <b>Увага! Опубліковано заміни пар</b>",
+        f"📅 <b>Дата:</b> <code>{date_str}</code>\n",
+    ]
+    sorted_items = sorted(items, key=lambda x: int(x.get("lesson_number") or 0))
+    for it in sorted_items:
+        old_s = html.escape(it["old_subject"]) if it.get("old_subject") else "—"
+        new_s = html.escape(it["new_subject"])
+        teacher = html.escape(it["teacher"]) if it.get("teacher") else ""
+        room = f" (ауд. {html.escape(it['room'])})" if it.get("room") else ""
+        teacher_part = f" — {teacher}{room}" if (teacher or room) else ""
+        lines.append(f"⏰ <b>{it.get('lesson_number')} пара:</b> <b>{new_s}</b>{teacher_part}")
+        if old_s and old_s != "—":
+            lines.append(f"   <i>(замість: {old_s})</i>")
+        lines.append("")
+
+    lines.append("Актуальний розклад оновлено в меню <b>«📅 Розклад»</b> та <b>«🔄 Заміни»</b>.")
+    return "\n".join(lines)
+

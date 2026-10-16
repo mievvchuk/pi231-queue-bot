@@ -351,3 +351,41 @@ def test_auto_archive_previous_replacements(conn):
     assert active_friday[0]["new_subject"] == "Нова заміна пт"
 
 
+def test_format_replacements_broadcast():
+    items = [
+        {
+            "date": "2026-10-17",
+            "lesson_number": 2,
+            "old_subject": "Фізика",
+            "new_subject": "КПЗ",
+            "teacher": "Кондратюк Є.С.",
+            "room": "231",
+        },
+        {
+            "date": "2026-10-17",
+            "lesson_number": 1,
+            "old_subject": None,
+            "new_subject": "Математика",
+            "teacher": "Ковальчук С.О.",
+            "room": None,
+        },
+    ]
+    text = replacements.format_replacements_broadcast(items, "2026-10-17")
+    assert "Опубліковано заміни пар" in text
+    assert "2026-10-17" in text
+    assert "1 пара:" in text
+    assert "2 пара:" in text
+    assert "КПЗ" in text
+    assert "Кондратюк Є.С." in text
+    assert "ауд. 231" in text
+    assert "замість: Фізика" in text
+
+
+def test_updated_help_sections():
+    from handlers.start import HELP_SECTIONS
+    assert "Хочу вище / ⬇️ Хочу нижче" in HELP_SECTIONS["⚙️ Дії в черзі"]
+    assert "Ранковий розклад" in HELP_SECTIONS["📅 Розклад та заміни"]
+    assert "Миттєві сповіщення" in HELP_SECTIONS["📅 Розклад та заміни"]
+
+
+
