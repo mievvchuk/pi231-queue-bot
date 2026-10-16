@@ -85,7 +85,7 @@ def expand_teacher(name: str | None) -> str | None:
     return cleaned
 
 
-async def recognize_replacements_from_image(image_bytes: bytes, group_name: str = "ПІ-231") -> dict:
+async def recognize_replacements_from_image(image_bytes: bytes, group_name: str = "ПІ-231", conn=None) -> dict:
     """Розпізнає таблицю замін з фотографії через Groq або OpenAI API."""
     api_key = config.RECOGNITION_API_KEY
     if not api_key or config.RECOGNITION_PROVIDER == "disabled":
@@ -93,6 +93,15 @@ async def recognize_replacements_from_image(image_bytes: bytes, group_name: str 
             "⚠️ Автоматичне розпізнавання фото наразі вимкнено (не налаштовано RECOGNITION_API_KEY в .env).\n"
             "Зверніться до адміністратора для активації ключа Groq або OpenAI."
         )
+
+    try:
+        from services.working_days import get_next_working_day_key
+        next_work_date = get_next_working_day_key(conn)
+    except Exception:
+        from datetime import datetime, timedelta
+        from zoneinfo import ZoneInfo
+        now_dt = datetime.now(ZoneInfo(config.TIMEZONE)).date()
+        next_work_date = (now_dt + timedelta(days=1)).strftime("%Y-%m-%d")
 
     b64_image = base64.b64encode(image_bytes).decode("utf-8")
     prompt = (
@@ -108,7 +117,8 @@ async def recognize_replacements_from_image(image_bytes: bytes, group_name: str 
         "У полі 'lessonNumber' записуй саме НОМЕР ПАРИ (1, 2, 3, 4 тощо).\n"
         "У полі 'lessons' записуй текст зі стовпчика № (наприклад '5-6').\n"
         "У полі 'newSubject' записуй назву предмета (стовпчик 'Предмет'). Скорочення розшифруй (наприклад ЛМВ -> Людино-машинна взаємодія).\n"
-        "Визнач дату з шапки таблиці у форматі YYYY-MM-DD (наприклад '16 жовтня 2026' -> '2026-10-16').\n\n"
+        f"Визнач дату з шапки таблиці у форматі YYYY-MM-DD (наприклад '16 жовтня 2026' -> '2026-10-16').\n"
+        f"Якщо дату важко розібрати або вона відсутня, за замовчуванням це наступний робочий день: {next_work_date}.\n\n"
         "Поверни ТІЛЬКИ валідний JSON у форматі:\n"
         "{\n"
         '  "date": "YYYY-MM-DD",\n'
@@ -177,8 +187,8 @@ async def recognize_replacements_from_image(image_bytes: bytes, group_name: str 
         raise BotError(f"Не вдалося обробити зображення: {e}")
 
     date_str = result.get("date")
-    if not date_str:
-        raise BotError("Не вдалося визначити дату замін на фото. Переконайтеся, що на фото видно дату.")
+    if not date_str or not re.match(r"^\d{4}-\d{2}-\d{2}$", str(date_str).strip()):
+        date_str = next_work_date
 
     confidence = float(result.get("confidence", 0.0))
     if confidence < 0.5:

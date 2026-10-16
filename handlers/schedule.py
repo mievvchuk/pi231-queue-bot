@@ -19,7 +19,7 @@ from handlers.common import (
     make_keyboard,
     make_reply_keyboard,
 )
-from services import admins, recognition, replacements, schedule
+from services import admins, recognition, replacements, schedule, working_days
 from services.errors import BotError
 
 log = logging.getLogger(__name__)
@@ -311,7 +311,7 @@ async def handle_photo_replacement(message: Message, conn):
         await bot.download_file(file.file_path, destination=img_stream)
         img_bytes = img_stream.getvalue()
 
-        result = await recognition.recognize_replacements_from_image(img_bytes, group_name=config.STUDENT_GROUP)
+        result = await recognition.recognize_replacements_from_image(img_bytes, group_name=config.STUDENT_GROUP, conn=conn)
         reps = result["replacements"]
         token = str(uuid.uuid4())[:8]
         _PENDING_RECOGNITIONS[token] = reps
@@ -349,16 +349,23 @@ async def confirm_recognition(callback: CallbackQuery, state: FSMContext, conn):
         await callback.answer("Дані вже збережені або застаріли.", show_alert=True)
         return
 
+    target_date = reps[0].get("date") if reps else None
+    archived_count = 0
+    if target_date:
+        archived_count = replacements.archive_previous_replacements(conn, target_date, group_name=config.STUDENT_GROUP)
+
     saved_count = 0
     for r in reps:
-        if replacements.save_replacement(conn, r):
+        if replacements.save_replacement(conn, r, auto_archive_previous=False):
             saved_count += 1
 
-    admins.log_action(conn, callback.from_user.id, "save_replacements", f"count={saved_count}")
+    admins.log_action(conn, callback.from_user.id, "save_replacements", f"count={saved_count}, date={target_date}, archived={archived_count}")
     await callback.answer("Заміни збережено!")
+    arch_info = f"\n📦 Попередніх замін автоматично архівовано: <b>{archived_count}</b>." if archived_count > 0 else ""
     await callback.message.edit_text(
         f"✅ <b>Успішно збережено замін: {saved_count}!</b>\n"
-        "Вони вже враховані в розкладі занять."
+        f"📅 Дата: <code>{target_date}</code>\n"
+        f"Вони вже враховані в розкладі занять.{arch_info}"
     )
 
 
@@ -476,21 +483,36 @@ async def edit_field_prompt_handler(callback: CallbackQuery, state: FSMContext, 
 
     if field == "date":
         today_str = replacements.get_today_key()
-        tom_dt = datetime.datetime.now(ZoneInfo(config.TIMEZONE)) + datetime.timedelta(days=1)
-        tom_str = tom_dt.strftime("%Y-%m-%d")
+        next_work_dt = working_days.get_next_working_day(conn)
+        next_work_str = next_work_dt.strftime("%Y-%m-%d")
+        w_idx = next_work_dt.weekday()
+        day_name = schedule.DAY_NAMES_UK.get(schedule.DAY_KEYS_ORDER[w_idx] if w_idx < 5 else "saturday", "Робочий день")
+
         date_kb = InlineKeyboardMarkup(
             inline_keyboard=[
                 [
-                    InlineKeyboardButton(text=f"📅 Сьогодні ({today_str})", callback_data=f"rec_sd:{token}:{idx}:{today_str}"),
+                    InlineKeyboardButton(
+                        text=f"💼 Наст. роб. день: {next_work_str} ({day_name})",
+                        callback_data=f"rec_sd:{token}:{idx}:{next_work_str}",
+                    ),
                 ],
                 [
-                    InlineKeyboardButton(text=f"➡️ Завтра ({tom_str})", callback_data=f"rec_sd:{token}:{idx}:{tom_str}"),
+                    InlineKeyboardButton(
+                        text=f"📅 Сьогодні ({today_str})",
+                        callback_data=f"rec_sd:{token}:{idx}:{today_str}",
+                    ),
                 ],
                 [
-                    InlineKeyboardButton(text="✏️ Ввести іншу дату вручну", callback_data=f"rec_txtdate:{token}:{idx}"),
+                    InlineKeyboardButton(
+                        text="✏️ Ввести іншу дату вручну",
+                        callback_data=f"rec_txtdate:{token}:{idx}",
+                    ),
                 ],
                 [
-                    InlineKeyboardButton(text="🔙 Скасувати", callback_data=f"rec_it:{token}:{idx}"),
+                    InlineKeyboardButton(
+                        text="🔙 Скасувати",
+                        callback_data=f"rec_it:{token}:{idx}",
+                    ),
                 ],
             ]
         )
@@ -633,7 +655,7 @@ async def add_replacement_item_handler(callback: CallbackQuery, conn):
 
     last_pair = reps[-1].get("lesson_number", 0) if reps else 0
     next_pair = (last_pair + 1) if (isinstance(last_pair, int) and last_pair < 6) else 1
-    default_date = reps[0].get("date") if reps else replacements.get_today_key()
+    default_date = reps[0].get("date") if reps else working_days.get_next_working_day_key(conn)
 
     new_item = {
         "date": default_date,
@@ -799,4 +821,35 @@ async def handle_document_upload(message: Message, conn):
                 f"⚠️ <b>Помилка у файлі JSON:</b> {html.escape(str(e))}\n\n"
                 "Перевірте структуру файлу або скористайтеся /get_schedule як шаблоном."
             )
+
+
+@router.message(F.text == "📦 Архів замін", StateFilter("*"))
+@router.message(Command("archived_replacements"), StateFilter("*"))
+async def show_archived_replacements(message: Message, conn):
+    if not admins.is_admin(conn, message.from_user.id):
+        return
+    items = replacements.get_archived_replacements(conn, group_name=config.STUDENT_GROUP, limit=30)
+    if not items:
+        await message.answer(
+            f"📦 <b>Архів замін для групи {html.escape(config.STUDENT_GROUP)}:</b>\n\n"
+            "Архів порожній. Попередніх заархівованих замін ще немає."
+        )
+        return
+
+    by_date = {}
+    for it in items:
+        by_date.setdefault(it["date"], []).append(it)
+
+    lines = [f"📦 <b>Архів попередніх замін ({html.escape(config.STUDENT_GROUP)}):</b>\n"]
+    for d, reps_list in by_date.items():
+        lines.append(f"📅 <b>Дата: {d}</b>")
+        for r in reps_list:
+            old_s = f" (було: {r['old_subject']})" if r.get("old_subject") else ""
+            t_info = f", викл. {r['teacher']}" if r.get("teacher") else ""
+            r_info = f", ауд. {r['room']}" if r.get("room") else ""
+            lines.append(f"• Пара №{r['lesson_number']}: <b>{html.escape(r['new_subject'])}</b>{old_s}{t_info}{r_info}")
+        lines.append("")
+
+    lines.append("<i>💡 Попередні заміни автоматично архівуються при збереженні замін на новий робочий день.</i>")
+    await message.answer("\n".join(lines))
 

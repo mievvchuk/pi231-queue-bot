@@ -115,6 +115,9 @@ MIGRATIONS = [
     """
     ALTER TABLE queue_entries ADD COLUMN swap_wish TEXT DEFAULT NULL;
     """,
+    """
+    ALTER TABLE replacements ADD COLUMN is_archived INTEGER NOT NULL DEFAULT 0;
+    """,
 ]
 
 PG_SCHEMA = """
@@ -134,6 +137,7 @@ CREATE TABLE IF NOT EXISTS replacements (
     new_subject TEXT NOT NULL,
     teacher TEXT,
     room TEXT,
+    is_archived BOOLEAN NOT NULL DEFAULT FALSE,
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE UNIQUE INDEX IF NOT EXISTS ux_replacements_unique
@@ -261,6 +265,7 @@ class PGConnectionWrapper:
             cur.execute("ALTER TABLE queue_sessions ADD COLUMN IF NOT EXISTS queue_type TEXT NOT NULL DEFAULT 'lesson';")
             cur.execute("ALTER TABLE queue_entries ADD COLUMN IF NOT EXISTS ready_to_swap BOOLEAN NOT NULL DEFAULT FALSE;")
             cur.execute("ALTER TABLE queue_entries ADD COLUMN IF NOT EXISTS swap_wish TEXT DEFAULT NULL;")
+            cur.execute("ALTER TABLE replacements ADD COLUMN IF NOT EXISTS is_archived BOOLEAN NOT NULL DEFAULT FALSE;")
             cur.execute("DROP INDEX IF EXISTS ux_one_unfinished_session;")
             cur.execute("""CREATE UNIQUE INDEX IF NOT EXISTS ux_one_unfinished_session
                 ON queue_sessions (subject_id, teacher_id, queue_type)

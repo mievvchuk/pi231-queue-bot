@@ -89,3 +89,30 @@ def get_next_saturday(ref_date: date | None = None) -> date:
 def get_upcoming_saturdays(count: int = 4, ref_date: date | None = None) -> list[date]:
     first = get_next_saturday(ref_date)
     return [first + timedelta(days=7 * i) for i in range(count)]
+
+
+def get_next_working_day(conn, ref_date: date | None = None) -> date:
+    """Визначає наступний робочий день з урахуванням вихідних та зареєстрованих робочих субот.
+    Якщо сьогодні п'ятниця і субота не робоча — повертає понеділок.
+    Якщо субота робоча — повертає суботу."""
+    if ref_date is None:
+        ref_date = datetime.now(UK_TZ).date()
+
+    candidate = ref_date + timedelta(days=1)
+    for _ in range(14):  # Запобіжник зациклення
+        weekday = candidate.weekday()  # 0=Пн .. 4=Пт, 5=Сб, 6=Нд
+        if weekday < 5:
+            return candidate
+        if weekday == 5:
+            if conn is not None:
+                sat = get_working_saturday(conn, candidate.strftime("%Y-%m-%d"))
+                if sat:
+                    return candidate
+        candidate += timedelta(days=1)
+
+    return candidate
+
+
+def get_next_working_day_key(conn, ref_date: date | None = None) -> str:
+    return get_next_working_day(conn, ref_date).strftime("%Y-%m-%d")
+

@@ -284,3 +284,70 @@ def test_working_saturdays_flow(conn):
     actual_rev, reps_rev = schedule.get_actual_schedule(conn, sch_data, sat_date, "ПІ-231")
     assert all(l["is_replacement"] for l in actual_rev)
 
+
+def test_next_working_day_calculation(conn):
+    from datetime import date
+    from services.working_days import get_next_working_day, set_working_saturday, remove_working_saturday
+
+    # 1. Понеділок (12.10.2026) -> Вівторок (13.10.2026)
+    mon = date(2026, 10, 12)
+    assert get_next_working_day(conn, mon) == date(2026, 10, 13)
+
+    # 2. П'ятниця (16.10.2026) без робочої суботи -> Понеділок (19.10.2026)
+    fri = date(2026, 10, 16)
+    assert get_next_working_day(conn, fri) == date(2026, 10, 19)
+
+    # 3. П'ятниця (16.10.2026) з робочою суботою (17.10.2026) -> Субота (17.10.2026)
+    set_working_saturday(conn, "2026-10-17", "monday")
+    try:
+        assert get_next_working_day(conn, fri) == date(2026, 10, 17)
+    finally:
+        remove_working_saturday(conn, "2026-10-17")
+
+    # 4. Неділя (18.10.2026) -> Понеділок (19.10.2026)
+    sun = date(2026, 10, 18)
+    assert get_next_working_day(conn, sun) == date(2026, 10, 19)
+
+
+def test_auto_archive_previous_replacements(conn):
+    from services import replacements
+    from handlers.common import get_admin_schedule_menu
+
+    # Перевірка наявності кнопки архіву в меню
+    menu = get_admin_schedule_menu()
+    btn_texts = [btn.text for row in menu.keyboard for btn in row]
+    assert "📦 Архів замін" in btn_texts
+
+    # 1. Додаємо заміну на четвер (2026-10-15)
+    replacements.save_replacement(conn, {
+        "date": "2026-10-15",
+        "group_name": "ПІ-231",
+        "lesson_number": 1,
+        "new_subject": "Стара заміна чт",
+    })
+    active_thursday = replacements.get_replacements(conn, date="2026-10-15")
+    assert len(active_thursday) == 1
+    assert active_thursday[0]["new_subject"] == "Стара заміна чт"
+
+    # 2. Додаємо нові заміни на п'ятницю (2026-10-16)
+    replacements.save_replacement(conn, {
+        "date": "2026-10-16",
+        "group_name": "ПІ-231",
+        "lesson_number": 1,
+        "new_subject": "Нова заміна пт",
+    })
+
+    # Попередня заміна за четвер автоматично заархівована!
+    active_now_thursday = replacements.get_replacements(conn, date="2026-10-15")
+    assert len(active_now_thursday) == 0
+
+    # А в архіві вона присутня
+    archived = replacements.get_archived_replacements(conn)
+    assert any(r["new_subject"] == "Стара заміна чт" for r in archived)
+
+    # Активні заміни на п'ятницю доступні
+    active_friday = replacements.get_replacements(conn, date="2026-10-16")
+    assert len(active_friday) == 1
+    assert active_friday[0]["new_subject"] == "Нова заміна пт"
+
+
