@@ -39,3 +39,45 @@ def test_queue_actions_blocked_during_maintenance(conn):
     pos, total = queues.join_queue(conn, 100, sess_id)
     assert pos == 1
     assert total == 1
+
+
+@pytest.mark.asyncio
+async def test_maintenance_handlers_flow(conn):
+    from unittest.mock import AsyncMock, MagicMock
+    from aiogram.fsm.context import FSMContext
+    from aiogram.fsm.storage.memory import MemoryStorage
+    from aiogram.fsm.storage.base import StorageKey
+    from handlers.admin import (
+        start_maintenance_prompt,
+        process_maintenance_time_entry,
+        disable_maintenance,
+        AdminManageState,
+        AdminPanelState,
+    )
+
+    storage = MemoryStorage()
+    state = FSMContext(storage=storage, key=StorageKey(bot_id=1, chat_id=100, user_id=100))
+
+    message = MagicMock()
+    message.from_user.id = 100
+    message.answer = AsyncMock()
+    message.bot = MagicMock()
+    message.bot.send_message = AsyncMock()
+
+    # 1. Початок введення часу техробіт
+    await start_maintenance_prompt(message, state, conn)
+    assert await state.get_state() == AdminManageState.entering_maintenance_time
+    assert "Увімкнення режиму технічних робіт" in message.answer.call_args[0][0]
+
+    # 2. Введення часу (наприклад, "22:00")
+    message.text = "22:00"
+    await process_maintenance_time_entry(message, state, conn)
+    assert await state.get_state() == AdminPanelState.in_settings_menu
+    assert maintenance.is_maintenance_active(conn) is True
+    assert maintenance.get_maintenance_end_time(conn) == "22:00"
+
+    # 3. Вимкнення техробіт
+    await disable_maintenance(message, state, conn)
+    assert maintenance.is_maintenance_active(conn) is False
+    assert "ВИМКНЕНО" in message.answer.call_args[0][0]
+

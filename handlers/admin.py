@@ -121,6 +121,7 @@ class AdminManageState(StatesGroup):
     history_view = State()
     entering_broadcast = State()
     confirming_broadcast = State()
+    entering_maintenance_time = State()
 
 
 def get_open_session(conn, session_id: int):
@@ -1782,35 +1783,91 @@ async def perform_broadcast(message: Message, state: FSMContext, conn):
 
 # ---------- Режим технічних робіт ----------
 
-@router.message(F.text.in_({"🛠 Увімкнути техроботи", "🟢 Вимкнути техроботи"}), StateFilter("*"))
-async def toggle_maintenance(message: Message, state: FSMContext, conn):
-    from services.maintenance import get_maintenance_end_time, is_maintenance_active, set_maintenance_mode
-    cur = is_maintenance_active(conn)
-    new_state = not cur
-    set_maintenance_mode(conn, new_state, "20:15")
-    end_t = get_maintenance_end_time(conn)
-    admins.log_action(conn, message.from_user.id, "toggle_maintenance", f"active={new_state}")
-
-    if new_state:
-        from services.maintenance import broadcast_maintenance_notice
-        await message.answer("⏳ Розсилаю сповіщення про техроботи та приховую кнопки у студентів...")
-        succ, err = await broadcast_maintenance_notice(message.bot, conn, end_t)
-        status_txt = (
-            f"🛠 <b>Режим техробіт УВІМКНЕНО!</b> (орієнтовно до {end_t})\n\n"
-            f"• Сповіщення доставлено: <b>{succ}</b> користувачам (помилок: {err})\n"
-            f"• Доступ до запису заблоковано, кнопки у студентів деактивовано."
+@router.message(F.text == "🛠 Увімкнути техроботи", StateFilter("*"))
+async def start_maintenance_prompt(message: Message, state: FSMContext, conn):
+    from services.maintenance import is_maintenance_active
+    if is_maintenance_active(conn):
+        await message.answer(
+            "🛠 Режим технічних робіт вже увімкнено.",
+            reply_markup=get_admin_settings_menu(is_maintenance=True),
         )
+        return
+
+    await state.set_state(AdminManageState.entering_maintenance_time)
+    keyboard = make_reply_keyboard([
+        ["через 15 хв", "через 30 хв"],
+        ["через 1 год", "через 2 год"],
+        ["🔙 Скасувати"],
+    ])
+    await message.answer(
+        "🛠 <b>Увімкнення режиму технічних робіт</b>\n\n"
+        "Вкажіть орієнтовний час завершення (наприклад: <code>21:30</code>, <code>22:00</code>) "
+        "або оберіть швидкий варіант на кнопках нижче 👇",
+        reply_markup=keyboard,
+    )
+
+
+@router.message(AdminManageState.entering_maintenance_time, F.text)
+async def process_maintenance_time_entry(message: Message, state: FSMContext, conn):
+    if message.text in {"🔙 Скасувати", "🔙 Назад"}:
+        await state.set_state(AdminPanelState.in_settings_menu)
+        from services.maintenance import is_maintenance_active
+        await message.answer(
+            "Скасовано. Режим техробіт не увімкнено.",
+            reply_markup=get_admin_settings_menu(is_maintenance=is_maintenance_active(conn)),
+        )
+        return
+
+    import config
+    from datetime import datetime, timedelta
+    from zoneinfo import ZoneInfo
+    now_tz = datetime.now(ZoneInfo(config.TIMEZONE))
+    t_text = message.text.strip()
+    if t_text == "через 15 хв":
+        end_t = (now_tz + timedelta(minutes=15)).strftime("%H:%M")
+    elif t_text == "через 30 хв":
+        end_t = (now_tz + timedelta(minutes=30)).strftime("%H:%M")
+    elif t_text == "через 1 год":
+        end_t = (now_tz + timedelta(hours=1)).strftime("%H:%M")
+    elif t_text == "через 2 год":
+        end_t = (now_tz + timedelta(hours=2)).strftime("%H:%M")
     else:
-        from services.maintenance import broadcast_maintenance_end
-        await message.answer("⏳ Розсилаю сповіщення про завершення робіт та повертаю кнопки студентам...")
-        succ, err = await broadcast_maintenance_end(message.bot, conn)
-        status_txt = (
-            "🟢 <b>Режим техробіт ВИМКНЕНО!</b>\n\n"
-            f"• Сповіщення доставлено: <b>{succ}</b> користувачам (помилок: {err})\n"
-            f"• Бот знову працює у штатному режимі, кнопки меню відновлено!"
-        )
+        end_t = t_text
 
+    from services.maintenance import broadcast_maintenance_notice, set_maintenance_mode
+    set_maintenance_mode(conn, True, end_t)
+    admins.log_action(conn, message.from_user.id, "toggle_maintenance", f"active=True, end_time={end_t}")
+
+    await message.answer("⏳ Розсилаю сповіщення про техроботи та приховую кнопки у студентів...")
+    succ, err = await broadcast_maintenance_notice(message.bot, conn, end_t)
+    await state.set_state(AdminPanelState.in_settings_menu)
+    status_txt = (
+        f"🛠 <b>Режим техробіт УВІМКНЕНО!</b> (орієнтовно до {end_t})\n\n"
+        f"• Сповіщення доставлено: <b>{succ}</b> користувачам (помилок: {err})\n"
+        f"• Доступ до запису заблоковано, кнопки у студентів деактивовано."
+    )
     await message.answer(
         status_txt,
-        reply_markup=get_admin_settings_menu(is_maintenance=new_state),
+        reply_markup=get_admin_settings_menu(is_maintenance=True),
     )
+
+
+@router.message(F.text == "🟢 Вимкнути техроботи", StateFilter("*"))
+async def disable_maintenance(message: Message, state: FSMContext, conn):
+    from services.maintenance import broadcast_maintenance_end, set_maintenance_mode
+    set_maintenance_mode(conn, False)
+    admins.log_action(conn, message.from_user.id, "toggle_maintenance", "active=False")
+
+    await message.answer("⏳ Розсилаю сповіщення про завершення робіт та повертаю кнопки студентам...")
+    succ, err = await broadcast_maintenance_end(message.bot, conn)
+    await state.set_state(AdminPanelState.in_settings_menu)
+    status_txt = (
+        "🟢 <b>Режим техробіт ВИМКНЕНО!</b>\n\n"
+        f"• Сповіщення доставлено: <b>{succ}</b> користувачам (помилок: {err})\n"
+        f"• Студентам надіслано повідомлення про завершення робіт та вказівку скористатися /start для оновлення меню!"
+    )
+    await message.answer(
+        status_txt,
+        reply_markup=get_admin_settings_menu(is_maintenance=False),
+    )
+
