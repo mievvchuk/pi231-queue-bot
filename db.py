@@ -112,6 +112,9 @@ MIGRATIONS = [
     """
     ALTER TABLE queue_entries ADD COLUMN ready_to_swap INTEGER NOT NULL DEFAULT 0;
     """,
+    """
+    ALTER TABLE queue_entries ADD COLUMN swap_wish TEXT DEFAULT NULL;
+    """,
 ]
 
 PG_SCHEMA = """
@@ -180,6 +183,7 @@ CREATE TABLE IF NOT EXISTS queue_entries (
     status TEXT NOT NULL DEFAULT 'active'
         CHECK (status IN ('active', 'completed', 'left', 'removed', 'transferred')),
     ready_to_swap BOOLEAN NOT NULL DEFAULT FALSE,
+    swap_wish TEXT DEFAULT NULL,
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
     completed_at TIMESTAMP WITH TIME ZONE
 );
@@ -256,6 +260,7 @@ class PGConnectionWrapper:
             cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_blocked BOOLEAN NOT NULL DEFAULT FALSE;")
             cur.execute("ALTER TABLE queue_sessions ADD COLUMN IF NOT EXISTS queue_type TEXT NOT NULL DEFAULT 'lesson';")
             cur.execute("ALTER TABLE queue_entries ADD COLUMN IF NOT EXISTS ready_to_swap BOOLEAN NOT NULL DEFAULT FALSE;")
+            cur.execute("ALTER TABLE queue_entries ADD COLUMN IF NOT EXISTS swap_wish TEXT DEFAULT NULL;")
             cur.execute("DROP INDEX IF EXISTS ux_one_unfinished_session;")
             cur.execute("""CREATE UNIQUE INDEX IF NOT EXISTS ux_one_unfinished_session
                 ON queue_sessions (subject_id, teacher_id, queue_type)

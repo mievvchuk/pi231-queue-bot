@@ -314,11 +314,57 @@ async def show_queue_actions(message: Message, state: FSMContext, conn):
     is_in_queue = queues.get_user_position(conn, message.from_user.id, session_id) is not None
     is_open = session["status"] == "open"
     can_pick = not queues.are_first_10_occupied(conn, session_id)
+    swap_wish = queues.get_swap_wish(conn, message.from_user.id, session_id) if is_in_queue else None
     ready_to_swap = queues.is_ready_to_swap(conn, message.from_user.id, session_id) if is_in_queue else False
     markup = get_queue_actions_reply_menu(
-        is_in_queue, is_open=is_open, can_pick_number=can_pick, ready_to_swap=ready_to_swap
+        is_in_queue, is_open=is_open, can_pick_number=can_pick, swap_wish=swap_wish, ready_to_swap=ready_to_swap
     )
     await message.answer("⚙️ <b>Оберіть дію:</b>", reply_markup=markup)
+
+
+@router.message(F.text.in_({"⬆️ Хочу вище", "⏸ Зняти «Хочу вище»"}), not_admin_state_filter)
+async def handle_swap_wish_higher(message: Message, state: FSMContext, conn, subjects):
+    session_id = await ensure_session_id(message, state)
+    if not session_id:
+        return
+    pos = queues.get_user_position(conn, message.from_user.id, session_id)
+    if pos is None:
+        raise BotError("Ви не записані в цю чергу.")
+    if pos == 1 and message.text == "⬆️ Хочу вище":
+        raise BotError("Ви вже на 1-му місці в черзі! Якщо не встигаєте підготуватися — оберіть «⬇️ Хочу нижче».")
+
+    new_wish = queues.set_swap_wish(conn, message.from_user.id, session_id, "higher")
+    if new_wish == "higher":
+        note = (
+            "⬆️ <b>Статус оновлено:</b> ви позначені як <b>«хочу вище»</b>.\n"
+            "Студенти перед вами бачитимуть це і зможуть запропонувати вам своє місце, якщо їм потрібен додатковий час."
+        )
+    else:
+        note = "⏸ <b>Статус «Хочу вище» знято.</b>"
+    await open_queue_screen(message, conn, subjects, session_id, note=note)
+
+
+@router.message(F.text.in_({"⬇️ Хочу нижче", "⏸ Зняти «Хочу нижче»"}), not_admin_state_filter)
+async def handle_swap_wish_lower(message: Message, state: FSMContext, conn, subjects):
+    session_id = await ensure_session_id(message, state)
+    if not session_id:
+        return
+    pos = queues.get_user_position(conn, message.from_user.id, session_id)
+    if pos is None:
+        raise BotError("Ви не записані в цю чергу.")
+    total = len(queues.get_entries(conn, session_id))
+    if total > 1 and pos == total and message.text == "⬇️ Хочу нижче":
+        raise BotError("Ви вже останній у черзі! Якщо готові здавати раніше — оберіть «⬆️ Хочу вище».")
+
+    new_wish = queues.set_swap_wish(conn, message.from_user.id, session_id, "lower")
+    if new_wish == "lower":
+        note = (
+            "⬇️ <b>Статус оновлено:</b> ви позначені як <b>«хочу нижче»</b>.\n"
+            "Студенти після вас бачитимуть це і зможуть запропонувати обмін, щоб піти здавати раніше."
+        )
+    else:
+        note = "⏸ <b>Статус «Хочу нижче» знято.</b>"
+    await open_queue_screen(message, conn, subjects, session_id, note=note)
 
 
 @router.message(F.text.in_({"🔄 Готовий до обміну", "⏸ Не готовий до обміну"}), not_admin_state_filter)
@@ -494,15 +540,41 @@ async def start_swap_flow(message: Message, state: FSMContext, conn, subjects):
 
     await state.set_state(StudentFlow.choosing_swap_target)
     await state.update_data(session_id=session_id, swap_page=1)
-    candidates.sort(key=lambda e: (0 if bool(e.get("ready_to_swap")) else 1, e["position"]))
+
+    def candidate_sort_key(e):
+        wish = e.get("swap_wish")
+        c_pos = e["position"]
+        if c_pos < my_pos and wish == "lower":
+            return (0, c_pos)
+        if c_pos > my_pos and wish == "higher":
+            return (0, c_pos)
+        if wish in ("higher", "lower") or bool(e.get("ready_to_swap")):
+            return (1, c_pos)
+        return (2, c_pos)
+
+    candidates.sort(key=candidate_sort_key)
     page_candidates, cur_page, total_pages = paginate(candidates, 1, per_page=8)
     rows = []
     for e in page_candidates:
-        ready_badge = " 🟢 [готовий]" if bool(e.get("ready_to_swap")) else ""
-        rows.append([f"🔄 {e['position']}. {e['full_name']}{ready_badge}"])
+        wish = e.get("swap_wish")
+        if wish == "higher":
+            badge = " ⬆️ [хоче вище]"
+        elif wish == "lower":
+            badge = " ⬇️ [хоче нижче]"
+        elif bool(e.get("ready_to_swap")):
+            badge = " 🟢 [готовий]"
+        else:
+            badge = ""
+        rows.append([f"🔄 {e['position']}. {e['full_name']}{badge}"])
     markup = get_paginated_reply_keyboard(rows, cur_page, total_pages, back_text="🔙 Назад до черги")
-    has_ready = any(bool(e.get("ready_to_swap")) for e in candidates)
-    info_note = "\n\n🟢 <i>Студенти з позначкою «готовий» виділені першими у списку.</i>" if has_ready else ""
+    has_matches = any(candidate_sort_key(e)[0] == 0 for e in candidates)
+    has_wishes = any(e.get("swap_wish") for e in candidates)
+    if has_matches:
+        info_note = "\n\n🟢 <i>Студенти, чиї бажання («хочу вище/нижче») співпадають з вашим обміном, виділені першими!</i>"
+    elif has_wishes:
+        info_note = "\n\n🟢 <i>Студенти з позначками «хочу вище» або «хочу нижче» виділені першими.</i>"
+    else:
+        info_note = ""
     await message.answer(f"🔁 <b>Обмін місцями</b>\n\nОберіть студента на кнопках внизу 👇{info_note}", reply_markup=markup)
 
 
@@ -514,17 +586,38 @@ async def paginate_swap_targets(message: Message, state: FSMContext, conn):
     page = (page - 1) if message.text == "⬅️" else (page + 1)
     await state.update_data(swap_page=page)
 
+    my_pos = queues.get_user_position(conn, message.from_user.id, session_id) or 0
     entries = queues.get_entries(conn, session_id)
     candidates = [
         e for e in entries
         if e["user_id"] and e["telegram_id"] and e["telegram_id"] > 0 and e["telegram_id"] != message.from_user.id
     ]
-    candidates.sort(key=lambda e: (0 if bool(e.get("ready_to_swap")) else 1, e["position"]))
+
+    def candidate_sort_key(e):
+        wish = e.get("swap_wish")
+        c_pos = e["position"]
+        if c_pos < my_pos and wish == "lower":
+            return (0, c_pos)
+        if c_pos > my_pos and wish == "higher":
+            return (0, c_pos)
+        if wish in ("higher", "lower") or bool(e.get("ready_to_swap")):
+            return (1, c_pos)
+        return (2, c_pos)
+
+    candidates.sort(key=candidate_sort_key)
     page_candidates, cur_page, total_pages = paginate(candidates, page, per_page=8)
     rows = []
     for e in page_candidates:
-        ready_badge = " 🟢 [готовий]" if bool(e.get("ready_to_swap")) else ""
-        rows.append([f"🔄 {e['position']}. {e['full_name']}{ready_badge}"])
+        wish = e.get("swap_wish")
+        if wish == "higher":
+            badge = " ⬆️ [хоче вище]"
+        elif wish == "lower":
+            badge = " ⬇️ [хоче нижче]"
+        elif bool(e.get("ready_to_swap")):
+            badge = " 🟢 [готовий]"
+        else:
+            badge = ""
+        rows.append([f"🔄 {e['position']}. {e['full_name']}{badge}"])
     markup = get_paginated_reply_keyboard(rows, cur_page, total_pages, back_text="🔙 Назад до черги")
     await message.answer("Оберіть студента для обміну місцями 👇", reply_markup=markup)
 
@@ -542,7 +635,11 @@ async def swap_target_chosen(message: Message, state: FSMContext, conn, subjects
     entries = queues.get_entries(conn, session_id)
     cleaned = (
         message.text.replace("🔄", "")
+        .replace("⬆️", "")
+        .replace("⬇️", "")
         .replace("🟢", "")
+        .replace("[хоче вище]", "")
+        .replace("[хоче нижче]", "")
         .replace("[готовий]", "")
         .strip()
     )
@@ -569,8 +666,15 @@ async def swap_target_chosen(message: Message, state: FSMContext, conn, subjects
 
     await state.set_state(StudentFlow.confirm_swap)
     await state.update_data(session_id=session_id, target_entry_id=target["id"])
-    is_target_ready = bool(target.get("ready_to_swap"))
-    ready_info = "\n🟢 <i>Студент зазначив, що готовий помінятися!</i>" if is_target_ready else ""
+    target_wish = target.get("swap_wish")
+    if target_wish == "lower":
+        ready_info = "\n🟢 <i>Студент зазначив, що хоче опуститися нижче в черзі («⬇️ Хочу нижче»)!</i>"
+    elif target_wish == "higher":
+        ready_info = "\n🟢 <i>Студент зазначив, що хоче піднятися вище в черзі («⬆️ Хочу вище»)!</i>"
+    elif bool(target.get("ready_to_swap")):
+        ready_info = "\n🟢 <i>Студент зазначив, що готовий помінятися!</i>"
+    else:
+        ready_info = ""
     text = (
         f"🔁 <b>Запропонувати обмін місцями?</b>\n\n"
         f"👤 Студент: <b>{html.escape(target_name)}</b> (місце {target['position']}){ready_info}\n"

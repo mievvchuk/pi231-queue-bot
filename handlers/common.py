@@ -68,14 +68,28 @@ def get_queue_view_reply_menu() -> ReplyKeyboardMarkup:
 
 
 def get_queue_actions_reply_menu(
-    is_in_queue: bool, is_open: bool = True, can_pick_number: bool = True, ready_to_swap: bool = False
+    is_in_queue: bool,
+    is_open: bool = True,
+    can_pick_number: bool = True,
+    swap_wish: str | None = None,
+    ready_to_swap: bool = False,
 ) -> ReplyKeyboardMarkup:
     """Меню «Дії» залежно від статусу запису студента."""
     if is_in_queue:
-        swap_toggle_btn = "⏸ Не готовий до обміну" if ready_to_swap else "🔄 Готовий до обміну"
+        if swap_wish == "higher":
+            btn_higher = "⏸ Зняти «Хочу вище»"
+            btn_lower = "⬇️ Хочу нижче"
+        elif swap_wish == "lower":
+            btn_higher = "⬆️ Хочу вище"
+            btn_lower = "⏸ Зняти «Хочу нижче»"
+        else:
+            btn_higher = "⬆️ Хочу вище"
+            btn_lower = "⬇️ Хочу нижче"
+
         return make_reply_keyboard([
             ["✅ Здав", "❌ Не здав"],
-            ["🔁 Обмінятися місцями", swap_toggle_btn],
+            ["🔁 Обмінятися місцями"],
+            [btn_higher, btn_lower],
             ["🚪 Покинути чергу", "🔙 Назад до черги"],
         ])
     if is_open:
@@ -405,8 +419,15 @@ def format_entry(row, my_telegram_id: int | None = None, marked: bool = False, s
     prefix = "👉 " if (is_me or marked) else ""
     suffix = " — це ви" if is_me else ""
 
-    is_swap_ready = bool(row["ready_to_swap"]) if "ready_to_swap" in row.keys() and row["ready_to_swap"] is not None else False
-    swap_badge = " 🔄 [готовий до обміну]" if is_swap_ready else ""
+    swap_wish = row["swap_wish"] if "swap_wish" in row.keys() and row["swap_wish"] else None
+    if swap_wish == "higher":
+        swap_badge = " ⬆️ [хочу вище]"
+    elif swap_wish == "lower":
+        swap_badge = " ⬇️ [хочу нижче]"
+    elif bool(row["ready_to_swap"]) if "ready_to_swap" in row.keys() and row["ready_to_swap"] is not None else False:
+        swap_badge = " 🔄 [готовий до обміну]"
+    else:
+        swap_badge = ""
 
     id_part = ""
     if show_id and tg_id and tg_id > 0:

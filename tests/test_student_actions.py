@@ -226,40 +226,80 @@ def test_ready_to_swap_toggle_and_format(conn, filled):
     assert "🔄 [готовий до обміну]" in formatted
 
     # Кнопки в меню Дії
-    menu_ready = get_queue_actions_reply_menu(is_in_queue=True, ready_to_swap=True)
+    menu_ready = get_queue_actions_reply_menu(is_in_queue=True, swap_wish=None)
     flat_btns_ready = [btn.text for row in menu_ready.keyboard for btn in row]
-    assert "⏸ Не готовий до обміну" in flat_btns_ready
+    assert "⬆️ Хочу вище" in flat_btns_ready
+    assert "⬇️ Хочу нижче" in flat_btns_ready
 
     # Перемикання назад у False
     new_st2 = queues.toggle_ready_to_swap(conn, 1, filled)
     assert new_st2 is False
     assert queues.is_ready_to_swap(conn, 1, filled) is False
 
-    menu_not_ready = get_queue_actions_reply_menu(is_in_queue=True, ready_to_swap=False)
-    flat_btns_not_ready = [btn.text for row in menu_not_ready.keyboard for btn in row]
-    assert "🔄 Готовий до обміну" in flat_btns_not_ready
+
+def test_swap_wish_higher_and_lower(conn, filled):
+    from handlers.common import format_entry, get_queue_actions_reply_menu
+
+    # 1. Встановлення "higher"
+    assert queues.get_swap_wish(conn, 2, filled) is None
+    res = queues.set_swap_wish(conn, 2, filled, "higher")
+    assert res == "higher"
+    assert queues.get_swap_wish(conn, 2, filled) == "higher"
+    assert queues.is_ready_to_swap(conn, 2, filled) is True
+
+    # Форматування запису
+    entries = queues.get_entries(conn, filled)
+    e2 = next(e for e in entries if e["telegram_id"] == 2)
+    assert "⬆️ [хочу вище]" in format_entry(e2)
+
+    # Меню дій: має бути кнопка для скасування
+    menu = get_queue_actions_reply_menu(is_in_queue=True, swap_wish="higher")
+    flat_btns = [btn.text for row in menu.keyboard for btn in row]
+    assert "⏸ Зняти «Хочу вище»" in flat_btns
+    assert "⬇️ Хочу нижче" in flat_btns
+
+    # 2. Зміна на "lower"
+    res2 = queues.set_swap_wish(conn, 2, filled, "lower")
+    assert res2 == "lower"
+    assert queues.get_swap_wish(conn, 2, filled) == "lower"
+    entries = queues.get_entries(conn, filled)
+    e2 = next(e for e in entries if e["telegram_id"] == 2)
+    assert "⬇️ [хочу нижче]" in format_entry(e2)
+
+    menu_lower = get_queue_actions_reply_menu(is_in_queue=True, swap_wish="lower")
+    flat_btns_l = [btn.text for row in menu_lower.keyboard for btn in row]
+    assert "⬆️ Хочу вище" in flat_btns_l
+    assert "⏸ Зняти «Хочу нижче»" in flat_btns_l
+
+    # 3. Повторне натискання "lower" вимикає його
+    res3 = queues.set_swap_wish(conn, 2, filled, "lower")
+    assert res3 is None
+    assert queues.get_swap_wish(conn, 2, filled) is None
+    entries = queues.get_entries(conn, filled)
+    e2 = next(e for e in entries if e["telegram_id"] == 2)
+    assert "хочу" not in format_entry(e2)
 
 
 def test_ready_to_swap_cleared_on_swap_and_leave(conn, filled):
-    # Вмикаємо статус готовності для студента 1
-    queues.toggle_ready_to_swap(conn, 1, filled)
-    assert queues.is_ready_to_swap(conn, 1, filled) is True
+    # Вмикаємо статус для студента 1
+    queues.set_swap_wish(conn, 1, filled, "lower")
+    assert queues.get_swap_wish(conn, 1, filled) == "lower"
 
     # Знаходимо entry_id для 1 та 2
     entries = queues.get_entries(conn, filled)
     e1 = next(e for e in entries if e["telegram_id"] == 1)
     e2 = next(e for e in entries if e["telegram_id"] == 2)
 
-    # Обмін місцями скидає ready_to_swap
+    # Обмін місцями скидає swap_wish
     queues.swap_entries(conn, e1["id"], e2["id"])
-    assert queues.is_ready_to_swap(conn, 1, filled) is False
-    assert queues.is_ready_to_swap(conn, 2, filled) is False
+    assert queues.get_swap_wish(conn, 1, filled) is None
+    assert queues.get_swap_wish(conn, 2, filled) is None
 
     # Вмикаємо знову та перевіряємо скидання при виході
-    queues.toggle_ready_to_swap(conn, 1, filled)
-    assert queues.is_ready_to_swap(conn, 1, filled) is True
+    queues.set_swap_wish(conn, 1, filled, "higher")
+    assert queues.get_swap_wish(conn, 1, filled) == "higher"
     queues.leave_queue(conn, 1, filled)
-    assert queues.is_ready_to_swap(conn, 1, filled) is False
+    assert queues.get_swap_wish(conn, 1, filled) is None
 
 
 
