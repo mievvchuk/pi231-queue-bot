@@ -68,14 +68,15 @@ def get_queue_view_reply_menu() -> ReplyKeyboardMarkup:
 
 
 def get_queue_actions_reply_menu(
-    is_in_queue: bool, is_open: bool = True, can_pick_number: bool = True
+    is_in_queue: bool, is_open: bool = True, can_pick_number: bool = True, ready_to_swap: bool = False
 ) -> ReplyKeyboardMarkup:
     """Меню «Дії» залежно від статусу запису студента."""
     if is_in_queue:
+        swap_toggle_btn = "⏸ Не готовий до обміну" if ready_to_swap else "🔄 Готовий до обміну"
         return make_reply_keyboard([
             ["✅ Здав", "❌ Не здав"],
-            ["🔁 Обмінятися місцями", "🚪 Покинути чергу"],
-            ["🔙 Назад до черги"],
+            ["🔁 Обмінятися місцями", swap_toggle_btn],
+            ["🚪 Покинути чергу", "🔙 Назад до черги"],
         ])
     if is_open:
         if can_pick_number:
@@ -403,11 +404,15 @@ def format_entry(row, my_telegram_id: int | None = None, marked: bool = False, s
     is_me = my_telegram_id is not None and tg_id == my_telegram_id
     prefix = "👉 " if (is_me or marked) else ""
     suffix = " — це ви" if is_me else ""
+
+    is_swap_ready = bool(row["ready_to_swap"]) if "ready_to_swap" in row.keys() and row["ready_to_swap"] is not None else False
+    swap_badge = " 🔄 [готовий до обміну]" if is_swap_ready else ""
+
     id_part = ""
     if show_id and tg_id and tg_id > 0:
         id_part = f" <code>[ID: {tg_id}]</code>"
     pos = row["position"] if "position" in row.keys() else "?"
-    return f"{prefix}{pos}. {name}{suffix}{id_part}"
+    return f"{prefix}{pos}. {name}{swap_badge}{suffix}{id_part}"
 
 
 async def show(callback: CallbackQuery, text: str, markup: InlineKeyboardMarkup | None = None):

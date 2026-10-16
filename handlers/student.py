@@ -314,8 +314,28 @@ async def show_queue_actions(message: Message, state: FSMContext, conn):
     is_in_queue = queues.get_user_position(conn, message.from_user.id, session_id) is not None
     is_open = session["status"] == "open"
     can_pick = not queues.are_first_10_occupied(conn, session_id)
-    markup = get_queue_actions_reply_menu(is_in_queue, is_open=is_open, can_pick_number=can_pick)
+    ready_to_swap = queues.is_ready_to_swap(conn, message.from_user.id, session_id) if is_in_queue else False
+    markup = get_queue_actions_reply_menu(
+        is_in_queue, is_open=is_open, can_pick_number=can_pick, ready_to_swap=ready_to_swap
+    )
     await message.answer("⚙️ <b>Оберіть дію:</b>", reply_markup=markup)
+
+
+@router.message(F.text.in_({"🔄 Готовий до обміну", "⏸ Не готовий до обміну"}), not_admin_state_filter)
+async def toggle_swap_readiness(message: Message, state: FSMContext, conn, subjects):
+    session_id = await ensure_session_id(message, state)
+    if not session_id:
+        return
+    if queues.get_user_position(conn, message.from_user.id, session_id) is None:
+        raise BotError("Ви не записані в цю чергу.")
+    new_status = queues.toggle_ready_to_swap(conn, message.from_user.id, session_id)
+    note = (
+        "🔄 <b>Статус оновлено:</b> ви позначені як <b>готовий до обміну місцями</b>.\n"
+        "Інші студенти бачитимуть статус у черзі та бачитимуть вас першими у списку для обміну."
+        if new_status
+        else "⏸ <b>Статус оновлено:</b> готовність до обміну вимкнено."
+    )
+    await open_queue_screen(message, conn, subjects, session_id, note=note)
 
 
 @router.message(F.text.in_({"🔙 Назад до черги", "🔙 Назад"}), not_admin_state_filter)
@@ -474,10 +494,16 @@ async def start_swap_flow(message: Message, state: FSMContext, conn, subjects):
 
     await state.set_state(StudentFlow.choosing_swap_target)
     await state.update_data(session_id=session_id, swap_page=1)
+    candidates.sort(key=lambda e: (0 if bool(e.get("ready_to_swap")) else 1, e["position"]))
     page_candidates, cur_page, total_pages = paginate(candidates, 1, per_page=8)
-    rows = [[f"🔄 {e['position']}. {e['full_name']}"] for e in page_candidates]
+    rows = []
+    for e in page_candidates:
+        ready_badge = " 🟢 [готовий]" if bool(e.get("ready_to_swap")) else ""
+        rows.append([f"🔄 {e['position']}. {e['full_name']}{ready_badge}"])
     markup = get_paginated_reply_keyboard(rows, cur_page, total_pages, back_text="🔙 Назад до черги")
-    await message.answer("🔁 <b>Обмін місцями</b>\n\nОберіть студента на кнопках внизу 👇", reply_markup=markup)
+    has_ready = any(bool(e.get("ready_to_swap")) for e in candidates)
+    info_note = "\n\n🟢 <i>Студенти з позначкою «готовий» виділені першими у списку.</i>" if has_ready else ""
+    await message.answer(f"🔁 <b>Обмін місцями</b>\n\nОберіть студента на кнопках внизу 👇{info_note}", reply_markup=markup)
 
 
 @router.message(StudentFlow.choosing_swap_target, F.text.in_({"⬅️", "➡️"}))
@@ -493,8 +519,12 @@ async def paginate_swap_targets(message: Message, state: FSMContext, conn):
         e for e in entries
         if e["user_id"] and e["telegram_id"] and e["telegram_id"] > 0 and e["telegram_id"] != message.from_user.id
     ]
+    candidates.sort(key=lambda e: (0 if bool(e.get("ready_to_swap")) else 1, e["position"]))
     page_candidates, cur_page, total_pages = paginate(candidates, page, per_page=8)
-    rows = [[f"🔄 {e['position']}. {e['full_name']}"] for e in page_candidates]
+    rows = []
+    for e in page_candidates:
+        ready_badge = " 🟢 [готовий]" if bool(e.get("ready_to_swap")) else ""
+        rows.append([f"🔄 {e['position']}. {e['full_name']}{ready_badge}"])
     markup = get_paginated_reply_keyboard(rows, cur_page, total_pages, back_text="🔙 Назад до черги")
     await message.answer("Оберіть студента для обміну місцями 👇", reply_markup=markup)
 
@@ -510,7 +540,12 @@ async def swap_target_chosen(message: Message, state: FSMContext, conn, subjects
             await open_queue_screen(message, conn, subjects, session_id)
         return
     entries = queues.get_entries(conn, session_id)
-    cleaned = message.text.replace("🔄", "").strip()
+    cleaned = (
+        message.text.replace("🔄", "")
+        .replace("🟢", "")
+        .replace("[готовий]", "")
+        .strip()
+    )
     match = re.match(r"^(\d+)[\.\)\-\s]+(.+)$", cleaned)
     target = None
     if match:
@@ -534,9 +569,11 @@ async def swap_target_chosen(message: Message, state: FSMContext, conn, subjects
 
     await state.set_state(StudentFlow.confirm_swap)
     await state.update_data(session_id=session_id, target_entry_id=target["id"])
+    is_target_ready = bool(target.get("ready_to_swap"))
+    ready_info = "\n🟢 <i>Студент зазначив, що готовий помінятися!</i>" if is_target_ready else ""
     text = (
         f"🔁 <b>Запропонувати обмін місцями?</b>\n\n"
-        f"👤 Студент: <b>{html.escape(target_name)}</b> (місце {target['position']})\n"
+        f"👤 Студент: <b>{html.escape(target_name)}</b> (місце {target['position']}){ready_info}\n"
         f"Ваше поточне місце: <b>{my_pos}</b>\n\n"
         f"Студенту надійде сповіщення. Якщо він погодиться — місця оновляться автоматично."
     )

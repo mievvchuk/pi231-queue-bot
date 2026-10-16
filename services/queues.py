@@ -27,7 +27,7 @@ def get_entry(conn: sqlite3.Connection, entry_id: int):
 def get_entries(conn: sqlite3.Connection, session_id: int) -> list[sqlite3.Row]:
     """Активні записи по порядку. full_name = NULL означає вільне місце."""
     return conn.execute(
-        """SELECT e.id, e.user_id, e.position, u.full_name, u.telegram_id, u.is_blocked
+        """SELECT e.id, e.user_id, e.position, e.ready_to_swap, u.full_name, u.telegram_id, u.is_blocked
            FROM queue_entries e LEFT JOIN users u ON u.id = e.user_id
            WHERE e.session_id = ? AND e.status = 'active' ORDER BY e.position""",
         (session_id,),
@@ -99,7 +99,7 @@ def _ordered_ids(conn, session_id: int) -> list[int]:
 def _close_entry(conn, entry, new_status: str) -> None:
     """Прибирає запис з активної черги, зберігаючи його в історії."""
     conn.execute(
-        "UPDATE queue_entries SET status = ?, position = NULL, completed_at = CURRENT_TIMESTAMP "
+        "UPDATE queue_entries SET status = ?, position = NULL, ready_to_swap = 0, completed_at = CURRENT_TIMESTAMP "
         "WHERE id = ?",
         (new_status, entry["id"]),
     )
@@ -269,6 +269,7 @@ def finish_own_entry(conn: sqlite3.Connection, telegram_id: int, session_id: int
         ids.remove(entry["id"])
         ids.append(entry["id"])
         _set_order(conn, session_id, ids)
+        conn.execute("UPDATE queue_entries SET ready_to_swap = 0 WHERE id = ?", (entry["id"],))
         return len(ids)
 
 
@@ -289,8 +290,35 @@ def swap_entries(conn, entry_id_1: int, entry_id_2: int) -> tuple[int, int]:
         conn.execute("UPDATE queue_entries SET position = NULL WHERE id IN (?, ?)", (entry_1["id"], entry_2["id"]))
         conn.execute("UPDATE queue_entries SET position = ? WHERE id = ?", (pos_2, entry_1["id"]))
         conn.execute("UPDATE queue_entries SET position = ? WHERE id = ?", (pos_1, entry_2["id"]))
+        conn.execute("UPDATE queue_entries SET ready_to_swap = 0 WHERE id IN (?, ?)", (entry_1["id"], entry_2["id"]))
 
         return pos_2, pos_1
+
+
+def toggle_ready_to_swap(conn: sqlite3.Connection, telegram_id: int, session_id: int) -> bool:
+    """Перемикає статус готовності студента до обміну місцями.
+    Повертає новий статус (True, якщо готовий)."""
+    with transaction(conn):
+        entry = _own_active_entry(conn, telegram_id, session_id)
+        current = bool(entry["ready_to_swap"]) if "ready_to_swap" in entry.keys() and entry["ready_to_swap"] is not None else False
+        new_val = not current
+        conn.execute(
+            "UPDATE queue_entries SET ready_to_swap = ? WHERE id = ?",
+            (1 if new_val else 0, entry["id"]),
+        )
+        return new_val
+
+
+def is_ready_to_swap(conn: sqlite3.Connection, telegram_id: int, session_id: int) -> bool:
+    """Перевіряє, чи активний статус готовності до обміну в користувача."""
+    row = conn.execute(
+        """SELECT e.ready_to_swap FROM queue_entries e JOIN users u ON u.id = e.user_id
+           WHERE e.session_id = ? AND u.telegram_id = ? AND e.status = 'active'""",
+        (session_id, telegram_id),
+    ).fetchone()
+    if not row:
+        return False
+    return bool(row["ready_to_swap"]) if row["ready_to_swap"] is not None else False
 
 
 # ---------- Адмін: керування чергами ----------

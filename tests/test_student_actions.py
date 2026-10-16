@@ -207,4 +207,60 @@ def test_consultation_queue_support(conn, make_user):
     assert find_session_by_label(conn, subjects, lbl_consult)["id"] == s_consult
 
 
+def test_ready_to_swap_toggle_and_format(conn, filled):
+    from handlers.common import format_entry, get_queue_actions_reply_menu
+
+    # Початковий стан — False
+    assert not queues.is_ready_to_swap(conn, 1, filled)
+
+    # Перемикання в True
+    new_st = queues.toggle_ready_to_swap(conn, 1, filled)
+    assert new_st is True
+    assert queues.is_ready_to_swap(conn, 1, filled) is True
+
+    # Перевірка get_entries та format_entry
+    entries = queues.get_entries(conn, filled)
+    e1 = next(e for e in entries if e["telegram_id"] == 1)
+    assert bool(e1["ready_to_swap"]) is True
+    formatted = format_entry(e1, my_telegram_id=2)
+    assert "🔄 [готовий до обміну]" in formatted
+
+    # Кнопки в меню Дії
+    menu_ready = get_queue_actions_reply_menu(is_in_queue=True, ready_to_swap=True)
+    flat_btns_ready = [btn.text for row in menu_ready.keyboard for btn in row]
+    assert "⏸ Не готовий до обміну" in flat_btns_ready
+
+    # Перемикання назад у False
+    new_st2 = queues.toggle_ready_to_swap(conn, 1, filled)
+    assert new_st2 is False
+    assert queues.is_ready_to_swap(conn, 1, filled) is False
+
+    menu_not_ready = get_queue_actions_reply_menu(is_in_queue=True, ready_to_swap=False)
+    flat_btns_not_ready = [btn.text for row in menu_not_ready.keyboard for btn in row]
+    assert "🔄 Готовий до обміну" in flat_btns_not_ready
+
+
+def test_ready_to_swap_cleared_on_swap_and_leave(conn, filled):
+    # Вмикаємо статус готовності для студента 1
+    queues.toggle_ready_to_swap(conn, 1, filled)
+    assert queues.is_ready_to_swap(conn, 1, filled) is True
+
+    # Знаходимо entry_id для 1 та 2
+    entries = queues.get_entries(conn, filled)
+    e1 = next(e for e in entries if e["telegram_id"] == 1)
+    e2 = next(e for e in entries if e["telegram_id"] == 2)
+
+    # Обмін місцями скидає ready_to_swap
+    queues.swap_entries(conn, e1["id"], e2["id"])
+    assert queues.is_ready_to_swap(conn, 1, filled) is False
+    assert queues.is_ready_to_swap(conn, 2, filled) is False
+
+    # Вмикаємо знову та перевіряємо скидання при виході
+    queues.toggle_ready_to_swap(conn, 1, filled)
+    assert queues.is_ready_to_swap(conn, 1, filled) is True
+    queues.leave_queue(conn, 1, filled)
+    assert queues.is_ready_to_swap(conn, 1, filled) is False
+
+
+
 
