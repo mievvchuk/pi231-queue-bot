@@ -402,6 +402,71 @@ def test_format_queues_overview_and_filtering(conn, filled):
     assert not any("курсов" in s["name"].lower() for s in lesson_subjects)
 
 
+def test_queue_categories_option_1(conn, make_user):
+    from handlers.common import (
+        categorize_sessions,
+        format_category_queues_overview,
+        format_queue_categories_overview,
+        get_category_queues_reply_menu,
+        get_queue_categories_reply_menu,
+    )
+    from handlers.student import is_category_button
+    from subjects import load_subjects
+    import config
+    from aiogram.types import Message
+
+    subjects = load_subjects(config.SUBJECTS_PATH)
+    make_user(100, "Адмін Тестовий")
+
+    # Створюємо 1 звичайну пару, 1 консультацію та 1 чергу на курсову
+    s_lesson = queues.create_session(conn, 100, 1, 1, queue_type="lesson")
+    s_consult = queues.create_session(conn, 100, 2, 2, queue_type="consultation")
+    s_cw = queues.create_session(conn, 100, 7, 6, queue_type="consultation")  # Курсова
+
+    sessions = queues.list_sessions(conn, ("open", "closed"))
+    lessons, consults, coursework = categorize_sessions(sessions, subjects)
+
+    assert len(lessons) == 1
+    assert len(consults) == 1
+    assert len(coursework) == 1
+
+    # 1. Хаб категорій
+    cat_menu = get_queue_categories_reply_menu(len(lessons), len(consults), len(coursework))
+    btn_texts = [btn.text for row in cat_menu.keyboard for btn in row]
+    assert "📖 Черги на пари (1)" in btn_texts
+    assert "💬 Консультації (1)" in btn_texts
+    assert "📑 Курсова робота (1)" in btn_texts
+    assert "🔄 Оновити" in btn_texts
+    assert "🏠 Головне меню" in btn_texts
+
+    cat_overview = format_queue_categories_overview(len(lessons), len(consults), len(coursework))
+    assert "Активні черги групи ПІ-231" in cat_overview
+    assert "Усього активних черг: <b>3</b>" in cat_overview
+    assert "📖 Черги на пари: <b>1</b>" in cat_overview
+
+    # 2. Меню всередині категорії
+    lesson_menu = get_category_queues_reply_menu(lessons, subjects, page=1)
+    lesson_btn_texts = [btn.text for row in lesson_menu.keyboard for btn in row]
+    assert any("📋 " in b for b in lesson_btn_texts)
+    assert "🔙 До категорій" in lesson_btn_texts
+
+    cw_overview = format_category_queues_overview(conn, coursework, subjects, "coursework")
+    assert "Черги на курсову роботу" in cw_overview
+    assert "Список черг за керівниками:" in cw_overview
+
+    # 3. Розпізнавання кнопок категорій
+    class DummyMsg:
+        def __init__(self, text):
+            self.text = text
+
+    assert is_category_button(DummyMsg("📖 Черги на пари (2)"))
+    assert is_category_button(DummyMsg("💬 Консультації (1)"))
+    assert is_category_button(DummyMsg("📑 Курсова робота (3)"))
+    assert not is_category_button(DummyMsg("📋 Комп'ютерні мережі"))
+    assert not is_category_button(DummyMsg("🏠 Головне меню"))
+
+
+
 
 
 

@@ -10,14 +10,19 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, Message
 
 from handlers.common import (
+    categorize_sessions,
     find_session_by_label,
+    format_category_queues_overview,
     format_my_queues_overview,
     format_queue,
+    format_queue_categories_overview,
     format_queues_overview,
+    get_category_queues_reply_menu,
     get_coursework_queues_menu,
     get_lost_context_menu,
     get_paginated_reply_keyboard,
     get_queue_actions_reply_menu,
+    get_queue_categories_reply_menu,
     get_queue_view_reply_menu,
     get_queues_reply_menu,
     get_reply_menu,
@@ -120,12 +125,58 @@ async def view_all_queues(message: Message, state: FSMContext, conn, subjects):
         )
         return
     await state.set_state(StudentFlow.browsing_queues)
-    await state.update_data(page=1)
-    text = format_queues_overview(conn, sessions, subjects, title="Активні черги")
-    await message.answer(
-        text,
-        reply_markup=get_queues_reply_menu(sessions, subjects, page=1),
+    await state.update_data(category=None, page=1)
+    lessons, consults, coursework = categorize_sessions(sessions, subjects)
+    text = format_queue_categories_overview(len(lessons), len(consults), len(coursework))
+    markup = get_queue_categories_reply_menu(len(lessons), len(consults), len(coursework))
+    await message.answer(text, reply_markup=markup)
+
+
+def is_category_button(message: Message) -> bool:
+    if not message.text:
+        return False
+    t = message.text.strip()
+    return (
+        t.startswith("📖 Черги на пари")
+        or t.startswith("💬 Консультації")
+        or t.startswith("📑 Курсова робота")
+        or t.startswith("📑 Курсові роботи")
     )
+
+
+@router.message(is_category_button, not_admin_state_filter)
+async def open_queue_category(message: Message, state: FSMContext, conn, subjects):
+    t = message.text.lower()
+    if "пари" in t:
+        category = "lessons"
+    elif "консультац" in t:
+        category = "consultations"
+    elif "курсов" in t:
+        category = "coursework"
+    else:
+        await view_all_queues(message, state, conn, subjects)
+        return
+
+    sessions = queues.list_sessions(conn, ("open", "closed"))
+    lessons, consults, coursework = categorize_sessions(sessions, subjects)
+    cat_map = {
+        "lessons": lessons,
+        "consultations": consults,
+        "coursework": coursework,
+    }
+    cat_sessions = cat_map.get(category, [])
+    if not cat_sessions:
+        await message.answer(
+            "У цій категорії зараз немає активних черг.",
+            reply_markup=get_queue_categories_reply_menu(len(lessons), len(consults), len(coursework)),
+        )
+        return
+
+    await state.set_state(StudentFlow.browsing_queues)
+    await state.update_data(category=category, page=1)
+    text = format_category_queues_overview(conn, cat_sessions, subjects, category, page=1)
+    markup = get_category_queues_reply_menu(cat_sessions, subjects, page=1, back_text="🔙 До категорій")
+    await message.answer(text, reply_markup=markup)
 
 
 @router.message(F.text == "👥 Мої черги", StateFilter("*"))
@@ -149,16 +200,32 @@ async def my_queues(message: Message, state: FSMContext, conn, subjects):
 
 @router.message(StudentFlow.browsing_queues, F.text.in_({"⬅️", "➡️"}))
 async def paginate_all_queues(message: Message, state: FSMContext, conn, subjects):
-    sessions = queues.list_sessions(conn, ("open", "closed"))
     data = await state.get_data()
+    category = data.get("category")
+    sessions = queues.list_sessions(conn, ("open", "closed"))
+    if not category:
+        lessons, consults, coursework = categorize_sessions(sessions, subjects)
+        text = format_queue_categories_overview(len(lessons), len(consults), len(coursework))
+        markup = get_queue_categories_reply_menu(len(lessons), len(consults), len(coursework))
+        await message.answer(text, reply_markup=markup)
+        return
+
+    lessons, consults, coursework = categorize_sessions(sessions, subjects)
+    cat_map = {"lessons": lessons, "consultations": consults, "coursework": coursework}
+    cat_sessions = cat_map.get(category, [])
+    if not cat_sessions:
+        await view_all_queues(message, state, conn, subjects)
+        return
+
     page = data.get("page", 1)
+    total_pages = (len(cat_sessions) + 7) // 8 or 1
     page = (page - 1) if message.text == "⬅️" else (page + 1)
+    page = max(1, min(page, total_pages))
     await state.update_data(page=page)
-    text = format_queues_overview(conn, sessions, subjects, title=f"Активні черги (сторінка {page})")
-    await message.answer(
-        text,
-        reply_markup=get_queues_reply_menu(sessions, subjects, page=page, group_coursework=True),
-    )
+
+    text = format_category_queues_overview(conn, cat_sessions, subjects, category, page=page, total_pages=total_pages)
+    markup = get_category_queues_reply_menu(cat_sessions, subjects, page=page, back_text="🔙 До категорій")
+    await message.answer(text, reply_markup=markup)
 
 
 @router.message(StudentFlow.browsing_my_queues, F.text.in_({"⬅️", "➡️"}))
@@ -177,17 +244,35 @@ async def paginate_my_queues(message: Message, state: FSMContext, conn, subjects
 
 @router.message(F.text.in_({"🔄 Оновити список", "🔄 Оновити"}), StudentFlow.browsing_queues)
 async def refresh_all_queues_list(message: Message, state: FSMContext, conn, subjects):
-    sessions = queues.list_sessions(conn, ("open", "closed"))
     data = await state.get_data()
-    page = data.get("page", 1)
+    category = data.get("category")
+    sessions = queues.list_sessions(conn, ("open", "closed"))
     if not sessions:
+        await state.clear()
         await message.answer("Активних черг немає.", reply_markup=get_reply_menu(conn, message.from_user.id))
         return
-    text = format_queues_overview(conn, sessions, subjects, title="Активні черги (оновлено)")
-    await message.answer(
-        text,
-        reply_markup=get_queues_reply_menu(sessions, subjects, page=page, group_coursework=True),
-    )
+
+    lessons, consults, coursework = categorize_sessions(sessions, subjects)
+
+    if category:
+        cat_map = {"lessons": lessons, "consultations": consults, "coursework": coursework}
+        cat_sessions = cat_map.get(category, [])
+        if not cat_sessions:
+            await message.answer("У цій категорії більше немає активних черг.")
+            await view_all_queues(message, state, conn, subjects)
+            return
+
+        page = data.get("page", 1)
+        total_pages = (len(cat_sessions) + 7) // 8 or 1
+        page = min(page, total_pages)
+        await state.update_data(page=page)
+        text = format_category_queues_overview(conn, cat_sessions, subjects, category, page=page, total_pages=total_pages)
+        markup = get_category_queues_reply_menu(cat_sessions, subjects, page=page, back_text="🔙 До категорій")
+        await message.answer(text, reply_markup=markup)
+    else:
+        text = format_queue_categories_overview(len(lessons), len(consults), len(coursework))
+        markup = get_queue_categories_reply_menu(len(lessons), len(consults), len(coursework))
+        await message.answer(text, reply_markup=markup)
 
 
 @router.message(F.text.in_({"🔄 Оновити список", "🔄 Оновити"}), StudentFlow.browsing_my_queues)
@@ -280,7 +365,7 @@ async def refresh_coursework_queues_list(message: Message, state: FSMContext, co
     )
 
 
-@router.message(F.text.in_({"🔙 До черг", "🔙 До списку черг"}), not_admin_state_filter)
+@router.message(F.text.in_({"🔙 До категорій", "🔙 До черг", "🔙 До списку черг"}), not_admin_state_filter)
 async def back_to_queues_list(message: Message, state: FSMContext, conn, subjects):
     await state.clear()
     await view_all_queues(message, state, conn, subjects)
@@ -291,9 +376,10 @@ async def select_queue_by_button(message: Message, state: FSMContext, conn, subj
     session = find_session_by_label(conn, subjects, message.text)
     if not session:
         sessions = queues.list_sessions(conn, ("open", "closed"))
+        lessons, consults, coursework = categorize_sessions(sessions, subjects)
         await message.answer(
-            "⚠️ Чергу не знайдено або її закрито. Оберіть зі списку активних черг 👇",
-            reply_markup=get_queues_reply_menu(sessions, subjects),
+            "⚠️ Чергу не знайдено або її закрито. Оберіть категорію активних черг 👇",
+            reply_markup=get_queue_categories_reply_menu(len(lessons), len(consults), len(coursework)),
         )
         return
     await state.clear()

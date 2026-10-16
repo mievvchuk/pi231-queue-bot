@@ -278,6 +278,123 @@ def get_coursework_queues_menu(
     )
 
 
+def categorize_sessions(sessions: list, subjects: list[dict]) -> tuple[list, list, list]:
+    """Розподіляє сесії черг на 3 категорії: (пари, консультації, курсові)."""
+    lessons = []
+    consultations = []
+    coursework = []
+    for s in sessions:
+        sub_name, _ = session_names(subjects, s)
+        q_type = s["queue_type"] if "queue_type" in s.keys() else "lesson"
+        if "курсов" in sub_name.lower():
+            coursework.append(s)
+        elif q_type == "consultation":
+            consultations.append(s)
+        else:
+            lessons.append(s)
+    return lessons, consultations, coursework
+
+
+def get_queue_categories_reply_menu(
+    lessons_count: int,
+    consults_count: int,
+    coursework_count: int,
+) -> ReplyKeyboardMarkup:
+    """Нижня клавіатура категорій активних черг (Хаб категорій)."""
+    rows = []
+    if lessons_count > 0:
+        rows.append([f"📖 Черги на пари ({lessons_count})"])
+    if consults_count > 0:
+        rows.append([f"💬 Консультації ({consults_count})"])
+    if coursework_count > 0:
+        rows.append([f"📑 Курсова робота ({coursework_count})"])
+    rows.append(["🔄 Оновити", "🏠 Головне меню"])
+    return make_reply_keyboard(rows)
+
+
+def format_queue_categories_overview(
+    lessons_count: int,
+    consults_count: int,
+    coursework_count: int,
+) -> str:
+    """Текстовий огляд Хабу категорій черг."""
+    total = lessons_count + consults_count + coursework_count
+    lines = [
+        "📋 <b>Активні черги групи ПІ-231</b>\n",
+        f"Усього активних черг: <b>{total}</b>\n",
+    ]
+    if lessons_count > 0:
+        lines.append(f"• 📖 Черги на пари: <b>{lessons_count}</b>")
+    if consults_count > 0:
+        lines.append(f"• 💬 Консультації: <b>{consults_count}</b>")
+    if coursework_count > 0:
+        lines.append(f"• 📑 Курсова робота: <b>{coursework_count}</b>")
+    lines.append("\nОберіть категорію на кнопках внизу 👇")
+    return "\n".join(lines)
+
+
+def get_category_queues_reply_menu(
+    sessions: list,
+    subjects: list[dict],
+    page: int = 1,
+    back_text: str = "🔙 До категорій",
+) -> ReplyKeyboardMarkup:
+    """Нижня клавіатура черг конкретної категорії з пагінацією по 8."""
+    item_rows = [[f"📋 {queue_label(subjects, s)}"] for s in sessions]
+    page_items, current_page, total_pages = paginate(item_rows, page, per_page=8)
+    return get_paginated_reply_keyboard(
+        page_items,
+        page=current_page,
+        total_pages=total_pages,
+        back_text=back_text,
+        extra_row=["🔄 Оновити"],
+    )
+
+
+def format_category_queues_overview(
+    conn,
+    sessions: list,
+    subjects: list[dict],
+    category: str,
+    page: int = 1,
+    total_pages: int = 1,
+) -> str:
+    """Форматує текстовий список черг обраної категорії."""
+    if not sessions:
+        return "У цій категорії зараз немає активних черг."
+
+    cat_titles = {
+        "lessons": "📖 <b>Черги на звичайні пари</b>",
+        "consultations": "💬 <b>Черги на консультації</b>",
+        "coursework": "📑 <b>Черги на курсову роботу</b>",
+    }
+    title = cat_titles.get(category, "📋 <b>Черги</b>")
+    if total_pages > 1:
+        title += f" (сторінка {page}/{total_pages})"
+
+    lines = [f"{title}\n"]
+
+    if category == "coursework":
+        lines.append("Список черг за керівниками:")
+        for s in sessions:
+            _, teacher = session_names(subjects, s)
+            entries = queues.get_entries(conn, s["id"])
+            count = len(entries)
+            st_text = "🟢 відкрито" if s["status"] == "open" else "🔴 закрито"
+            lines.append(f"• 👨‍🏫 <b>{html.escape(teacher)}</b> — {st_text} (у черзі: <b>{count}</b>)")
+        lines.append("\nОберіть керівника на кнопках внизу 👇")
+    else:
+        for s in sessions:
+            sub, teacher = session_names(subjects, s)
+            entries = queues.get_entries(conn, s["id"])
+            count = len(entries)
+            st_text = "🟢 відкрито" if s["status"] == "open" else "🔴 закрито"
+            lines.append(f"• <b>{html.escape(sub)}</b>\n  👨‍🏫 {html.escape(teacher)} — {st_text} (у черзі: <b>{count}</b>)")
+        lines.append("\nОберіть чергу на кнопках внизу 👇")
+
+    return "\n".join(lines)
+
+
 def format_queues_overview(conn, sessions: list, subjects: list[dict], title: str = "Активні черги") -> str:
     """Форматує структурований текстовий огляд списку черг для групи."""
     if not sessions:
@@ -362,8 +479,8 @@ def find_session_by_label(conn, subjects: list[dict], text: str):
     # 1. Точний збіг нормалізованого підпису
     for s in sessions:
         s_type = s["queue_type"] if "queue_type" in s.keys() else "lesson"
-        is_consult = "консультац" in norm_input
-        if (s_type == "consultation") != is_consult:
+        is_consult = ("консультац" in norm_input) or ("курсов" in norm_input)
+        if (s_type == "consultation") != is_consult and "курсов" not in norm_input:
             continue
 
         lbl = queue_label(subjects, s)
@@ -374,10 +491,10 @@ def find_session_by_label(conn, subjects: list[dict], text: str):
     # 2. Пошук за прізвищем викладача та предметом
     for s in sessions:
         s_type = s["queue_type"] if "queue_type" in s.keys() else "lesson"
-        is_consult = "консультац" in norm_input
-        if is_consult and s_type != "consultation":
+        is_consult = ("консультац" in norm_input) or ("курсов" in norm_input)
+        if is_consult and s_type != "consultation" and "курсов" not in norm_input:
             continue
-        if not is_consult and s_type == "consultation":
+        if not is_consult and s_type == "consultation" and "курсов" not in norm_input:
             continue
 
         sub_name, teacher_name = session_names(subjects, s)
@@ -393,10 +510,10 @@ def find_session_by_label(conn, subjects: list[dict], text: str):
     # 3. Резервний пошук за назвою предмета (тільки якщо в запиті не вказано іншого викладача)
     for s in sessions:
         s_type = s["queue_type"] if "queue_type" in s.keys() else "lesson"
-        is_consult = "консультац" in norm_input
-        if is_consult and s_type != "consultation":
+        is_consult = ("консультац" in norm_input) or ("курсов" in norm_input)
+        if is_consult and s_type != "consultation" and "курсов" not in norm_input:
             continue
-        if not is_consult and s_type == "consultation":
+        if not is_consult and s_type == "consultation" and "курсов" not in norm_input:
             continue
 
         sub_name, teacher_name = session_names(subjects, s)
