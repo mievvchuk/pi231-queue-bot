@@ -99,7 +99,7 @@ def _ordered_ids(conn, session_id: int) -> list[int]:
 def _close_entry(conn, entry, new_status: str) -> None:
     """Прибирає запис з активної черги, зберігаючи його в історії."""
     conn.execute(
-        "UPDATE queue_entries SET status = ?, position = NULL, ready_to_swap = 0, swap_wish = NULL, completed_at = CURRENT_TIMESTAMP "
+        "UPDATE queue_entries SET status = ?, position = NULL, ready_to_swap = FALSE, swap_wish = NULL, completed_at = CURRENT_TIMESTAMP "
         "WHERE id = ?",
         (new_status, entry["id"]),
     )
@@ -269,7 +269,7 @@ def finish_own_entry(conn: sqlite3.Connection, telegram_id: int, session_id: int
         ids.remove(entry["id"])
         ids.append(entry["id"])
         _set_order(conn, session_id, ids)
-        conn.execute("UPDATE queue_entries SET ready_to_swap = 0, swap_wish = NULL WHERE id = ?", (entry["id"],))
+        conn.execute("UPDATE queue_entries SET ready_to_swap = FALSE, swap_wish = NULL WHERE id = ?", (entry["id"],))
         return len(ids)
 
 
@@ -290,7 +290,7 @@ def swap_entries(conn, entry_id_1: int, entry_id_2: int) -> tuple[int, int]:
         conn.execute("UPDATE queue_entries SET position = NULL WHERE id IN (?, ?)", (entry_1["id"], entry_2["id"]))
         conn.execute("UPDATE queue_entries SET position = ? WHERE id = ?", (pos_2, entry_1["id"]))
         conn.execute("UPDATE queue_entries SET position = ? WHERE id = ?", (pos_1, entry_2["id"]))
-        conn.execute("UPDATE queue_entries SET ready_to_swap = 0, swap_wish = NULL WHERE id IN (?, ?)", (entry_1["id"], entry_2["id"]))
+        conn.execute("UPDATE queue_entries SET ready_to_swap = FALSE, swap_wish = NULL WHERE id IN (?, ?)", (entry_1["id"], entry_2["id"]))
 
         return pos_2, pos_1
 
@@ -305,7 +305,7 @@ def set_swap_wish(conn: sqlite3.Connection, telegram_id: int, session_id: int, w
         new_val = None if current == wish else wish
         conn.execute(
             "UPDATE queue_entries SET swap_wish = ?, ready_to_swap = ? WHERE id = ?",
-            (new_val, 1 if new_val else 0, entry["id"]),
+            (new_val, bool(new_val), entry["id"]),
         )
         return new_val
 
@@ -332,7 +332,7 @@ def toggle_ready_to_swap(conn: sqlite3.Connection, telegram_id: int, session_id:
         wish_val = entry["swap_wish"] if "swap_wish" in entry.keys() else None
         conn.execute(
             "UPDATE queue_entries SET ready_to_swap = ?, swap_wish = ? WHERE id = ?",
-            (1 if new_val else 0, None if not new_val else wish_val, entry["id"]),
+            (new_val, None if not new_val else wish_val, entry["id"]),
         )
         return new_val
 

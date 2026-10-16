@@ -12,7 +12,7 @@ def get_today_key() -> str:
 
 def get_replacements(conn, date: str | None = None, group_name: str = "ПІ-231", include_archived: bool = False) -> list[dict]:
     """Отримує заміни з бази даних: на конкретну дату або всі активні від сьогодні."""
-    arch_sql = "" if include_archived else "AND (is_archived = 0 OR is_archived IS NULL)"
+    arch_sql = "" if include_archived else "AND (is_archived = FALSE OR is_archived IS NULL)"
     if date:
         rows = conn.execute(
             f"""SELECT * FROM replacements 
@@ -36,7 +36,7 @@ def get_archived_replacements(conn, group_name: str = "ПІ-231", limit: int = 3
     """Повертає заархівовані заміни для групи (останні збережені)."""
     rows = conn.execute(
         """SELECT * FROM replacements 
-           WHERE group_name = ? AND is_archived = 1 
+           WHERE group_name = ? AND is_archived = TRUE 
            ORDER BY date DESC, lesson_number ASC 
            LIMIT ?""",
         (group_name, limit),
@@ -48,8 +48,8 @@ def archive_previous_replacements(conn, before_date: str, group_name: str = "П�
     """Автоматично архівує всі активні заміни з датою, меншою за before_date."""
     cur = conn.execute(
         """UPDATE replacements 
-           SET is_archived = 1 
-           WHERE group_name = ? AND date < ? AND (is_archived = 0 OR is_archived IS NULL)""",
+           SET is_archived = TRUE 
+           WHERE group_name = ? AND date < ? AND (is_archived = FALSE OR is_archived IS NULL)""",
         (group_name, before_date),
     )
     return cur.rowcount if hasattr(cur, "rowcount") and cur.rowcount is not None and cur.rowcount >= 0 else 0
@@ -65,12 +65,12 @@ def save_replacement(conn, item: dict, auto_archive_previous: bool = True) -> bo
     conn.execute(
         """INSERT INTO replacements 
            (date, group_name, lesson_number, old_subject, new_subject, teacher, room, is_archived)
-           VALUES (?, ?, ?, ?, ?, ?, ?, 0)
+           VALUES (?, ?, ?, ?, ?, ?, ?, FALSE)
            ON CONFLICT (date, group_name, lesson_number, new_subject) DO UPDATE
            SET old_subject = excluded.old_subject,
                teacher = excluded.teacher,
                room = excluded.room,
-               is_archived = 0""",
+               is_archived = FALSE""",
         (
             date_val,
             grp,
