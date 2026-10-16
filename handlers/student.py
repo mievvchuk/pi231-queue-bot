@@ -11,7 +11,9 @@ from aiogram.types import CallbackQuery, Message
 
 from handlers.common import (
     find_session_by_label,
+    format_my_queues_overview,
     format_queue,
+    format_queues_overview,
     get_coursework_queues_menu,
     get_lost_context_menu,
     get_paginated_reply_keyboard,
@@ -119,8 +121,9 @@ async def view_all_queues(message: Message, state: FSMContext, conn, subjects):
         return
     await state.set_state(StudentFlow.browsing_queues)
     await state.update_data(page=1)
+    text = format_queues_overview(conn, sessions, subjects, title="Активні черги")
     await message.answer(
-        "Оберіть чергу на кнопках внизу 👇",
+        text,
         reply_markup=get_queues_reply_menu(sessions, subjects, page=1),
     )
 
@@ -137,8 +140,9 @@ async def my_queues(message: Message, state: FSMContext, conn, subjects):
         return
     await state.set_state(StudentFlow.browsing_my_queues)
     await state.update_data(page=1)
+    text = format_my_queues_overview(conn, sessions, subjects, message.from_user.id)
     await message.answer(
-        "Ваші черги. Оберіть чергу на кнопках внизу 👇",
+        text,
         reply_markup=get_queues_reply_menu(sessions, subjects, page=1, group_coursework=False),
     )
 
@@ -150,8 +154,9 @@ async def paginate_all_queues(message: Message, state: FSMContext, conn, subject
     page = data.get("page", 1)
     page = (page - 1) if message.text == "⬅️" else (page + 1)
     await state.update_data(page=page)
+    text = format_queues_overview(conn, sessions, subjects, title=f"Активні черги (сторінка {page})")
     await message.answer(
-        "Оберіть чергу на кнопках внизу 👇",
+        text,
         reply_markup=get_queues_reply_menu(sessions, subjects, page=page, group_coursework=True),
     )
 
@@ -163,8 +168,9 @@ async def paginate_my_queues(message: Message, state: FSMContext, conn, subjects
     page = data.get("page", 1)
     page = (page - 1) if message.text == "⬅️" else (page + 1)
     await state.update_data(page=page)
+    text = format_my_queues_overview(conn, sessions, subjects, message.from_user.id)
     await message.answer(
-        "Ваші черги. Оберіть чергу на кнопках внизу 👇",
+        text,
         reply_markup=get_queues_reply_menu(sessions, subjects, page=page, group_coursework=False),
     )
 
@@ -177,8 +183,9 @@ async def refresh_all_queues_list(message: Message, state: FSMContext, conn, sub
     if not sessions:
         await message.answer("Активних черг немає.", reply_markup=get_reply_menu(conn, message.from_user.id))
         return
+    text = format_queues_overview(conn, sessions, subjects, title="Активні черги (оновлено)")
     await message.answer(
-        "Список черг оновлено 👇",
+        text,
         reply_markup=get_queues_reply_menu(sessions, subjects, page=page, group_coursework=True),
     )
 
@@ -191,8 +198,9 @@ async def refresh_my_queues_list(message: Message, state: FSMContext, conn, subj
     if not sessions:
         await message.answer("Ви не записані в жодну чергу.", reply_markup=get_reply_menu(conn, message.from_user.id))
         return
+    text = format_my_queues_overview(conn, sessions, subjects, message.from_user.id)
     await message.answer(
-        "Ваші черги оновлено 👇",
+        text,
         reply_markup=get_queues_reply_menu(sessions, subjects, page=page, group_coursework=False),
     )
 
@@ -229,11 +237,19 @@ async def open_coursework_group(message: Message, state: FSMContext, conn, subje
         )
         return
 
+    cw_lines = [f"📚 <b>{html.escape(cw_name)}</b>\n", "Список черг за керівниками:"]
+    for s in cw_sessions:
+        _, teacher = session_names(subjects, s)
+        entries = queues.get_entries(conn, s["id"])
+        count = len(entries)
+        st_text = "🟢 відкрито" if s["status"] == "open" else "🔴 закрито"
+        cw_lines.append(f"• 👨‍🏫 <b>{html.escape(teacher)}</b> — {st_text} (у черзі: <b>{count}</b>)")
+    cw_lines.append("\nОберіть керівника на кнопках внизу 👇")
+
     await state.set_state(StudentFlow.browsing_coursework_queues)
     await state.update_data(coursework_name=cw_name, page=1)
     await message.answer(
-        f"📚 <b>{html.escape(cw_name)}</b>\n\n"
-        "Оберіть викладача для перегляду черги 👇",
+        "\n".join(cw_lines),
         reply_markup=get_coursework_queues_menu(sessions, subjects, cw_name, page=1),
     )
 
@@ -899,7 +915,8 @@ async def queue_type_selected(message: Message, state: FSMContext, subjects):
     await state.set_state(StudentFlow.creating_queue_subject)
     await state.update_data(queue_type=q_type)
     type_name = "консультації" if q_type == "consultation" else "пари"
-    rows = [[f"➕ {s['name']}"] for s in subjects]
+    available_subjects = [s for s in subjects if "курсов" not in s["name"].lower()] if q_type == "lesson" else subjects
+    rows = [[f"➕ {s['name']}"] for s in available_subjects]
     rows.append(["🔙 Назад", "🏠 Головне меню"])
     await message.answer(
         f"Оберіть предмет для {type_name} на кнопках внизу 👇",
@@ -923,6 +940,9 @@ async def new_queue_subject_selected(message: Message, state: FSMContext, conn, 
 
     data = await state.get_data()
     q_type = data.get("queue_type", "lesson")
+    if q_type == "lesson" and "курсов" in matched_sub["name"].lower():
+        raise BotError("Черга на курсову роботу відкривається через «💬 Консультація».")
+
     type_label = "консультацію" if q_type == "consultation" else "пару"
     type_badge = " [Консультація]" if q_type == "consultation" else ""
 
@@ -966,7 +986,8 @@ async def back_to_queue_subject(message: Message, state: FSMContext, subjects):
     q_type = data.get("queue_type", "lesson")
     type_name = "консультації" if q_type == "consultation" else "пари"
     await state.set_state(StudentFlow.creating_queue_subject)
-    rows = [[f"➕ {s['name']}"] for s in subjects]
+    available_subjects = [s for s in subjects if "курсов" not in s["name"].lower()] if q_type == "lesson" else subjects
+    rows = [[f"➕ {s['name']}"] for s in available_subjects]
     rows.append(["🔙 Назад", "🏠 Головне меню"])
     await message.answer(
         f"Оберіть предмет для {type_name} на кнопках внизу 👇",

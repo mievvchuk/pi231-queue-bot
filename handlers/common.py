@@ -278,6 +278,68 @@ def get_coursework_queues_menu(
     )
 
 
+def format_queues_overview(conn, sessions: list, subjects: list[dict], title: str = "Активні черги") -> str:
+    """Форматує структурований текстовий огляд списку черг для групи."""
+    if not sessions:
+        return "Активних черг зараз немає."
+
+    lessons = []
+    consultations = []
+    for s in sessions:
+        q_type = s["queue_type"] if "queue_type" in s.keys() else "lesson"
+        if q_type == "consultation":
+            consultations.append(s)
+        else:
+            lessons.append(s)
+
+    lines = [f"📋 <b>{title} групи ПІ-231</b>\n"]
+
+    if lessons:
+        lines.append("📖 <b>Звичайні пари:</b>")
+        for s in lessons:
+            sub, teacher = session_names(subjects, s)
+            entries = queues.get_entries(conn, s["id"])
+            count = len(entries)
+            st_text = "🟢 відкрито" if s["status"] == "open" else "🔴 закрито"
+            lines.append(f"• <b>{html.escape(sub)}</b>\n  👨‍🏫 {html.escape(teacher)} — {st_text} (у черзі: <b>{count}</b>)")
+        lines.append("")
+
+    if consultations:
+        lines.append("💬 <b>Консультації та курсові роботи:</b>")
+        for s in consultations:
+            sub, teacher = session_names(subjects, s)
+            entries = queues.get_entries(conn, s["id"])
+            count = len(entries)
+            st_text = "🟢 відкрито" if s["status"] == "open" else "🔴 закрито"
+            lines.append(f"• <b>{html.escape(sub)}</b>\n  👨‍🏫 {html.escape(teacher)} — {st_text} (у черзі: <b>{count}</b>)")
+        lines.append("")
+
+    lines.append("Оберіть чергу на кнопках внизу 👇")
+    return "\n".join(lines)
+
+
+def format_my_queues_overview(conn, sessions: list, subjects: list[dict], telegram_id: int) -> str:
+    """Форматує структурований огляд черг, у які записаний користувач."""
+    if not sessions:
+        return "Ви ще не записані в жодну чергу."
+
+    lines = ["👥 <b>Ваші черги</b>\n"]
+    for s in sessions:
+        sub, teacher = session_names(subjects, s)
+        my_pos = queues.get_user_position(conn, telegram_id, s["id"])
+        entries = queues.get_entries(conn, s["id"])
+        total = len(entries)
+        st_text = "🟢 відкрито" if s["status"] == "open" else "🔴 закрито"
+        q_type = s["queue_type"] if "queue_type" in s.keys() else "lesson"
+        type_badge = " [Консультація]" if q_type == "consultation" else ""
+        lines.append(
+            f"• <b>{html.escape(sub)}</b>{type_badge}\n"
+            f"  👨‍🏫 {html.escape(teacher)} — 📍 Ваше місце: <b>{my_pos}</b> з {total} ({st_text})"
+        )
+    lines.append("\nОберіть чергу на кнопках внизу 👇")
+    return "\n".join(lines)
+
+
 def normalize_text(text: str) -> str:
     """Нормалізує текст для надійного порівняння назв черг та викладачів."""
     t = text.lower()

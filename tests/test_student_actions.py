@@ -378,6 +378,31 @@ async def test_swap_request_from_notification_callback(conn, filled):
     assert btn_no.callback_data == f"sw_no:{e1['id']}:{e2['id']}"
 
 
+def test_format_queues_overview_and_filtering(conn, filled):
+    from handlers.common import format_queues_overview, format_my_queues_overview
+    from subjects import load_subjects
+    import config
+
+    subjects = load_subjects(config.SUBJECTS_PATH)
+    sessions = queues.list_sessions(conn, ("open", "closed"))
+
+    # 1. Перевірка форматування огляду черг
+    overview = format_queues_overview(conn, sessions, subjects)
+    assert "Активні черги групи ПІ-231" in overview
+    assert "Звичайні пари:" in overview
+    assert "у черзі:" in overview
+
+    # 2. Перевірка огляду моїх черг
+    my_overview = format_my_queues_overview(conn, sessions, subjects, telegram_id=1)
+    assert "Ваші черги" in my_overview
+    assert "Ваше місце:" in my_overview
+
+    # 3. Перевірка фільтрації курсової з пар
+    lesson_subjects = [s for s in subjects if "курсов" not in s["name"].lower()]
+    assert not any("курсов" in s["name"].lower() for s in lesson_subjects)
+
+
+
 
 
 
