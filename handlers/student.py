@@ -23,6 +23,7 @@ from handlers.common import (
     make_reply_keyboard,
     notify_admins_queue_opened,
     notify_next_students,
+    notify_swap_wishes,
     paginate,
     queue_label,
     session_names,
@@ -339,6 +340,17 @@ async def handle_swap_wish_higher(message: Message, state: FSMContext, conn, sub
             "⬆️ <b>Статус оновлено:</b> ви позначені як <b>«хочу вище»</b>.\n"
             "Студенти перед вами бачитимуть це і зможуть запропонувати вам своє місце, якщо їм потрібен додатковий час."
         )
+        matches = await notify_swap_wishes(message.bot, conn, subjects, session_id, message.from_user.id, "higher")
+        if matches:
+            match_names = ", ".join(
+                f"<b>{html.escape(m['full_name'])}</b> (місце {m['position']})"
+                for m in matches
+                if m.get("full_name")
+            )
+            note += (
+                f"\n\n💡 <b>Знайдено збіг!</b> Студенти перед вами, які хочуть опуститися нижче: {match_names}. "
+                "Ви можете запропонувати їм обмін через <b>«⚙️ Дії» ➡️ «🔁 Обмінятися місцями»</b>."
+            )
     else:
         note = "⏸ <b>Статус «Хочу вище» знято.</b>"
     await open_queue_screen(message, conn, subjects, session_id, note=note)
@@ -362,6 +374,17 @@ async def handle_swap_wish_lower(message: Message, state: FSMContext, conn, subj
             "⬇️ <b>Статус оновлено:</b> ви позначені як <b>«хочу нижче»</b>.\n"
             "Студенти після вас бачитимуть це і зможуть запропонувати обмін, щоб піти здавати раніше."
         )
+        matches = await notify_swap_wishes(message.bot, conn, subjects, session_id, message.from_user.id, "lower")
+        if matches:
+            match_names = ", ".join(
+                f"<b>{html.escape(m['full_name'])}</b> (місце {m['position']})"
+                for m in matches
+                if m.get("full_name")
+            )
+            note += (
+                f"\n\n💡 <b>Знайдено збіг!</b> Студенти після вас, які хочуть піднятися вище: {match_names}. "
+                "Ви можете запропонувати їм обмін через <b>«⚙️ Дії» ➡️ «🔁 Обмінятися місцями»</b>."
+            )
     else:
         note = "⏸ <b>Статус «Хочу нижче» знято.</b>"
     await open_queue_screen(message, conn, subjects, session_id, note=note)
@@ -800,6 +823,61 @@ async def swap_decline(callback: CallbackQuery, conn, subjects):
                 sender_user["telegram_id"],
                 f"❌ Студент <b>{html.escape(target_name)}</b> відхилив пропозицію обміну місцями."
             )
+
+
+@router.callback_query(F.data.startswith("sw_req:"))
+async def swap_request_from_notification(callback: CallbackQuery, conn, subjects):
+    parts = callback.data.split(":")
+    if len(parts) != 3:
+        raise BotError("Невірні дані запиту.")
+    initiator_entry_id = int(parts[1])
+    receiver_entry_id = int(parts[2])
+
+    initiator_entry = queues.get_entry(conn, initiator_entry_id)
+    if not initiator_entry or initiator_entry["status"] != "active":
+        raise BotError("Цей запис уже неактивний або чергу було змінено.")
+
+    initiator_user = conn.execute("SELECT * FROM users WHERE id = ?", (initiator_entry["user_id"],)).fetchone()
+    if not initiator_user or initiator_user["telegram_id"] != callback.from_user.id:
+        raise BotError("Ця кнопка призначена для іншого студента.")
+
+    receiver_entry = queues.get_entry(conn, receiver_entry_id)
+    if not receiver_entry or receiver_entry["status"] != "active":
+        raise BotError("Студент уже змінив позицію або вийшов із черги.")
+
+    receiver_user = conn.execute("SELECT * FROM users WHERE id = ?", (receiver_entry["user_id"],)).fetchone()
+    if not receiver_user or not receiver_user["telegram_id"] or receiver_user["telegram_id"] <= 0:
+        raise BotError("Студент ще не підключив свій Telegram.")
+
+    session = get_session_or_fail(conn, initiator_entry["session_id"])
+    subject, teacher = session_names(subjects, session)
+
+    invite_text = (
+        f"🔁 <b>Пропозиція обміну місцями</b>\n\n"
+        f"Студент <b>{html.escape(initiator_user['full_name'])}</b> (місце {initiator_entry['position']}) пропонує помінятися місцями:\n"
+        f"📚 <b>{html.escape(subject)} — {html.escape(teacher)}</b>\n\n"
+        f"• Ваше поточне місце: <b>{receiver_entry['position']}</b>\n"
+        f"• Нове місце після обміну: <b>{initiator_entry['position']}</b>"
+    )
+    invite_keyboard = make_keyboard([
+        [
+            ("✅ Погодитися", f"sw_yes:{initiator_entry['id']}:{receiver_entry['id']}"),
+            ("❌ Відхилити", f"sw_no:{initiator_entry['id']}:{receiver_entry['id']}"),
+        ]
+    ])
+
+    try:
+        await callback.bot.send_message(receiver_user["telegram_id"], invite_text, reply_markup=invite_keyboard)
+    except Exception:
+        raise BotError("Не вдалося доставити пропозицію студенту.")
+
+    await show(
+        callback,
+        f"✅ <b>Запит на обмін надіслано!</b>\n\n"
+        f"Студенту <b>{html.escape(receiver_user['full_name'])}</b> надіслано пропозицію обміну місцями "
+        f"(з місця {initiator_entry['position']} на місце {receiver_entry['position']}).\n"
+        f"Щойно він натисне «Погодитися» — ваші місця оновляться автоматично.",
+    )
 
 
 # ---------- Створення черги ----------

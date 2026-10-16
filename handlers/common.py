@@ -1,6 +1,7 @@
 import html
 import logging
 import re
+import time
 from contextlib import suppress
 
 from aiogram import BaseMiddleware
@@ -574,3 +575,126 @@ async def notify_next_students(bot, conn, subjects: list[dict], session_id: int,
         )
         with suppress(Exception):
             await bot.send_message(second["telegram_id"], text_second)
+
+
+_swap_wish_cooldowns: dict[tuple[int, int, int], float] = {}
+
+
+def clear_swap_wish_cooldowns() -> None:
+    _swap_wish_cooldowns.clear()
+
+
+async def notify_swap_wishes(
+    bot,
+    conn,
+    subjects: list[dict],
+    session_id: int,
+    sender_telegram_id: int,
+    new_wish: str,
+) -> list[dict]:
+    """Сповіщає студентів у черзі про готовність до обміну («хочу вище» / «хочу нижче»):
+    1. Якщо «хочу вище» — сповіщає безпосереднього сусіда попереду (місце pos-1).
+    2. Якщо знайдено протилежний статус («хочу вище» <-> «хочу нижче») — надсилає розумне сповіщення з кнопкою швидкого обміну.
+    Повертає список знайдених кандидатів зі збігом статусу."""
+    session = queues.get_session(conn, session_id)
+    if not session or session["status"] not in ("open", "closed"):
+        return []
+
+    entries = [dict(r) for r in queues.get_entries(conn, session_id)]
+    my_entry = None
+    for e in entries:
+        if e.get("telegram_id") == sender_telegram_id:
+            my_entry = e
+            break
+
+    if not my_entry or not my_entry.get("position"):
+        return []
+
+    my_pos = my_entry["position"]
+    my_user = conn.execute("SELECT * FROM users WHERE id = ?", (my_entry["user_id"],)).fetchone()
+    my_name = my_user["full_name"] if my_user else "Студент"
+    subject, teacher = session_names(subjects, session)
+    now = time.time()
+
+    def can_notify(target_user_id: int) -> bool:
+        key = (session_id, my_entry["user_id"], target_user_id)
+        last_t = _swap_wish_cooldowns.get(key, 0)
+        if now - last_t < 300:  # 5 хвилин захист від спаму
+            return False
+        _swap_wish_cooldowns[key] = now
+        return True
+
+    matched_candidates = []
+
+    if new_wish == "higher":
+        # 1. Безпосередній сусід попереду (my_pos - 1)
+        pred_entry = None
+        if my_pos > 1:
+            for e in entries:
+                if e.get("position") == my_pos - 1:
+                    pred_entry = e
+                    break
+
+        if pred_entry and pred_entry.get("telegram_id") and pred_entry["telegram_id"] > 0:
+            if can_notify(pred_entry["user_id"]):
+                text = (
+                    f"💡 <b>Студент за вами готовий піти здавати раніше!</b>\n\n"
+                    f"Студент <b>{html.escape(my_name)}</b> (місце {my_pos}) позначив статус <b>«⬆️ Хочу вище»</b>.\n"
+                    f"📚 <b>{html.escape(subject)} — {html.escape(teacher)}</b>\n\n"
+                    f"Якщо вам потрібен додатковий час для підготовки — ви можете запропонувати йому помінятися місцями:"
+                )
+                kb = make_keyboard([
+                    [("🔁 Запропонувати обмін місцями", f"sw_req:{pred_entry['id']}:{my_entry['id']}")]
+                ])
+                with suppress(Exception):
+                    await bot.send_message(pred_entry["telegram_id"], text, reply_markup=kb)
+
+        # 2. Розумний збіг (Smart Match): студенти попереду з «⬇️ Хочу нижче»
+        for e in entries:
+            if (
+                e.get("position")
+                and e["position"] < my_pos
+                and e.get("swap_wish") == "lower"
+            ):
+                matched_candidates.append(e)
+                if pred_entry and e.get("id") == pred_entry.get("id"):
+                    continue
+                if e.get("telegram_id") and e["telegram_id"] > 0 and can_notify(e["user_id"]):
+                    text = (
+                        f"💡 <b>Знайдено можливість для обміну місцями!</b>\n\n"
+                        f"Студент <b>{html.escape(my_name)}</b> (місце {my_pos}) позначив <b>«⬆️ Хочу вище»</b>, "
+                        f"а ви бажали опуститися (<b>«⬇️ Хочу нижче»</b>).\n"
+                        f"📚 <b>{html.escape(subject)} — {html.escape(teacher)}</b>\n\n"
+                        f"Бажаєте помінятися з ним місцями?"
+                    )
+                    kb = make_keyboard([
+                        [("🔁 Запропонувати обмін місцями", f"sw_req:{e['id']}:{my_entry['id']}")]
+                    ])
+                    with suppress(Exception):
+                        await bot.send_message(e["telegram_id"], text, reply_markup=kb)
+
+    elif new_wish == "lower":
+        # Розумний збіг (Smart Match): студенти позаду з «⬆️ Хочу вище»
+        for e in entries:
+            if (
+                e.get("position")
+                and e["position"] > my_pos
+                and e.get("swap_wish") == "higher"
+            ):
+                matched_candidates.append(e)
+                if e.get("telegram_id") and e["telegram_id"] > 0 and can_notify(e["user_id"]):
+                    text = (
+                        f"💡 <b>Знайдено можливість для обміну місцями!</b>\n\n"
+                        f"Студент <b>{html.escape(my_name)}</b> (місце {my_pos}) позначив, що хоче опуститися (<b>«⬇️ Хочу нижче»</b>), "
+                        f"а ви маєте статус <b>«⬆️ Хочу вище»</b>.\n"
+                        f"📚 <b>{html.escape(subject)} — {html.escape(teacher)}</b>\n\n"
+                        f"Бажаєте запропонувати йому помінятися місцями?"
+                    )
+                    kb = make_keyboard([
+                        [("🔁 Запропонувати обмін місцями", f"sw_req:{e['id']}:{my_entry['id']}")]
+                    ])
+                    with suppress(Exception):
+                        await bot.send_message(e["telegram_id"], text, reply_markup=kb)
+
+    return matched_candidates
+

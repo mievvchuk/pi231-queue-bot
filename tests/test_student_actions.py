@@ -302,5 +302,82 @@ def test_ready_to_swap_cleared_on_swap_and_leave(conn, filled):
     assert queues.get_swap_wish(conn, 1, filled) is None
 
 
+@pytest.mark.asyncio
+async def test_notify_swap_wishes_and_smart_match(conn, filled):
+    from unittest.mock import AsyncMock, MagicMock
+    from handlers.common import clear_swap_wish_cooldowns, notify_swap_wishes
+
+    sample_subjects = [{"id": "sub1", "name": "КПЗ", "teachers": [{"id": "teach1", "name": "Кондратюк Є.С."}]}]
+    clear_swap_wish_cooldowns()
+    bot = MagicMock()
+    bot.send_message = AsyncMock()
+
+    # Студент 2 (позиція 2) ставить "higher" -> студент 1 (позиція 1) отримує сповіщення
+    queues.set_swap_wish(conn, 2, filled, "higher")
+    matches = await notify_swap_wishes(bot, conn, sample_subjects, filled, 2, "higher")
+    assert matches == []
+    assert bot.send_message.call_count == 1
+    call_args = bot.send_message.call_args
+    # Сповіщення надіслано студенту 1
+    assert call_args[0][0] == 1
+    assert "Студент за вами готовий піти здавати раніше" in call_args[0][1]
+    # Перевіряємо наявність інлайн-кнопки sw_req
+    kb = call_args[1]["reply_markup"]
+    btn = kb.inline_keyboard[0][0]
+    assert btn.callback_data.startswith("sw_req:")
+
+    # Перевірка захисту від спаму (cooldown): повторний виклик не шле сповіщення знову
+    bot.send_message.reset_mock()
+    await notify_swap_wishes(bot, conn, sample_subjects, filled, 2, "higher")
+    assert bot.send_message.call_count == 0
+
+    # Тепер студент 1 (позиція 1) вмикає "lower"
+    # Оскільки студент 2 вже має "higher", для студента 2 спрацьовує Smart Match!
+    clear_swap_wish_cooldowns()
+    queues.set_swap_wish(conn, 1, filled, "lower")
+    matches2 = await notify_swap_wishes(bot, conn, sample_subjects, filled, 1, "lower")
+    assert len(matches2) == 1
+    assert matches2[0]["telegram_id"] == 2
+    assert bot.send_message.call_count == 1
+    call_args2 = bot.send_message.call_args
+    assert call_args2[0][0] == 2
+    assert "Знайдено можливість для обміну місцями" in call_args2[0][1]
+
+
+@pytest.mark.asyncio
+async def test_swap_request_from_notification_callback(conn, filled):
+    from unittest.mock import AsyncMock, MagicMock
+    from handlers.student import swap_request_from_notification
+
+    sample_subjects = [{"id": "sub1", "name": "КПЗ", "teachers": [{"id": "teach1", "name": "Кондратюк Є.С."}]}]
+
+    entries = queues.get_entries(conn, filled)
+    e1 = next(e for e in entries if e["telegram_id"] == 1)
+    e2 = next(e for e in entries if e["telegram_id"] == 2)
+
+    from aiogram.types import Message
+    callback = MagicMock()
+    callback.from_user.id = 1
+    callback.data = f"sw_req:{e1['id']}:{e2['id']}"
+    callback.bot.send_message = AsyncMock()
+    callback.message = MagicMock(spec=Message)
+    callback.message.edit_text = AsyncMock()
+
+    await swap_request_from_notification(callback, conn, sample_subjects)
+
+    # Перевіряємо, що студенту 2 надійшла пропозиція обміну
+    assert callback.bot.send_message.call_count == 1
+    sent_args = callback.bot.send_message.call_args
+    assert sent_args[0][0] == 2
+    assert "Пропозиція обміну місцями" in sent_args[0][1]
+    # Клавіатура містить sw_yes та sw_no
+    kb = sent_args[1]["reply_markup"]
+    btn_yes = kb.inline_keyboard[0][0]
+    btn_no = kb.inline_keyboard[0][1]
+    assert btn_yes.callback_data == f"sw_yes:{e1['id']}:{e2['id']}"
+    assert btn_no.callback_data == f"sw_no:{e1['id']}:{e2['id']}"
+
+
+
 
 
