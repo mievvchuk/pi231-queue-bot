@@ -194,9 +194,6 @@ def format_schedule_for_date(conn, schedule_data: dict, dt: date, group_name: st
     lines = [header, ""]
     for l in lessons:
         time_part = f" ({l['startTime']}–{l['endTime']})" if l.get("startTime") and l.get("endTime") else ""
-        if not time_part and l.get("lessons"):
-            time_part = f" ({l['lessons']} уроки)"
-
         badge = " ⚠️ <b>[ЗАМІНА]</b>" if l.get("is_replacement") else ""
         lines.append(f"⏰ <b>{l['number']} пара</b>{time_part}{badge}")
         lines.append(f"📚 <b>{html.escape(l.get('subject', ''))}</b>")
