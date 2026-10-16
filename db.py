@@ -245,10 +245,21 @@ class PGConnectionWrapper:
         self.clean_url = clean_url
         self._init_schema()
 
+    def _connect_raw(self):
+        import time
+        last_err = None
+        for attempt in range(5):
+            try:
+                return psycopg.connect(self.clean_url, autocommit=True)
+            except Exception as e:
+                last_err = e
+                time.sleep(1.5)
+        raise last_err
+
     def _ensure_connected(self):
         try:
             if self.raw.closed:
-                self.raw = psycopg.connect(self.clean_url, autocommit=True)
+                self.raw = self._connect_raw()
             else:
                 self.raw.execute("SELECT 1")
         except Exception:
@@ -256,7 +267,7 @@ class PGConnectionWrapper:
                 self.raw.close()
             except Exception:
                 pass
-            self.raw = psycopg.connect(self.clean_url, autocommit=True)
+            self.raw = self._connect_raw()
 
     def _init_schema(self):
         with self.raw.cursor() as cur:
@@ -318,7 +329,18 @@ def connect(db_target: str):
             raise RuntimeError("psycopg is required to connect to PostgreSQL. Run: pip install psycopg[binary]")
         # Neon вимагає SSL
         clean_url = db_target.replace("&channel_binding=require", "")
-        raw = psycopg.connect(clean_url, autocommit=True)
+        import time
+        raw = None
+        last_err = None
+        for attempt in range(5):
+            try:
+                raw = psycopg.connect(clean_url, autocommit=True)
+                break
+            except Exception as e:
+                last_err = e
+                time.sleep(2)
+        if raw is None and last_err:
+            raise last_err
         return PGConnectionWrapper(raw, clean_url)
 
     conn = sqlite3.connect(db_target, timeout=10, isolation_level=None)
