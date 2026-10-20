@@ -73,7 +73,7 @@ def resolve_bug_report(conn, report_id: int, admin_reply: str | None = None) -> 
 
 def format_bug_report_card(report) -> str:
     status_badge = "🟢 Відкритий" if report["status"] == "open" else "✅ Вирішено"
-    uname = f" (@{html.escape(report['username'])})" if report.get("username") else ""
+    uname = f" (@{html.escape(report['username'])})" if report["username"] else ""
     lines = [
         f"🐞 <b>Баг-репорт #{report['id']}</b> [{status_badge}]",
         f"👤 <b>Від:</b> {html.escape(report['user_name'])}{uname} (<code>{report['user_telegram_id']}</code>)",
@@ -81,7 +81,7 @@ def format_bug_report_card(report) -> str:
         "",
         f"📝 <b>Опис проблеми:</b>\n{html.escape(report['text'])}",
     ]
-    if report.get("admin_reply"):
+    if report["admin_reply"]:
         lines.append("")
         lines.append(f"💬 <b>Відповідь адміна:</b>\n<i>{html.escape(report['admin_reply'])}</i>")
     return "\n".join(lines)
@@ -111,7 +111,7 @@ async def notify_admins_new_bug(bot: Bot, conn, report_id: int) -> None:
         if not adm_id or adm_id <= 0:
             continue
         with suppress(Exception):
-            if report.get("photo_file_id"):
+            if report["photo_file_id"]:
                 await bot.send_photo(
                     chat_id=adm_id,
                     photo=report["photo_file_id"],

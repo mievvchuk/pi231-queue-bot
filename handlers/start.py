@@ -270,7 +270,7 @@ async def admin_view_bug_reports(message: Message, state: FSMContext, conn):
                 ]
             ]
         )
-        if rep.get("photo_file_id"):
+        if rep["photo_file_id"]:
             await message.answer_photo(rep["photo_file_id"], caption=card_text, reply_markup=kb)
         else:
             await message.answer(card_text, reply_markup=kb)
