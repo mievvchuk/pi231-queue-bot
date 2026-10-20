@@ -1125,22 +1125,27 @@ async def admin_paginate_close_queues(message: Message, state: FSMContext, conn,
 
 # ---------- Звіти та статистика ----------
 
-@router.message(F.text.in_({"📊 Звіти та статистика", "📊 Звіти"}), StateFilter("*"))
+@router.message(F.text.in_({"📊 Звіти та статистика", "📊 Звіти", "📊 Звіти та таблиці"}), StateFilter("*"))
 async def admin_category_reports(message: Message, state: FSMContext):
     await state.clear()
     await state.set_state(AdminPanelState.in_reports_menu)
     await message.answer(
-        "📊 <b>Звіти та аналітика активності групи ПІ-231</b>\n\n"
-        "• <b>📈 Загальна статистика</b> — зведений дашборд: скільки черг проведено, загальна кількість здач, топ найактивніших студентів та активність по предметах.\n"
-        "• <b>📚 Звіти за предметами</b> — рейтинг студентів та CSV-таблиця по конкретній дисципліні.\n"
-        "• <b>📥 Експорт зведеної таблиці (CSV)</b> — єдиний файл Excel/CSV з матрицею всіх здач кожного студента по всіх предметах.\n\n"
-        "Оберіть потрібний розділ на кнопках нижче 👇",
+        "📊 <b>Звіти, графічні діаграми та аналітика ПІ-231</b>\n\n"
+        "• <b>📈 Загальна статистика</b> — зведений візуальний мульти-дашборд (4 графіки на одному полотні) + текстовий звіт.\n"
+        "• <b>🍩 Діаграма: Типи та статуси</b> — кільцеві діаграми (Donut Charts) категорій черг та результатів здач.\n"
+        "• <b>📊 Діаграма: Предмети</b> — вертикальна стовпчикова діаграма (Column Chart) порівняння дисциплін.\n"
+        "• <b>🏆 Діаграма: Топ студентів</b> — горизонтальна рейтингова діаграма (Leaderboard Bar Chart) лідерів здач.\n"
+        "• <b>📚 Звіти за предметами</b> — комбінована діаграма та CSV-таблиця по конкретній дисципліні.\n"
+        "• <b>📥 Експорт зведеної таблиці (CSV)</b> — єдиний файл Excel/CSV з матрицею всіх студентів та предметів.\n\n"
+        "Оберіть потрібний тип звіту або діаграми нижче 👇",
         reply_markup=get_admin_reports_menu(),
     )
 
 
 @router.message(F.text == "📈 Загальна статистика", StateFilter("*"))
 async def admin_global_statistics_view(message: Message, conn, subjects):
+    from services import charts
+
     stats = queues.get_global_statistics(conn, subjects)
     lines = [
         "📈 <b>Загальна статистика черг ПІ-231</b>\n",
@@ -1172,7 +1177,69 @@ async def admin_global_statistics_view(message: Message, conn, subjects):
             medal = "🥇" if idx == 1 else ("🥈" if idx == 2 else ("🥉" if idx == 3 else f"{idx}."))
             lines.append(f"{medal} {html.escape(st['name'])} — <b>{st['passed']}</b> ✅")
 
+    try:
+        png_bytes = charts.generate_overview_dashboard_png(stats)
+        chart_file = BufferedInputFile(png_bytes, filename="pi231_overview_dashboard.png")
+        await message.answer_photo(
+            chart_file,
+            caption="📈 <b>Зведений аналітичний дашборд групи ПІ-231</b>",
+        )
+    except Exception as e:
+        log.warning(f"Could not render overview dashboard chart: {e}")
+
     await message.answer("\n".join(lines), reply_markup=get_admin_reports_menu())
+
+
+@router.message(F.text == "🍩 Діаграма: Типи та статуси", StateFilter("*"))
+async def admin_chart_donut_status(message: Message, conn, subjects):
+    from services import charts
+
+    stats = queues.get_global_statistics(conn, subjects)
+    png_bytes = charts.generate_donut_status_chart_png(stats)
+    chart_file = BufferedInputFile(png_bytes, filename="pi231_donut_status.png")
+    await message.answer_photo(
+        chart_file,
+        caption=(
+            "🍩 <b>Кільцеві діаграми: Категорії черг та Статуси здач</b>\n"
+            f"• Усього проведено черг: <b>{stats['total_sessions']}</b>\n"
+            f"• Загальна конверсія успішних здач: <b>{stats['pass_rate']}%</b> ({stats['total_passed']} здано)"
+        ),
+        reply_markup=get_admin_reports_menu(),
+    )
+
+
+@router.message(F.text == "📊 Діаграма: Предмети", StateFilter("*"))
+async def admin_chart_subjects_columns(message: Message, conn, subjects):
+    from services import charts
+
+    stats = queues.get_global_statistics(conn, subjects)
+    png_bytes = charts.generate_subjects_column_chart_png(stats)
+    chart_file = BufferedInputFile(png_bytes, filename="pi231_subjects_columns.png")
+    await message.answer_photo(
+        chart_file,
+        caption=(
+            "📊 <b>Стовпчикова діаграма активності за предметами</b>\n"
+            "Порівняння кількості успішних здач робіт (зелений) та проведених черг (блакитний) по кожній дисципліні."
+        ),
+        reply_markup=get_admin_reports_menu(),
+    )
+
+
+@router.message(F.text == "🏆 Діаграма: Топ студентів", StateFilter("*"))
+async def admin_chart_top_students(message: Message, conn, subjects):
+    from services import charts
+
+    stats = queues.get_global_statistics(conn, subjects)
+    png_bytes = charts.generate_top_students_bar_chart_png(stats)
+    chart_file = BufferedInputFile(png_bytes, filename="pi231_top_students.png")
+    await message.answer_photo(
+        chart_file,
+        caption=(
+            "🏆 <b>Горизонтальна рейтингова діаграма активності студентів</b>\n"
+            "Лідери групи ПІ-231 за загальною кількістю успішно зданих робіт у чергах."
+        ),
+        reply_markup=get_admin_reports_menu(),
+    )
 
 
 @router.message(F.text == "📥 Експорт зведеної таблиці (CSV)", StateFilter("*"))
@@ -1265,6 +1332,17 @@ async def admin_generate_subject_report(message: Message, state: FSMContext, con
         ["📊 Інший предмет"],
         ["🔙 Назад"],
     ]
+
+    try:
+        from services import charts
+        chart_bytes = charts.generate_subject_report_chart_png(matched_sub["name"], teachers, report)
+        chart_photo = BufferedInputFile(chart_bytes, filename=f"chart_{safe_name}.png")
+        await message.answer_photo(
+            chart_photo,
+            caption=f"📊 <b>Діаграма успішності: {html.escape(matched_sub['name'])}</b>",
+        )
+    except Exception as e:
+        log.warning(f"Could not generate subject chart: {e}")
 
     await message.answer(text_msg)
     await message.answer_document(

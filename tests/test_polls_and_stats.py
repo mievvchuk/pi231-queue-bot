@@ -224,3 +224,40 @@ async def test_bug_reports_flow(conn, make_user):
     assert resolved["status"] == "resolved"
     assert resolved["admin_reply"] == "Виправлено, спробуйте ще раз!"
 
+
+def test_chart_generators_produce_valid_png(conn, make_user):
+    from services import charts
+
+    subjects = load_subjects(config.SUBJECTS_PATH)
+    make_user(401, "Мельник Софія")
+    make_user(402, "Шевченко Артем")
+
+    s1 = queues.create_session(conn, 100, 0, 0)
+    queues.join_queue(conn, 401, s1)
+    queues.join_queue(conn, 402, s1)
+    queues.finish_own_entry(conn, 401, s1, passed=True)
+
+    stats = queues.get_global_statistics(conn, subjects)
+
+    png_overview = charts.generate_overview_dashboard_png(stats)
+    assert png_overview.startswith(b"\x89PNG")
+
+    png_donut = charts.generate_donut_status_chart_png(stats)
+    assert png_donut.startswith(b"\x89PNG")
+
+    png_cols = charts.generate_subjects_column_chart_png(stats)
+    assert png_cols.startswith(b"\x89PNG")
+
+    png_bars = charts.generate_top_students_bar_chart_png(stats)
+    assert png_bars.startswith(b"\x89PNG")
+
+    sub_report = queues.get_subject_report(conn, subjects[0]["id"])
+    png_sub = charts.generate_subject_report_chart_png(subjects[0]["name"], "Викладач Т.Т.", sub_report)
+    assert png_sub.startswith(b"\x89PNG")
+
+    poll_id = polls.create_poll(conn, 100, "Тестове опитування для графіка?", ["Так", "Ні"], is_anonymous=False)
+    poll_data = polls.get_poll_results(conn, poll_id)
+    png_poll = charts.generate_poll_results_chart_png(poll_data)
+    assert png_poll.startswith(b"\x89PNG")
+
+

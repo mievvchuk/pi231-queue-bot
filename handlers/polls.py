@@ -501,7 +501,10 @@ async def admin_confirm_and_publish_poll(message: Message, state: FSMContext, co
 
 def _admin_poll_control_kb(poll_id: int, is_active: bool) -> InlineKeyboardMarkup:
     rows = [
-        [InlineKeyboardButton(text="🔄 Оновити результати (Live)", callback_data=f"adm_poll_ref:{poll_id}")]
+        [
+            InlineKeyboardButton(text="🔄 Оновити (Live)", callback_data=f"adm_poll_ref:{poll_id}"),
+            InlineKeyboardButton(text="📊 Діаграма", callback_data=f"adm_poll_chart:{poll_id}"),
+        ]
     ]
     if is_active:
         rows.append([
@@ -511,6 +514,29 @@ def _admin_poll_control_kb(poll_id: int, is_active: bool) -> InlineKeyboardMarku
             )
         ])
     return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+@router.callback_query(F.data.startswith("adm_poll_chart:"))
+async def admin_poll_chart_callback(callback: CallbackQuery, conn):
+    if not admins.is_admin(conn, callback.from_user.id):
+        await callback.answer("Тільки для адміністраторів.", show_alert=True)
+        return
+    from aiogram.types import BufferedInputFile
+    from services import charts
+
+    poll_id = int(callback.data.split(":")[1])
+    poll = polls.get_poll(conn, poll_id)
+    if not poll:
+        await callback.answer("Опитування не знайдено.", show_alert=True)
+        return
+    await callback.answer("Генерую діаграму...")
+    poll_data = polls.get_poll_results(conn, poll_id)
+    png_bytes = charts.generate_poll_results_chart_png(poll_data)
+    photo = BufferedInputFile(png_bytes, filename=f"poll_{poll_id}_chart.png")
+    await callback.message.answer_photo(
+        photo,
+        caption=f"📊 <b>Діаграма результатів опитування #{poll_id}</b>\n«{html.escape(poll['question'])}»",
+    )
 
 
 @router.message(F.text == "📡 Активні опитування", StateFilter("*"))
