@@ -66,7 +66,7 @@ async def _is_admin_filter(event, conn) -> bool:
 
 
 router.callback_query.filter(_is_admin_filter)
-router.message.filter(_is_admin_filter)
+router.message.filter(F.chat.type == "private", _is_admin_filter)
 router.callback_query.middleware(AdminOnly())
 router.message.middleware(AdminOnly())
 

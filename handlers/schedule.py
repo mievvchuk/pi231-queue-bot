@@ -40,7 +40,10 @@ def get_schedule_data() -> dict:
 
 # ---------- Розклад: Сьогодні / Завтра / Тиждень ----------
 
-@router.message(F.text == "📅 Розклад", StateFilter("*"))
+_private_only = F.chat.type == "private"
+
+
+@router.message(_private_only, F.text == "📅 Розклад", StateFilter("*"))
 async def open_schedule_menu(message: Message, state: FSMContext, conn):
     await state.clear()
     sch_data = get_schedule_data()
@@ -55,7 +58,7 @@ async def open_schedule_menu(message: Message, state: FSMContext, conn):
     )
 
 
-@router.message(F.text == "📅 Сьогодні", StateFilter("*"))
+@router.message(_private_only, F.text == "📅 Сьогодні", StateFilter("*"))
 @router.message(Command("today"), StateFilter("*"))
 async def show_today_schedule(message: Message, conn):
     sch_data = get_schedule_data()
@@ -64,7 +67,7 @@ async def show_today_schedule(message: Message, conn):
     await message.answer(text)
 
 
-@router.message(F.text == "➡️ Завтра", StateFilter("*"))
+@router.message(_private_only, F.text == "➡️ Завтра", StateFilter("*"))
 @router.message(Command("tomorrow"), StateFilter("*"))
 async def show_tomorrow_schedule(message: Message, conn):
     sch_data = get_schedule_data()
@@ -73,7 +76,7 @@ async def show_tomorrow_schedule(message: Message, conn):
     await message.answer(text)
 
 
-@router.message(F.text == "🗓 Весь тиждень", StateFilter("*"))
+@router.message(_private_only, F.text == "🗓 Весь тиждень", StateFilter("*"))
 @router.message(Command("week"), StateFilter("*"))
 async def show_week_schedule(message: Message, conn):
     sch_data = get_schedule_data()
@@ -119,14 +122,15 @@ async def show_base_schedule(message: Message):
 
 # ---------- Заміни ----------
 
-@router.message(F.text.in_({"🔄 Заміни", "🔄 Активні заміни"}), StateFilter("*"))
+@router.message(_private_only, F.text.in_({"🔄 Заміни", "🔄 Активні заміни"}), StateFilter("*"))
 @router.message(Command("replacements"), StateFilter("*"))
 async def show_replacements(message: Message, conn):
     items = replacements.get_replacements(conn, group_name=config.STUDENT_GROUP)
     if not items:
+        is_priv = getattr(message.chat, "type", "private") == "private"
         admin_hint = (
             "\n<i>(Щоб додати заміну, надішліть фотографію таблиці замін у чат)</i>"
-            if admins.is_admin(conn, message.from_user.id)
+            if is_priv and admins.is_admin(conn, message.from_user.id)
             else ""
         )
         await message.answer(
@@ -143,7 +147,7 @@ async def show_replacements(message: Message, conn):
     await message.answer("\n\n".join(text_parts))
 
 
-@router.message(Command("clear_replacements"), StateFilter("*"))
+@router.message(_private_only, Command("clear_replacements"), StateFilter("*"))
 async def request_clear_replacements(message: Message, conn):
     if not admins.is_admin(conn, message.from_user.id):
         raise BotError("Очищати заміни можуть лише адміністратори.")
@@ -301,7 +305,7 @@ def render_item_edit_menu(token: str, idx: int, r: dict) -> tuple[str, InlineKey
 
 # ---------- Обробка фотографій таблиць замін ----------
 
-@router.message(F.photo)
+@router.message(_private_only, F.photo)
 async def handle_photo_replacement(message: Message, conn):
     if not admins.is_admin(conn, message.from_user.id):
         return
@@ -688,7 +692,7 @@ async def add_replacement_item_handler(callback: CallbackQuery, conn):
     await callback.message.edit_text(text, reply_markup=kb)
 
 
-@router.message(EditReplacementState.waiting_for_value)
+@router.message(_private_only, EditReplacementState.waiting_for_value)
 async def process_field_value_text(message: Message, state: FSMContext, conn):
     if not admins.is_admin(conn, message.from_user.id):
         await state.clear()
@@ -767,8 +771,8 @@ async def show_bot_status(message: Message, conn):
 
 # ---------- Завантаження та вивантаження файлу розкладу ----------
 
-@router.message(Command("get_schedule"), StateFilter("*"))
-@router.message(Command("export_schedule"), StateFilter("*"))
+@router.message(_private_only, Command("get_schedule"), StateFilter("*"))
+@router.message(_private_only, Command("export_schedule"), StateFilter("*"))
 async def export_schedule_file(message: Message, conn):
     import os
     from aiogram.types import FSInputFile
@@ -793,7 +797,7 @@ async def export_schedule_file(message: Message, conn):
     )
 
 
-@router.message(F.document)
+@router.message(_private_only, F.document)
 async def handle_document_upload(message: Message, conn):
     import json
     import os
@@ -837,8 +841,8 @@ async def handle_document_upload(message: Message, conn):
             )
 
 
-@router.message(F.text == "📦 Архів замін", StateFilter("*"))
-@router.message(Command("archived_replacements"), StateFilter("*"))
+@router.message(_private_only, F.text == "📦 Архів замін", StateFilter("*"))
+@router.message(_private_only, Command("archived_replacements"), StateFilter("*"))
 async def show_archived_replacements(message: Message, conn):
     if not admins.is_admin(conn, message.from_user.id):
         return

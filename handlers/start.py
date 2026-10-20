@@ -15,6 +15,7 @@ from services import admins, users
 from services.errors import BotError
 
 router = Router()
+router.message.filter(F.chat.type == "private")
 fallback_router = Router()  # підключається в bot.py останнім
 
 HELP_MENU = make_reply_keyboard([

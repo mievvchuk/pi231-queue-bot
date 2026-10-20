@@ -25,7 +25,6 @@ NOTIFICATION_TIME = os.getenv("NOTIFICATION_TIME", "07:00")
 TIMEZONE = os.getenv("TZ", "Europe/Kyiv")
 RECOGNITION_API_KEY = os.getenv("RECOGNITION_API_KEY", os.getenv("OPENAI_API_KEY", ""))
 RECOGNITION_PROVIDER = os.getenv("RECOGNITION_PROVIDER", "openai" if RECOGNITION_API_KEY else "disabled")
-ALERTS_TOKEN = os.getenv("ALERTS_TOKEN", "e99b53d5fed806f150b79df3a19c8293d73cac28ab2203")
 
 
 

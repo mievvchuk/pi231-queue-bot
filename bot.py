@@ -81,11 +81,6 @@ async def main() -> None:
     from services.polls import start_polls_watcher
     asyncio.create_task(start_polls_watcher(bot, conn))
 
-    if getattr(config, "ALERTS_TOKEN", None):
-        from services.alerts import start_alerts_checker
-        db_target = config.DATABASE_URL or getattr(config, "SQLITE_PATH", "bot.db")
-        asyncio.create_task(start_alerts_checker(bot, db_target, config.ALERTS_TOKEN))
-
     # Стійкий цикл polling: бот автоматично відновлює роботу при тимчасових мережевих збоях
     while True:
         try:

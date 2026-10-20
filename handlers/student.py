@@ -41,6 +41,7 @@ from services.errors import BotError
 
 log = logging.getLogger(__name__)
 router = Router()
+router.message.filter(F.chat.type == "private")
 
 
 class StudentFlow(StatesGroup):

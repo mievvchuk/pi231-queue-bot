@@ -73,3 +73,74 @@ async def test_non_admin_back_to_queue_routes_to_student(conn, make_user):
     method_called = mock_bot.call_args[0][0]
     reply_text = getattr(method_called, "text", "")
     assert "У вас немає прав адміністратора" not in reply_text
+
+
+@pytest.mark.asyncio
+async def test_group_chat_protection_blocks_keyboards_and_photos_but_allows_schedule_commands(conn):
+    from datetime import datetime
+    from unittest.mock import AsyncMock
+    from aiogram.fsm.storage.memory import MemoryStorage
+    from aiogram.types import Chat, Message, PhotoSize, Update, User
+    from handlers import schedule as schedule_handler
+
+    subjects = load_subjects(config.SUBJECTS_PATH)
+    for r in (
+        start.router,
+        polls.router,
+        admin.router,
+        schedule_handler.router,
+        student.router,
+        start.fallback_router,
+    ):
+        r._parent_router = None
+
+    dp = Dispatcher(storage=MemoryStorage(), conn=conn, subjects=subjects)
+    dp.message.outer_middleware(Guard())
+    dp.include_routers(
+        start.router,
+        polls.router,
+        admin.router,
+        schedule_handler.router,
+        student.router,
+        start.fallback_router,
+    )
+
+    admin_user = User(id=100, is_bot=False, first_name="Адмін")
+    group_chat = Chat(id=-1001234567890, type="supergroup", title="ПІ-231")
+    mock_bot = AsyncMock()
+    mock_bot.id = 1
+
+    # 1. /start у групі ігнорується (не спамить ReplyKeyboardMarkup)
+    msg_start = Message(
+        message_id=10,
+        date=datetime.now(),
+        chat=group_chat,
+        from_user=admin_user,
+        text="/start",
+    )
+    await dp.feed_update(mock_bot, Update(update_id=10, message=msg_start))
+    assert not mock_bot.called
+
+    # 2. Звичайне фото від адміна в групі ігнорується (не запускає розпізнавання замін)
+    msg_photo = Message(
+        message_id=11,
+        date=datetime.now(),
+        chat=group_chat,
+        from_user=admin_user,
+        photo=[PhotoSize(file_id="f1", file_unique_id="u1", width=800, height=600)],
+    )
+    await dp.feed_update(mock_bot, Update(update_id=11, message=msg_photo))
+    assert not mock_bot.called
+
+    # 3. Команда /replacements у групі працює і не прикріплює нижню клавіатуру
+    msg_rep = Message(
+        message_id=12,
+        date=datetime.now(),
+        chat=group_chat,
+        from_user=admin_user,
+        text="/replacements",
+    )
+    await dp.feed_update(mock_bot, Update(update_id=12, message=msg_rep))
+    assert mock_bot.called
+    method_called = mock_bot.call_args[0][0]
+    assert getattr(method_called, "reply_markup", None) is None

@@ -568,13 +568,7 @@ def queue_label(subjects: list[dict], session) -> str:
 
 
 def format_queue(subjects: list[dict], session, entries, my_telegram_id: int | None = None, show_id: bool = False) -> str:
-    from services.alerts import get_alert_status
-
     lines = []
-    if get_alert_status():
-        lines.append("🚨 <b>Повітряна тривога</b>")
-        lines.append("Заняття призупинено, чергу збережено.")
-        lines.append("")
 
     subject, teacher = session_names(subjects, session)
     q_type = session["queue_type"] if "queue_type" in session.keys() else "lesson"
@@ -589,9 +583,7 @@ def format_queue(subjects: list[dict], session, entries, my_telegram_id: int | N
     lines.append("")
 
     status = session["status"] if "status" in session.keys() else ""
-    if get_alert_status():
-        lines.append("🚨 <b>Тривога (черга збережена)</b>")
-    elif status == "open":
+    if status == "open":
         lines.append("🟢 <b>Запис відкрито</b>")
     elif status == "closed":
         lines.append("🔴 <b>Запис закрито</b>")
@@ -674,6 +666,9 @@ class Guard(BaseMiddleware):
                             )
                         return
                     elif isinstance(event, Message):
+                        chat = getattr(event, "chat", None)
+                        if chat and getattr(chat, "type", "private") != "private":
+                            return
                         msg_text = get_maintenance_message(end_time)
                         from aiogram.types import ReplyKeyboardRemove
                         await event.answer(msg_text, reply_markup=ReplyKeyboardRemove())

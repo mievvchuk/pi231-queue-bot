@@ -48,6 +48,14 @@ def _require_admin_msg(conn, user_id: int):
         raise PermissionDenied("У вас немає прав адміністратора.")
 
 
+class PrivateChatOnlyFilter:
+    async def __call__(self, message: Message) -> bool:
+        return getattr(message.chat, "type", "private") == "private"
+
+
+_private_only = F.chat.type == "private"
+
+
 # ---------- Обробка подій Telegram Poll та PollAnswer ----------
 
 @router.poll_answer()
@@ -97,7 +105,7 @@ async def cmd_link_group(message: Message, conn):
 
 # ---------- Розділ «🗳 Опитування» (для адміністраторів) ----------
 
-@router.message(F.text.in_({"🗳 Опитування", "🗳 Опитування групи", "📊 Опитування"}), StateFilter("*"))
+@router.message(_private_only, F.text.in_({"🗳 Опитування", "🗳 Опитування групи", "📊 Опитування"}), StateFilter("*"))
 async def handle_polls_button(message: Message, state: FSMContext, conn):
     """Відкриває адмінський розділ керування опитуваннями.
     Для студентів опитування надходять автоматично у приватні повідомлення або груповий чат."""
@@ -165,7 +173,7 @@ async def open_admin_polls_hub(message: Message, state: FSMContext, conn):
     )
 
 
-@router.message(F.text == "➕ Створити опитування", StateFilter("*"))
+@router.message(_private_only, F.text == "➕ Створити опитування", StateFilter("*"))
 async def admin_start_create_poll(message: Message, state: FSMContext, conn):
     _require_admin_msg(conn, message.from_user.id)
     await state.clear()
@@ -185,13 +193,13 @@ async def admin_start_create_poll(message: Message, state: FSMContext, conn):
     )
 
 
-@router.message(F.text == "🔙 Скасувати створення", StateFilter("*"))
+@router.message(_private_only, F.text == "🔙 Скасувати створення", StateFilter("*"))
 async def admin_cancel_poll_wizard(message: Message, state: FSMContext, conn):
     _require_admin_msg(conn, message.from_user.id)
     await open_admin_polls_hub(message, state, conn)
 
 
-@router.message(AdminPollState.entering_question, F.text)
+@router.message(_private_only, AdminPollState.entering_question, F.text)
 async def admin_receive_poll_question(message: Message, state: FSMContext, conn):
     _require_admin_msg(conn, message.from_user.id)
     if message.text in {"🔙 Скасувати створення", "🔙 Назад", "↩️ Скасувати"}:
@@ -233,7 +241,7 @@ def _get_options_step_keyboard(options_count: int) -> ReplyKeyboardMarkup:
     return make_reply_keyboard(rows)
 
 
-@router.message(AdminPollState.entering_options, F.text)
+@router.message(_private_only, AdminPollState.entering_options, F.text)
 async def admin_receive_poll_options(message: Message, state: FSMContext, conn):
     _require_admin_msg(conn, message.from_user.id)
     txt = message.text.strip()
@@ -327,7 +335,7 @@ async def _render_poll_settings_step(message: Message, state: FSMContext, conn):
     )
 
 
-@router.message(AdminPollState.configuring_settings, F.text)
+@router.message(_private_only, AdminPollState.configuring_settings, F.text)
 async def admin_handle_poll_settings(message: Message, state: FSMContext, conn):
     _require_admin_msg(conn, message.from_user.id)
     txt = message.text.strip()
@@ -395,7 +403,7 @@ TIMER_PRESETS = {
 }
 
 
-@router.message(AdminPollState.selecting_timer, F.text)
+@router.message(_private_only, AdminPollState.selecting_timer, F.text)
 async def admin_receive_poll_timer(message: Message, state: FSMContext, conn):
     _require_admin_msg(conn, message.from_user.id)
     txt = message.text.strip()
@@ -452,7 +460,7 @@ async def admin_receive_poll_timer(message: Message, state: FSMContext, conn):
     )
 
 
-@router.message(AdminPollState.confirming_poll, F.text)
+@router.message(_private_only, AdminPollState.confirming_poll, F.text)
 async def admin_confirm_and_publish_poll(message: Message, state: FSMContext, conn):
     _require_admin_msg(conn, message.from_user.id)
     if message.text == "🔙 Скасувати створення":
@@ -539,7 +547,7 @@ async def admin_poll_chart_callback(callback: CallbackQuery, conn):
     )
 
 
-@router.message(F.text == "📡 Активні опитування", StateFilter("*"))
+@router.message(_private_only, F.text == "📡 Активні опитування", StateFilter("*"))
 async def admin_view_active_polls(message: Message, state: FSMContext, conn):
     _require_admin_msg(conn, message.from_user.id)
     await polls.check_expired_polls(message.bot, conn)
@@ -601,7 +609,7 @@ async def admin_stop_poll_early(callback: CallbackQuery, conn):
         await callback.message.answer(summary)
 
 
-@router.message(F.text == "📦 Історія опитувань", StateFilter("*"))
+@router.message(_private_only, F.text == "📦 Історія опитувань", StateFilter("*"))
 async def admin_polls_history(message: Message, conn):
     _require_admin_msg(conn, message.from_user.id)
     closed = polls.list_polls(conn, status="closed", limit=10)
@@ -635,7 +643,7 @@ async def admin_polls_history(message: Message, conn):
 
 # ---------- Налаштування групового чату ----------
 
-@router.message(F.text == "🔗 Груповий чат ПІ-231", StateFilter("*"))
+@router.message(_private_only, F.text == "🔗 Груповий чат ПІ-231", StateFilter("*"))
 async def admin_group_chat_settings(message: Message, state: FSMContext, conn):
     _require_admin_msg(conn, message.from_user.id)
     grp_id = polls.get_group_chat_id(conn)
@@ -651,7 +659,7 @@ async def admin_group_chat_settings(message: Message, state: FSMContext, conn):
     )
 
 
-@router.message(AdminPollState.entering_group_id, F.text)
+@router.message(_private_only, AdminPollState.entering_group_id, F.text)
 async def admin_save_group_chat_id(message: Message, state: FSMContext, conn):
     _require_admin_msg(conn, message.from_user.id)
     txt = message.text.strip()
