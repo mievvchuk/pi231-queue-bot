@@ -21,8 +21,10 @@ from handlers.common import (
     find_session_by_label,
     format_entry,
     format_queue,
+    get_admin_polls_menu,
     get_admin_queues_menu,
     get_admin_reply_menu,
+    get_admin_reports_menu,
     get_admin_schedule_menu,
     get_admin_settings_menu,
     get_admin_students_menu,
@@ -70,8 +72,10 @@ router.message.middleware(AdminOnly())
 
 
 class AdminPanelState(StatesGroup):
+    in_main_menu = State()
     in_queues_menu = State()
     in_students_menu = State()
+    in_reports_menu = State()
     in_settings_menu = State()
     in_schedule_menu = State()
     select_queue_for_view = State()
@@ -208,10 +212,26 @@ async def open_admin_student_manager(message: Message, conn, subjects, entry_id:
 # ---------- Головна адмін-панель та категорії ----------
 
 @router.message(F.text.in_({"⚡ Адмін-панель", "🔙 В адмін-панель"}), StateFilter("*"))
-async def admin_panel_open(message: Message, state: FSMContext):
+async def admin_panel_open(message: Message, state: FSMContext, conn=None):
     await state.clear()
+    await state.set_state(AdminPanelState.in_main_menu)
+    info_lines = ["⚡ <b>Адмін-панель групи ПІ-231</b>"]
+    if conn is not None:
+        try:
+            from services import polls
+            from services.maintenance import is_maintenance_active
+            act_q = len(queues.list_sessions(conn, ("open", "closed")))
+            act_p = len(polls.list_polls(conn, status="active", limit=50))
+            maint_str = "🛠 Увімкнено" if is_maintenance_active(conn) else "🟢 Штатний режим"
+            info_lines.append("")
+            info_lines.append(f"• 📋 Активних черг: <b>{act_q}</b>")
+            info_lines.append(f"• 🗳 Активних опитувань: <b>{act_p}</b>")
+            info_lines.append(f"• ⚙️ Статус системи: <b>{maint_str}</b>")
+        except Exception:
+            pass
+    info_lines.append("\nОберіть категорію керування на кнопках нижче 👇")
     await message.answer(
-        "⚡ <b>Адмін-панель</b>\n\nОберіть категорію на кнопках нижче 👇",
+        "\n".join(info_lines),
         reply_markup=get_admin_reply_menu(),
     )
 
@@ -225,11 +245,11 @@ async def admin_category_queues(message: Message, state: FSMContext):
     )
 
 
-@router.message(F.text == "👥 Студенти", StateFilter("*"))
+@router.message(F.text.in_({"🎓 Студенти в чергах", "👥 Студенти"}), StateFilter("*"))
 async def admin_category_students(message: Message, state: FSMContext):
     await state.set_state(AdminPanelState.in_students_menu)
     await message.answer(
-        "👥 <b>Керування студентами</b>\n\nОберіть дію нижче 👇",
+        "🎓 <b>Керування студентами в чергах</b>\n\nОберіть дію нижче 👇",
         reply_markup=get_admin_students_menu(),
     )
 
@@ -609,12 +629,12 @@ async def admin_broadcast_working_saturday_send(callback: CallbackQuery, conn):
 
 
 
-@router.message(F.text == "👥 Користувачі", StateFilter("*"))
+@router.message(F.text.in_({"👥 База користувачів", "👥 Користувачі"}), StateFilter("*"))
 async def admin_category_users(message: Message, state: FSMContext):
     await state.clear()
     await state.set_state(AdminUserState.in_users_menu)
     await message.answer(
-        "👥 <b>Користувачі</b>\n\nОберіть дію нижче 👇",
+        "👥 <b>База користувачів</b>\n\nОберіть дію нижче 👇",
         reply_markup=get_admin_users_menu(),
     )
 
@@ -907,8 +927,10 @@ async def admin_category_settings(message: Message, state: FSMContext, conn=None
 @router.message(
     F.text.in_({"🔙 Назад", "🔙 В адмін-панель"}),
     StateFilter(
+        AdminPanelState.in_main_menu,
         AdminPanelState.in_queues_menu,
         AdminPanelState.in_students_menu,
+        AdminPanelState.in_reports_menu,
         AdminPanelState.in_settings_menu,
         AdminPanelState.in_schedule_menu,
         AdminUserState.in_users_menu,
@@ -921,8 +943,8 @@ async def admin_category_settings(message: Message, state: FSMContext, conn=None
         AdminManageState.history_view,
     ),
 )
-async def admin_back_to_main_panel(message: Message, state: FSMContext):
-    await admin_panel_open(message, state)
+async def admin_back_to_main_panel(message: Message, state: FSMContext, conn=None):
+    await admin_panel_open(message, state, conn=conn)
 
 
 # ---------- Вибір черги для дій адміна ----------
@@ -1039,9 +1061,73 @@ async def admin_paginate_close_queues(message: Message, state: FSMContext, conn,
     await message.answer("Оберіть чергу на кнопках внизу 👇", reply_markup=markup)
 
 
-# ---------- Звіти по предметах ----------
+# ---------- Звіти та статистика ----------
 
-@router.message(F.text.in_({"📊 Звіти", "📊 Звіти за предметами", "📊 Інший предмет"}), StateFilter("*"))
+@router.message(F.text.in_({"📊 Звіти та статистика", "📊 Звіти"}), StateFilter("*"))
+async def admin_category_reports(message: Message, state: FSMContext):
+    await state.clear()
+    await state.set_state(AdminPanelState.in_reports_menu)
+    await message.answer(
+        "📊 <b>Звіти та аналітика активності групи ПІ-231</b>\n\n"
+        "• <b>📈 Загальна статистика</b> — зведений дашборд: скільки черг проведено, загальна кількість здач, топ найактивніших студентів та активність по предметах.\n"
+        "• <b>📚 Звіти за предметами</b> — рейтинг студентів та CSV-таблиця по конкретній дисципліні.\n"
+        "• <b>📥 Експорт зведеної таблиці (CSV)</b> — єдиний файл Excel/CSV з матрицею всіх здач кожного студента по всіх предметах.\n\n"
+        "Оберіть потрібний розділ на кнопках нижче 👇",
+        reply_markup=get_admin_reports_menu(),
+    )
+
+
+@router.message(F.text == "📈 Загальна статистика", StateFilter("*"))
+async def admin_global_statistics_view(message: Message, conn, subjects):
+    stats = queues.get_global_statistics(conn, subjects)
+    lines = [
+        "📈 <b>Загальна статистика черг ПІ-231</b>\n",
+        f"📁 <b>Проведено черг усього:</b> {stats['total_sessions']} "
+        f"(активних: {stats['active_sessions']}, в архіві: {stats['archived_sessions']})",
+        f"   ├ 📖 Звичайні пари: <b>{stats['lessons_count']}</b>",
+        f"   ├ 💬 Консультації: <b>{stats['consults_count']}</b>",
+        f"   └ 📑 Курсова робота: <b>{stats['cw_count']}</b>\n",
+        f"✅ <b>Успішних здач робіт:</b> {stats['total_passed']}",
+        f"🔄 <b>Не здано / перенесено:</b> {stats['total_removed']}",
+        f"🚪 <b>Виходів із черги:</b> {stats['total_left']}",
+        f"📊 <b>Конверсія здач:</b> {stats['pass_rate']}%\n",
+        f"👥 <b>Студентів у базі:</b> {stats['registered_users'] + stats['placeholder_users']} "
+        f"(прив'язали TG: {stats['registered_users']})\n",
+    ]
+
+    if stats["subjects"]:
+        lines.append("📚 <b>Активність за предметами:</b>")
+        for s in stats["subjects"]:
+            lines.append(
+                f"• <b>{html.escape(s['name'])}</b> — здач: <b>{s['passed']}</b> (черг: {s['sessions']})"
+            )
+        lines.append("")
+
+    active_top = [st for st in stats["top_students"] if st["passed"] > 0]
+    if active_top:
+        lines.append("🏆 <b>Топ-10 студентів за кількістю здач:</b>")
+        for idx, st in enumerate(active_top[:10], 1):
+            medal = "🥇" if idx == 1 else ("🥈" if idx == 2 else ("🥉" if idx == 3 else f"{idx}."))
+            lines.append(f"{medal} {html.escape(st['name'])} — <b>{st['passed']}</b> ✅")
+
+    await message.answer("\n".join(lines), reply_markup=get_admin_reports_menu())
+
+
+@router.message(F.text == "📥 Експорт зведеної таблиці (CSV)", StateFilter("*"))
+async def admin_export_global_csv(message: Message, conn, subjects):
+    csv_bytes = queues.export_global_statistics_csv(conn, subjects)
+    file = BufferedInputFile(csv_bytes, filename="pi231_full_statistics.csv")
+    await message.answer_document(
+        file,
+        caption=(
+            "📊 <b>Зведена таблиця успішності групи ПІ-231</b>\n"
+            "Містить дані по кожному студенту та всіх предметах семестру (формат CSV для Excel / Google Таблиць)."
+        ),
+        reply_markup=get_admin_reports_menu(),
+    )
+
+
+@router.message(F.text.in_({"📚 Звіти за предметами", "📊 Звіти за предметами", "📊 Інший предмет"}), StateFilter("*"))
 async def admin_pick_report_subject(message: Message, state: FSMContext, subjects):
     await state.clear()
     await state.set_state(AdminPanelState.select_subject_for_report)

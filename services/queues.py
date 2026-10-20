@@ -661,3 +661,153 @@ def get_subject_report(conn, subject_id: int) -> dict:
         "total_passed": total_passed,
         "students": sorted_students,
     }
+
+
+def get_global_statistics(conn, subjects: list[dict]) -> dict:
+    """Формує комплексну статистику активності черг та успішності всієї групи."""
+    all_sessions = conn.execute("SELECT * FROM queue_sessions ORDER BY id ASC").fetchall()
+    total_sessions = len(all_sessions)
+    active_sessions = sum(1 for s in all_sessions if s["status"] in ("open", "closed"))
+    archived_sessions = sum(1 for s in all_sessions if s["status"] == "archived")
+
+    sub_map = {s["id"]: s["name"] for s in subjects}
+    lessons_count = 0
+    consults_count = 0
+    cw_count = 0
+    for s in all_sessions:
+        s_name = sub_map.get(s["subject_id"], "")
+        q_type = s["queue_type"] if "queue_type" in s.keys() else "lesson"
+        if "курсов" in s_name.lower():
+            cw_count += 1
+        elif q_type == "consultation":
+            consults_count += 1
+        else:
+            lessons_count += 1
+
+    entries = conn.execute(
+        """SELECT e.session_id, e.user_id, e.status, s.subject_id, u.full_name
+           FROM queue_entries e
+           JOIN queue_sessions s ON s.id = e.session_id
+           JOIN users u ON u.id = e.user_id
+           WHERE e.user_id IS NOT NULL"""
+    ).fetchall()
+
+    total_passed = 0
+    total_removed = 0
+    total_left = 0
+    total_active = 0
+
+    student_totals: dict[int, dict] = {}
+    subject_stats: dict[int, dict] = {
+        s["id"]: {
+            "id": s["id"],
+            "name": s["name"],
+            "sessions": sum(1 for sess in all_sessions if sess["subject_id"] == s["id"]),
+            "passed": 0,
+            "entries": 0,
+        }
+        for s in subjects
+    }
+
+    for e in entries:
+        uid = e["user_id"]
+        sub_id = e["subject_id"]
+        st = e["status"]
+
+        if uid not in student_totals:
+            student_totals[uid] = {
+                "user_id": uid,
+                "name": e["full_name"],
+                "passed": 0,
+                "removed": 0,
+                "left": 0,
+                "by_subject": {},
+            }
+
+        if sub_id in subject_stats:
+            subject_stats[sub_id]["entries"] += 1
+
+        if st == "completed":
+            total_passed += 1
+            student_totals[uid]["passed"] += 1
+            student_totals[uid]["by_subject"][sub_id] = student_totals[uid]["by_subject"].get(sub_id, 0) + 1
+            if sub_id in subject_stats:
+                subject_stats[sub_id]["passed"] += 1
+        elif st == "removed":
+            total_removed += 1
+            student_totals[uid]["removed"] += 1
+        elif st == "left":
+            total_left += 1
+            student_totals[uid]["left"] += 1
+        elif st == "active":
+            total_active += 1
+
+    all_users = conn.execute("SELECT id, telegram_id, full_name FROM users ORDER BY lower(full_name) ASC").fetchall()
+    registered_count = sum(1 for u in all_users if u["telegram_id"] and u["telegram_id"] > 0)
+    placeholder_count = sum(1 for u in all_users if not u["telegram_id"] or u["telegram_id"] < 0)
+
+    for u in all_users:
+        if u["id"] not in student_totals:
+            student_totals[u["id"]] = {
+                "user_id": u["id"],
+                "name": u["full_name"],
+                "passed": 0,
+                "removed": 0,
+                "left": 0,
+                "by_subject": {},
+            }
+
+    top_students = sorted(
+        student_totals.values(),
+        key=lambda x: (-x["passed"], x["name"].lower()),
+    )
+
+    sorted_subjects = sorted(
+        subject_stats.values(),
+        key=lambda x: (-x["passed"], -x["sessions"], x["name"]),
+    )
+
+    finished_attempts = total_passed + total_removed
+    pass_rate = round((total_passed / finished_attempts) * 100) if finished_attempts > 0 else 0
+
+    return {
+        "total_sessions": total_sessions,
+        "active_sessions": active_sessions,
+        "archived_sessions": archived_sessions,
+        "lessons_count": lessons_count,
+        "consults_count": consults_count,
+        "cw_count": cw_count,
+        "total_passed": total_passed,
+        "total_removed": total_removed,
+        "total_left": total_left,
+        "total_active": total_active,
+        "pass_rate": pass_rate,
+        "registered_users": registered_count,
+        "placeholder_users": placeholder_count,
+        "top_students": top_students,
+        "subjects": sorted_subjects,
+    }
+
+
+def export_global_statistics_csv(conn, subjects: list[dict]) -> bytes:
+    """Формує зведену CSV-таблицю успішності всіх студентів по всіх предметах."""
+    stats = get_global_statistics(conn, subjects)
+    sub_headers = [s["name"] for s in subjects]
+    header_row = ["Прізвище та ім'я", "Усього здано", "Не здано / перенесено", "Виходів із черги"] + sub_headers
+
+    rows = [";".join(header_row)]
+    students_alpha = sorted(stats["top_students"], key=lambda x: x["name"].lower())
+
+    for st in students_alpha:
+        row_cells = [
+            st["name"],
+            str(st["passed"]),
+            str(st["removed"]),
+            str(st["left"]),
+        ]
+        for s in subjects:
+            row_cells.append(str(st["by_subject"].get(s["id"], 0)))
+        rows.append(";".join(row_cells))
+
+    return "\r\n".join(rows).encode("utf-8-sig")
+

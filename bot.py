@@ -17,7 +17,7 @@ import os
 from aiohttp import web
 
 
-BOT_VERSION = "v1.9"
+BOT_VERSION = "v2.0"
 
 
 async def healthcheck(request: web.Request) -> web.Response:
@@ -54,13 +54,21 @@ async def main() -> None:
     conn = connect(config.DATABASE_URL)
     init_admins(conn, config.get_initial_admin_ids())
 
+    from handlers import polls as polls_handler
     from handlers import schedule as schedule_handler
 
     # conn і subjects доступні в обробниках як іменовані параметри
     dp = Dispatcher(conn=conn, subjects=load_subjects(config.SUBJECTS_PATH))
     dp.message.outer_middleware(Guard())
     dp.callback_query.outer_middleware(Guard())
-    dp.include_routers(start.router, admin.router, schedule_handler.router, student.router, start.fallback_router)
+    dp.include_routers(
+        start.router,
+        polls_handler.router,
+        admin.router,
+        schedule_handler.router,
+        student.router,
+        start.fallback_router,
+    )
 
     bot = Bot(config.get_bot_token(), default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 
@@ -69,6 +77,9 @@ async def main() -> None:
 
     from services.schedule_notifier import start_schedule_notifier
     asyncio.create_task(start_schedule_notifier(bot, conn))
+
+    from services.polls import start_polls_watcher
+    asyncio.create_task(start_polls_watcher(bot, conn))
 
     if getattr(config, "ALERTS_TOKEN", None):
         from services.alerts import start_alerts_checker

@@ -118,6 +118,37 @@ MIGRATIONS = [
     """
     ALTER TABLE replacements ADD COLUMN is_archived INTEGER NOT NULL DEFAULT 0;
     """,
+    """
+    CREATE TABLE IF NOT EXISTS polls (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        question TEXT NOT NULL,
+        options_json TEXT NOT NULL,
+        is_anonymous INTEGER NOT NULL DEFAULT 1,
+        allows_multiple INTEGER NOT NULL DEFAULT 0,
+        target TEXT NOT NULL DEFAULT 'private',
+        status TEXT NOT NULL DEFAULT 'active',
+        created_by BIGINT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        closes_at TEXT DEFAULT NULL,
+        closed_at TEXT DEFAULT NULL
+    );
+    CREATE TABLE IF NOT EXISTS poll_instances (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        poll_id INTEGER NOT NULL REFERENCES polls(id),
+        chat_id BIGINT NOT NULL,
+        message_id BIGINT NOT NULL,
+        tg_poll_id TEXT NOT NULL,
+        options_counts_json TEXT DEFAULT NULL
+    );
+    CREATE TABLE IF NOT EXISTS poll_votes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        poll_id INTEGER NOT NULL REFERENCES polls(id),
+        voter_telegram_id BIGINT NOT NULL,
+        voter_name TEXT NOT NULL DEFAULT '',
+        option_index INTEGER NOT NULL,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    """,
 ]
 
 PG_SCHEMA = """
@@ -203,6 +234,35 @@ CREATE TABLE IF NOT EXISTS admin_log (
     admin_telegram_id BIGINT NOT NULL,
     action TEXT NOT NULL,
     details TEXT NOT NULL DEFAULT '',
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS polls (
+    id SERIAL PRIMARY KEY,
+    question TEXT NOT NULL,
+    options_json TEXT NOT NULL,
+    is_anonymous BOOLEAN NOT NULL DEFAULT TRUE,
+    allows_multiple BOOLEAN NOT NULL DEFAULT FALSE,
+    target TEXT NOT NULL DEFAULT 'private',
+    status TEXT NOT NULL DEFAULT 'active',
+    created_by BIGINT NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    closes_at TEXT DEFAULT NULL,
+    closed_at TIMESTAMP WITH TIME ZONE DEFAULT NULL
+);
+CREATE TABLE IF NOT EXISTS poll_instances (
+    id SERIAL PRIMARY KEY,
+    poll_id INTEGER NOT NULL REFERENCES polls(id),
+    chat_id BIGINT NOT NULL,
+    message_id BIGINT NOT NULL,
+    tg_poll_id TEXT NOT NULL,
+    options_counts_json TEXT DEFAULT NULL
+);
+CREATE TABLE IF NOT EXISTS poll_votes (
+    id SERIAL PRIMARY KEY,
+    poll_id INTEGER NOT NULL REFERENCES polls(id),
+    voter_telegram_id BIGINT NOT NULL,
+    voter_name TEXT NOT NULL DEFAULT '',
+    option_index INTEGER NOT NULL,
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 """

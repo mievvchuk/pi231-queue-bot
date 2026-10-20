@@ -2,7 +2,7 @@ import pytest
 from aiogram import Dispatcher
 
 import config
-from handlers import admin, start, student
+from handlers import admin, polls, start, student
 from handlers.common import Guard, format_queue
 from services import queues
 from subjects import load_subjects
@@ -19,9 +19,11 @@ def test_subjects_json_is_valid():
 
 
 def test_routers_can_be_connected_without_token():
+    for r in (start.router, polls.router, student.router, admin.router, start.fallback_router):
+        r._parent_router = None
     dp = Dispatcher()
     dp.callback_query.outer_middleware(Guard())
-    dp.include_routers(start.router, student.router, admin.router, start.fallback_router)
+    dp.include_routers(start.router, polls.router, student.router, admin.router, start.fallback_router)
 
 
 def test_queue_text_marks_current_user(conn, make_user):

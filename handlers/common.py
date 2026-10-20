@@ -40,14 +40,16 @@ def make_reply_keyboard(rows: list[list[str]]) -> ReplyKeyboardMarkup:
 
 
 def get_reply_menu(conn, telegram_id: int) -> ReplyKeyboardMarkup:
-    """Головне меню студента."""
+    """Головне меню студента (згруповане за розділами)."""
+    bottom_row = [KeyboardButton(text="❓ Допомога")]
+    if admins.is_admin(conn, telegram_id):
+        bottom_row.append(KeyboardButton(text="⚡ Адмін-панель"))
     keyboard = [
         [KeyboardButton(text="📋 Усі черги"), KeyboardButton(text="👥 Мої черги")],
+        [KeyboardButton(text="➕ Відкрити чергу"), KeyboardButton(text="🗳 Опитування")],
         [KeyboardButton(text="📅 Розклад"), KeyboardButton(text="🔄 Заміни")],
-        [KeyboardButton(text="➕ Відкрити чергу"), KeyboardButton(text="❓ Допомога")],
+        bottom_row,
     ]
-    if admins.is_admin(conn, telegram_id):
-        keyboard.append([KeyboardButton(text="⚡ Адмін-панель")])
     return ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True)
 
 
@@ -107,12 +109,30 @@ def get_queue_actions_reply_menu(
 
 
 def get_admin_reply_menu() -> ReplyKeyboardMarkup:
-    """Головне меню адмін-панелі: категорії."""
+    """Головне меню адмін-панелі: структуровані категорії."""
     return make_reply_keyboard([
-        ["📋 Черги", "👥 Студенти"],
-        ["📅 Розклад і заміни", "📊 Звіти"],
-        ["👥 Користувачі", "⚙️ Налаштування"],
-        ["🏠 Головне меню"],
+        ["📋 Черги", "🎓 Студенти в чергах"],
+        ["🗳 Опитування", "📊 Звіти та статистика"],
+        ["📅 Розклад і заміни", "👥 База користувачів"],
+        ["⚙️ Налаштування", "🏠 Головне меню"],
+    ])
+
+
+def get_admin_polls_menu() -> ReplyKeyboardMarkup:
+    """Вкладене меню адміна: Опитування та голосування."""
+    return make_reply_keyboard([
+        ["➕ Створити опитування", "📡 Активні опитування"],
+        ["📦 Історія опитувань", "🔗 Груповий чат ПІ-231"],
+        ["🔙 В адмін-панель"],
+    ])
+
+
+def get_admin_reports_menu() -> ReplyKeyboardMarkup:
+    """Вкладене меню адміна: Звіти та аналітика."""
+    return make_reply_keyboard([
+        ["📈 Загальна статистика", "📚 Звіти за предметами"],
+        ["📥 Експорт зведеної таблиці (CSV)"],
+        ["🔙 В адмін-панель"],
     ])
 
 
