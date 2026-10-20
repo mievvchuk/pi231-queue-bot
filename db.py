@@ -149,6 +149,19 @@ MIGRATIONS = [
         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
     """,
+    """
+    CREATE TABLE IF NOT EXISTS bug_reports (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_telegram_id BIGINT NOT NULL,
+        user_name TEXT NOT NULL DEFAULT '',
+        username TEXT DEFAULT NULL,
+        text TEXT NOT NULL,
+        photo_file_id TEXT DEFAULT NULL,
+        status TEXT NOT NULL DEFAULT 'open',
+        admin_reply TEXT DEFAULT NULL,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    """,
 ]
 
 PG_SCHEMA = """
@@ -263,6 +276,17 @@ CREATE TABLE IF NOT EXISTS poll_votes (
     voter_telegram_id BIGINT NOT NULL,
     voter_name TEXT NOT NULL DEFAULT '',
     option_index INTEGER NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS bug_reports (
+    id SERIAL PRIMARY KEY,
+    user_telegram_id BIGINT NOT NULL,
+    user_name TEXT NOT NULL DEFAULT '',
+    username TEXT DEFAULT NULL,
+    text TEXT NOT NULL,
+    photo_file_id TEXT DEFAULT NULL,
+    status TEXT NOT NULL DEFAULT 'open',
+    admin_reply TEXT DEFAULT NULL,
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 """

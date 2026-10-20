@@ -41,14 +41,13 @@ def make_reply_keyboard(rows: list[list[str]]) -> ReplyKeyboardMarkup:
 
 def get_reply_menu(conn, telegram_id: int) -> ReplyKeyboardMarkup:
     """Головне меню студента (без адмінських функцій; для адміна — кнопка переходу в Адмін-панель)."""
-    bottom_row = [KeyboardButton(text="❓ Допомога")]
-    if admins.is_admin(conn, telegram_id):
-        bottom_row.append(KeyboardButton(text="⚡ Адмін-панель"))
     keyboard = [
         [KeyboardButton(text="📋 Усі черги"), KeyboardButton(text="👥 Мої черги")],
         [KeyboardButton(text="➕ Відкрити чергу"), KeyboardButton(text="📅 Розклад")],
-        bottom_row,
+        [KeyboardButton(text="❓ Допомога"), KeyboardButton(text="🐞 Повідомити про баг")],
     ]
+    if admins.is_admin(conn, telegram_id):
+        keyboard.append([KeyboardButton(text="⚡ Адмін-панель")])
     return ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True)
 
 
@@ -186,8 +185,8 @@ def get_admin_settings_menu(is_maintenance: bool = False) -> ReplyKeyboardMarkup
     maint_btn = "🟢 Вимкнути техроботи" if is_maintenance else "🛠 Увімкнути техроботи"
     return make_reply_keyboard([
         ["📢 Оголошення для всіх", maint_btn],
-        ["👥 Адміністратори", "⛔ Заблоковані"],
-        ["🔙 В адмін-панель"],
+        ["🐞 Баг-репорти", "👥 Адміністратори"],
+        ["⛔ Заблоковані", "🔙 В адмін-панель"],
     ])
 
 

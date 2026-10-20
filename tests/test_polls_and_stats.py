@@ -169,6 +169,7 @@ def test_new_grouped_keyboards(conn):
     assert "➕ Відкрити чергу" in student_texts
     assert "📅 Розклад" in student_texts
     assert "❓ Допомога" in student_texts
+    assert "🐞 Повідомити про баг" in student_texts
     # Адмінські функції (опитування, заміни) не повинні бути в меню студента:
     assert "🗳 Опитування" not in student_texts
     assert "🔄 Заміни" not in student_texts
@@ -194,3 +195,32 @@ def test_new_grouped_keyboards(conn):
     assert "📈 Загальна статистика" in reports_texts
     assert "📚 Звіти за предметами" in reports_texts
     assert "📥 Експорт зведеної таблиці (CSV)" in reports_texts
+
+
+@pytest.mark.asyncio
+async def test_bug_reports_flow(conn, make_user):
+    from services import bugs
+
+    make_user(301, "Сидоренко Ілля")
+    rep_id = bugs.create_bug_report(
+        conn,
+        telegram_id=301,
+        text="Не відкривається черга на МН після натискання кнопки",
+        username="illya_s",
+    )
+    assert rep_id > 0
+
+    open_list = bugs.list_bug_reports(conn, status="open")
+    assert len(open_list) == 1
+    assert open_list[0]["user_name"] == "Сидоренко Ілля"
+
+    bot = MagicMock()
+    bot.send_message = AsyncMock()
+    await bugs.notify_admins_new_bug(bot, conn, rep_id)
+    assert bot.send_message.called
+
+    bugs.resolve_bug_report(conn, rep_id, admin_reply="Виправлено, спробуйте ще раз!")
+    resolved = bugs.get_bug_report(conn, rep_id)
+    assert resolved["status"] == "resolved"
+    assert resolved["admin_reply"] == "Виправлено, спробуйте ще раз!"
+

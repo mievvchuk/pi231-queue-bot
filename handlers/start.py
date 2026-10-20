@@ -71,6 +71,8 @@ class NameForm(StatesGroup):
     registration = State()
     rename = State()
     browsing_help = State()
+    reporting_bug = State()
+    admin_replying_bug = State()
 
 
 def main_menu(conn, telegram_id: int):
@@ -177,6 +179,194 @@ async def help_screen(callback: CallbackQuery):
         callback,
         "❓ <b>Довідка</b>\n\nСкористайтеся кнопкою «❓ Допомога» на нижній панелі для перегляду розділів.",
         make_keyboard([[("Назад", "menu")]]),
+    )
+
+
+# ---------- Повідомлення про баги (Баг-репорти) ----------
+
+@router.message(Command("bug"), StateFilter("*"))
+@router.message(F.text.in_({"🐞 Повідомити про баг", "🐞 Баг-репорт"}), StateFilter("*"))
+async def start_bug_report(message: Message, state: FSMContext, conn):
+    if not users.get_user(conn, message.from_user.id):
+        raise BotError("Спочатку зареєструйтесь: /start")
+    await state.set_state(NameForm.reporting_bug)
+    await message.answer(
+        "🐞 <b>Повідомлення про помилку або пропозиція</b>\n\n"
+        "Опишіть, що саме працює некоректно (на які кнопки натискали та що сталося), "
+        "або надішліть <b>скріншот із описом</b> прямо сюди в чат 👇",
+        reply_markup=make_reply_keyboard([["🔙 Скасувати"]]),
+    )
+
+
+@router.message(NameForm.reporting_bug, F.text.in_({"🔙 Скасувати", "↩️ Скасувати", "🔙 Назад"}))
+async def cancel_bug_report(message: Message, state: FSMContext, conn):
+    await state.clear()
+    await message.answer(
+        "Скасовано. Головне меню 👇",
+        reply_markup=get_reply_menu(conn, message.from_user.id),
+    )
+
+
+@router.message(NameForm.reporting_bug)
+async def receive_bug_report(message: Message, state: FSMContext, conn):
+    from services import bugs
+
+    photo_id = message.photo[-1].file_id if message.photo else None
+    text = (message.text or message.caption or "").strip()
+
+    try:
+        report_id = bugs.create_bug_report(
+            conn,
+            telegram_id=message.from_user.id,
+            text=text,
+            username=message.from_user.username,
+            photo_file_id=photo_id,
+            fallback_name=message.from_user.full_name or "Студент",
+        )
+    except BotError as err:
+        await message.answer(
+            f"⚠️ {err}\nНадішліть текст опису або натисніть «🔙 Скасувати»:",
+            reply_markup=make_reply_keyboard([["🔙 Скасувати"]]),
+        )
+        return
+
+    await state.clear()
+    await bugs.notify_admins_new_bug(message.bot, conn, report_id)
+    await message.answer(
+        f"✅ <b>Дякуємо! Ваш баг-репорт #{report_id} передано адміністраторам.</b>\n\n"
+        "Ми перевіримо це якнайшвидше та за потреби надішлемо відповідь у цей чат.",
+        reply_markup=get_reply_menu(conn, message.from_user.id),
+    )
+
+
+@router.message(F.text == "🐞 Баг-репорти", StateFilter("*"))
+async def admin_view_bug_reports(message: Message, state: FSMContext, conn):
+    if not admins.is_admin(conn, message.from_user.id):
+        return
+    from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+    from handlers.common import get_admin_settings_menu
+    from services import bugs
+    from services.maintenance import is_maintenance_active
+
+    open_reports = bugs.list_bug_reports(conn, status="open", limit=10)
+    if not open_reports:
+        await message.answer(
+            "🐞 <b>Баг-репорти</b>\n\n🎉 Наразі нових нерозглянутих баг-репортів немає!",
+            reply_markup=get_admin_settings_menu(is_maintenance=is_maintenance_active(conn)),
+        )
+        return
+
+    await message.answer(
+        f"🐞 <b>Відкриті баг-репорти ({len(open_reports)}):</b>",
+        reply_markup=get_admin_settings_menu(is_maintenance=is_maintenance_active(conn)),
+    )
+    for rep in open_reports[:5]:
+        card_text = bugs.format_bug_report_card(rep)
+        kb = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(text="💬 Відповісти студенту", callback_data=f"bug_reply:{rep['id']}"),
+                    InlineKeyboardButton(text="✅ Вирішено", callback_data=f"bug_resolve:{rep['id']}"),
+                ]
+            ]
+        )
+        if rep.get("photo_file_id"):
+            await message.answer_photo(rep["photo_file_id"], caption=card_text, reply_markup=kb)
+        else:
+            await message.answer(card_text, reply_markup=kb)
+
+
+@router.callback_query(F.data.startswith("bug_resolve:"))
+async def admin_resolve_bug_callback(callback: CallbackQuery, conn):
+    if not admins.is_admin(conn, callback.from_user.id):
+        await callback.answer("Тільки для адміністраторів.", show_alert=True)
+        return
+    from contextlib import suppress
+    from services import bugs
+
+    report_id = int(callback.data.split(":")[1])
+    report = bugs.get_bug_report(conn, report_id)
+    if not report:
+        await callback.answer("Баг-репорт не знайдено.", show_alert=True)
+        return
+
+    bugs.resolve_bug_report(conn, report_id)
+    await callback.answer("Позначено як вирішений!")
+
+    updated_card = bugs.format_bug_report_card(bugs.get_bug_report(conn, report_id))
+    with suppress(Exception):
+        if callback.message.photo:
+            await callback.message.edit_caption(caption=updated_card, reply_markup=None)
+        else:
+            await callback.message.edit_text(text=updated_card, reply_markup=None)
+
+    with suppress(Exception):
+        await callback.bot.send_message(
+            report["user_telegram_id"],
+            f"✅ <b>Ваш баг-репорт #{report_id} розглянуто та позначено як вирішений!</b>\n"
+            "Дякуємо, що допомагаєте робити бота кращим.",
+        )
+
+
+@router.callback_query(F.data.startswith("bug_reply:"))
+async def admin_reply_bug_callback(callback: CallbackQuery, state: FSMContext, conn):
+    if not admins.is_admin(conn, callback.from_user.id):
+        await callback.answer("Тільки для адміністраторів.", show_alert=True)
+        return
+    from services import bugs
+
+    report_id = int(callback.data.split(":")[1])
+    report = bugs.get_bug_report(conn, report_id)
+    if not report:
+        await callback.answer("Баг-репорт не знайдено.", show_alert=True)
+        return
+
+    await state.set_state(NameForm.admin_replying_bug)
+    await state.update_data(reply_bug_id=report_id)
+    await callback.answer()
+    await callback.message.answer(
+        f"💬 <b>Відповідь на баг-репорт #{report_id}</b> (студент: <b>{report['user_name']}</b>)\n\n"
+        "Напишіть текст відповіді в чат — бот надішле її студенту та позначить звернення вирішеним 👇",
+        reply_markup=make_reply_keyboard([["🔙 Скасувати"]]),
+    )
+
+
+@router.message(NameForm.admin_replying_bug, F.text)
+async def admin_send_bug_reply(message: Message, state: FSMContext, conn):
+    from contextlib import suppress
+    from handlers.common import get_admin_reply_menu
+    from services import bugs
+
+    if message.text in {"🔙 Скасувати", "↩️ Скасувати", "🔙 Назад"}:
+        await state.clear()
+        await message.answer("Скасовано.", reply_markup=get_admin_reply_menu())
+        return
+
+    data = await state.get_data()
+    report_id = data.get("reply_bug_id")
+    report = bugs.get_bug_report(conn, report_id) if report_id else None
+    if not report:
+        await state.clear()
+        await message.answer("Баг-репорт не знайдено.", reply_markup=get_admin_reply_menu())
+        return
+
+    reply_text = message.text.strip()
+    bugs.resolve_bug_report(conn, report_id, admin_reply=reply_text)
+    await state.clear()
+
+    delivered = False
+    with suppress(Exception):
+        await message.bot.send_message(
+            report["user_telegram_id"],
+            f"💬 <b>Відповідь адміністратора на ваш баг-репорт #{report_id}:</b>\n\n"
+            f"{reply_text}",
+        )
+        delivered = True
+
+    status_note = "доставлено студенту" if delivered else "збережено (не вдалося доставити в ПП)"
+    await message.answer(
+        f"✅ <b>Відповідь на баг-репорт #{report_id} ({status_note})!</b>",
+        reply_markup=get_admin_reply_menu(),
     )
 
 
