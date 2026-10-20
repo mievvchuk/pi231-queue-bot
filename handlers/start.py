@@ -20,8 +20,7 @@ fallback_router = Router()  # підключається в bot.py останн�
 HELP_MENU = make_reply_keyboard([
     ["📝 Реєстрація", "📋 Запис у чергу"],
     ["⚙️ Дії в черзі", "➕ Створення черги"],
-    ["📅 Розклад та заміни", "🗳 Опитування"],
-    ["🔙 Назад"],
+    ["📅 Розклад та заміни", "🔙 Назад"],
 ])
 
 HELP_SECTIONS = {
@@ -129,7 +128,7 @@ async def register(message: Message, state: FSMContext, conn):
     )
 
 
-@router.message(F.text.in_({"🏠 Головне меню", "Головне меню"}), StateFilter("*"))
+@router.message(F.text.in_({"🏠 Головне меню", "🏠 Головне меню (Як студент)", "Головне меню"}), StateFilter("*"))
 async def reply_main_menu(message: Message, state: FSMContext, conn):
     await state.clear()
     if not users.get_user(conn, message.from_user.id):

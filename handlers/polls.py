@@ -95,71 +95,19 @@ async def cmd_link_group(message: Message, conn):
     )
 
 
-# ---------- Студентський розділ «🗳 Опитування» ----------
+# ---------- Розділ «🗳 Опитування» (для адміністраторів) ----------
 
-@router.message(F.text.in_({"🗳 Опитування", "📊 Опитування"}), StateFilter("*"))
+@router.message(F.text.in_({"🗳 Опитування", "🗳 Опитування групи", "📊 Опитування"}), StateFilter("*"))
 async def handle_polls_button(message: Message, state: FSMContext, conn):
-    """Якщо користувач у стані адмін-панелі — відкриває адмінське меню опитувань,
-    інакше — студентський перегляд активних та завершених опитувань."""
-    current_state = await state.get_state()
-    if current_state and current_state.startswith("Admin") and admins.is_admin(conn, message.from_user.id):
-        await open_admin_polls_hub(message, state, conn)
-        return
-
-    await state.clear()
-    active_list = polls.list_polls(conn, status="active", limit=5)
-    closed_list = polls.list_polls(conn, status="closed", limit=5)
-
-    if not active_list and not closed_list:
-        kb = get_reply_menu(conn, message.from_user.id)
+    """Відкриває адмінський розділ керування опитуваннями.
+    Для студентів опитування надходять автоматично у приватні повідомлення або груповий чат."""
+    if not admins.is_admin(conn, message.from_user.id):
         await message.answer(
-            "🗳 <b>Опитування групи ПІ-231</b>\n\n"
-            "Наразі активних або завершених опитувань немає.",
-            reply_markup=kb,
+            "ℹ️ Нові опитування надходять автоматично в цей чат або в групу ПІ-231.",
+            reply_markup=get_reply_menu(conn, message.from_user.id),
         )
         return
-
-    lines = ["🗳 <b>Опитування групи ПІ-231</b>\n"]
-    inline_rows = []
-
-    if active_list:
-        lines.append(f"🟢 <b>Активні голосування ({len(active_list)}):</b>")
-        for p in active_list:
-            res = polls.get_poll_results(conn, p["id"])
-            lines.append(
-                f"• <b>#{p['id']} {html.escape(p['question'])}</b> "
-                f"(проголосувало: <b>{res['total_voters']}</b>)"
-            )
-            inline_rows.append([
-                InlineKeyboardButton(
-                    text=f"📊 Результати #{p['id']}",
-                    callback_data=f"st_poll_res:{p['id']}",
-                ),
-                InlineKeyboardButton(
-                    text=f"🗳 Бюлетень #{p['id']}",
-                    callback_data=f"st_poll_get:{p['id']}",
-                ),
-            ])
-        lines.append("")
-
-    if closed_list:
-        lines.append("🏁 <b>Нещодавно завершені:</b>")
-        for p in closed_list[:3]:
-            res = polls.get_poll_results(conn, p["id"])
-            lines.append(
-                f"• #{p['id']} {html.escape(p['question'])} "
-                f"(голосів: <b>{res['total_voters']}</b>)"
-            )
-            inline_rows.append([
-                InlineKeyboardButton(
-                    text=f"🏁 Підсумки #{p['id']}: {p['question'][:25]}...",
-                    callback_data=f"st_poll_res:{p['id']}",
-                )
-            ])
-
-    lines.append("\nОберіть опитування на кнопках нижче для перегляду деталей 👇")
-    markup = InlineKeyboardMarkup(inline_keyboard=inline_rows) if inline_rows else None
-    await message.answer("\n".join(lines), reply_markup=markup)
+    await open_admin_polls_hub(message, state, conn)
 
 
 @router.callback_query(F.data.startswith("st_poll_res:"))

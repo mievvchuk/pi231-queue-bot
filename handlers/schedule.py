@@ -124,10 +124,14 @@ async def show_base_schedule(message: Message):
 async def show_replacements(message: Message, conn):
     items = replacements.get_replacements(conn, group_name=config.STUDENT_GROUP)
     if not items:
+        admin_hint = (
+            "\n<i>(Щоб додати заміну, надішліть фотографію таблиці замін у чат)</i>"
+            if admins.is_admin(conn, message.from_user.id)
+            else ""
+        )
         await message.answer(
             f"🔄 <b>Активні заміни для групи {html.escape(config.STUDENT_GROUP)}:</b>\n\n"
-            "Наразі немає збережених замін пар.\n"
-            "<i>(Щоб додати заміну, надішліть фотографію таблиці замін)</i>"
+            f"Наразі немає збережених замін пар.{admin_hint}"
         )
         return
 

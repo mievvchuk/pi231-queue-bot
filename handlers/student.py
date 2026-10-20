@@ -82,7 +82,7 @@ async def open_queue_screen(message: Message, conn, subjects, session_id: int, n
     text = format_queue(subjects, session, entries, message.from_user.id, show_id=is_adm)
     if note:
         text = f"{note}\n\n{text}"
-    markup = get_queue_view_reply_menu()
+    markup = get_queue_view_reply_menu(is_admin=is_adm)
     await message.answer(text, reply_markup=markup)
 
 
@@ -106,7 +106,9 @@ async def student_queue_button_filter(message: Message, state: FSMContext) -> bo
         "📋 Мої черги",
         "📋 Стати в чергу",
         "📋 Список адміністраторів",
+        "📋 Список користувачів",
         "📋 Черги",
+        "📋 Черги та студенти",
     }:
         return False
     return await not_admin_state_filter(message, state)
@@ -984,7 +986,7 @@ async def swap_request_from_notification(callback: CallbackQuery, conn, subjects
 
 # ---------- Створення черги ----------
 
-@router.message(F.text.in_({"➕ Відкрити чергу", "➕ Створити чергу"}), not_admin_state_filter)
+@router.message(F.text.in_({"➕ Відкрити чергу", "➕ Створити чергу"}), StateFilter("*"))
 async def start_open_queue(message: Message, state: FSMContext, conn, subjects):
     await state.clear()
     await state.set_state(StudentFlow.creating_queue_type)

@@ -40,34 +40,35 @@ def make_reply_keyboard(rows: list[list[str]]) -> ReplyKeyboardMarkup:
 
 
 def get_reply_menu(conn, telegram_id: int) -> ReplyKeyboardMarkup:
-    """Головне меню студента (згруповане за розділами)."""
+    """Головне меню студента (без адмінських функцій; для адміна — кнопка переходу в Адмін-панель)."""
     bottom_row = [KeyboardButton(text="❓ Допомога")]
     if admins.is_admin(conn, telegram_id):
         bottom_row.append(KeyboardButton(text="⚡ Адмін-панель"))
     keyboard = [
         [KeyboardButton(text="📋 Усі черги"), KeyboardButton(text="👥 Мої черги")],
-        [KeyboardButton(text="➕ Відкрити чергу"), KeyboardButton(text="🗳 Опитування")],
-        [KeyboardButton(text="📅 Розклад"), KeyboardButton(text="🔄 Заміни")],
+        [KeyboardButton(text="➕ Відкрити чергу"), KeyboardButton(text="📅 Розклад")],
         bottom_row,
     ]
     return ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True)
 
 
 def get_schedule_reply_menu() -> ReplyKeyboardMarkup:
-    """Меню розділу «Розклад»."""
+    """Меню розділу «Розклад» для студентів."""
     return make_reply_keyboard([
         ["📅 Сьогодні", "➡️ Завтра"],
-        ["🗓 Весь тиждень", "🔄 Активні заміни"],
-        ["🏠 Головне меню"],
+        ["🗓 Весь тиждень", "🏠 Головне меню"],
     ])
 
 
-def get_queue_view_reply_menu() -> ReplyKeyboardMarkup:
-    """Основні кнопки екрану перегляду черги: рівно 4 кнопки."""
-    return make_reply_keyboard([
+def get_queue_view_reply_menu(is_admin: bool = False) -> ReplyKeyboardMarkup:
+    """Основні кнопки екрану перегляду черги (для старости/адміна додається швидкий перехід до керування чергою)."""
+    rows = [
         ["📍 Моє місце", "⚙️ Дії"],
         ["🔄 Оновити", "🔙 До черг"],
-    ])
+    ]
+    if is_admin:
+        rows.append(["⚡ Керувати чергою (Адмін)"])
+    return make_reply_keyboard(rows)
 
 
 def get_queue_actions_reply_menu(
@@ -109,12 +110,12 @@ def get_queue_actions_reply_menu(
 
 
 def get_admin_reply_menu() -> ReplyKeyboardMarkup:
-    """Головне меню адмін-панелі: структуровані категорії."""
+    """Головне меню адмін-панелі: зрозумілі категорії без дублювання."""
     return make_reply_keyboard([
-        ["📋 Черги", "🎓 Студенти в чергах"],
+        ["📋 Черги та студенти", "📅 Розклад і заміни"],
         ["🗳 Опитування", "📊 Звіти та статистика"],
-        ["📅 Розклад і заміни", "👥 База користувачів"],
-        ["⚙️ Налаштування", "🏠 Головне меню"],
+        ["👥 Список групи", "⚙️ Налаштування"],
+        ["🏠 Головне меню (Як студент)"],
     ])
 
 
@@ -139,18 +140,20 @@ def get_admin_reports_menu() -> ReplyKeyboardMarkup:
 def get_admin_schedule_menu() -> ReplyKeyboardMarkup:
     """Вкладене меню адміна: Розклад і заміни."""
     return make_reply_keyboard([
-        ["📥 Отримати schedule.json", "📤 Завантажити розклад"],
+        ["📸 Додати заміни (фото)", "🔄 Активні заміни"],
         ["🏢 Робоча субота", "📦 Архів замін"],
+        ["📥 Отримати schedule.json", "📤 Завантажити розклад"],
         ["🗑 Очистити всі заміни", "🟢 Статус системи"],
         ["🔙 В адмін-панель"],
     ])
 
 
 def get_admin_users_menu() -> ReplyKeyboardMarkup:
-    """Вкладене меню адміна: Користувачі."""
+    """Вкладене меню адміна: Список групи (база студентів)."""
     return make_reply_keyboard([
         ["📋 Список користувачів", "➕ Додати користувача"],
-        ["🔍 Знайти користувача", "🔙 В адмін-панель"],
+        ["🔍 Знайти користувача", "⛔ Заблоковані"],
+        ["🔙 В адмін-панель"],
     ])
 
 
@@ -164,30 +167,27 @@ def get_user_card_menu(is_blocked: bool) -> ReplyKeyboardMarkup:
 
 
 def get_admin_queues_menu() -> ReplyKeyboardMarkup:
-    """Вкладене меню адміна: Черги."""
+    """Вкладене меню адміна: Черги та студенти в чергах (об'єднане меню без плутанини)."""
     return make_reply_keyboard([
         ["👀 Активні черги", "➕ Створити чергу"],
+        ["📝 Додати студента", "🔢 Змінити порядок"],
         ["🔒 Відкрити/закрити", "📦 Історія"],
-        ["🔙 Назад"],
+        ["🔙 В адмін-панель"],
     ])
 
 
 def get_admin_students_menu() -> ReplyKeyboardMarkup:
-    """Вкладене меню адміна: Студенти."""
-    return make_reply_keyboard([
-        ["📝 Додати студента", "🔢 Змінити порядок"],
-        ["✅ Позначити здачу", "⛔ Заблоковані"],
-        ["🔙 Назад"],
-    ])
+    """Зворотна сумісність: повертає єдине меню керування чергами та студентами."""
+    return get_admin_queues_menu()
 
 
 def get_admin_settings_menu(is_maintenance: bool = False) -> ReplyKeyboardMarkup:
     """Вкладене меню адміна: Налаштування."""
     maint_btn = "🟢 Вимкнути техроботи" if is_maintenance else "🛠 Увімкнути техроботи"
     return make_reply_keyboard([
+        ["📢 Оголошення для всіх", maint_btn],
         ["👥 Адміністратори", "⛔ Заблоковані"],
-        [maint_btn, "📢 Оголошення для всіх"],
-        ["🔙 Назад"],
+        ["🔙 В адмін-панель"],
     ])
 
 

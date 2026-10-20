@@ -140,7 +140,8 @@ def get_admin_queue_menu(is_open: bool) -> ReplyKeyboardMarkup:
     rows = [
         ["➕ Додати студентів", "🔢 Керувати студентами"],
         [lock_text, "📦 Завершити чергу"],
-        ["🔄 Оновити", "🔙 Назад"],
+        ["👤 Як студент (Моє місце)", "🔄 Оновити"],
+        ["🔙 Назад", "🔙 В адмін-панель"],
     ]
     return make_reply_keyboard(rows)
 
@@ -211,47 +212,95 @@ async def open_admin_student_manager(message: Message, conn, subjects, entry_id:
 
 # ---------- Головна адмін-панель та категорії ----------
 
+@router.message(F.text == "⚡ Керувати чергою (Адмін)", StateFilter("*"))
+async def admin_quick_manage_from_student_view(message: Message, state: FSMContext, conn, subjects):
+    data = await state.get_data()
+    session_id = data.get("session_id")
+    if not session_id:
+        await admin_panel_open(message, state, conn=conn)
+        return
+    await state.clear()
+    await state.update_data(session_id=session_id)
+    await open_admin_queue_manager(
+        message,
+        conn,
+        subjects,
+        session_id,
+        note="⚡ <b>Режим старости/адміна:</b> тут можна додати студентів за списком, змінити порядок або завершити чергу.",
+    )
+
+
+@router.message(F.text == "👤 Як студент (Моє місце)", StateFilter("*"))
+async def admin_switch_to_student_queue_view(message: Message, state: FSMContext, conn, subjects):
+    from handlers.student import open_queue_screen
+    data = await state.get_data()
+    session_id = data.get("session_id")
+    if not session_id:
+        await admin_panel_open(message, state, conn=conn)
+        return
+    await state.clear()
+    await state.update_data(session_id=session_id)
+    await open_queue_screen(
+        message,
+        conn,
+        subjects,
+        session_id,
+        note="👤 <b>Режим студента:</b> тут ви можете самі записатися в чергу, відмітити «Здав» або обмінятися місцем.",
+    )
+
+
 @router.message(F.text.in_({"⚡ Адмін-панель", "🔙 В адмін-панель"}), StateFilter("*"))
 async def admin_panel_open(message: Message, state: FSMContext, conn=None):
     await state.clear()
     await state.set_state(AdminPanelState.in_main_menu)
-    info_lines = ["⚡ <b>Адмін-панель групи ПІ-231</b>"]
+    info_lines = ["⚡ <b>Адмін-панель старости (ПІ-231)</b>"]
     if conn is not None:
         try:
             from services import polls
             from services.maintenance import is_maintenance_active
             act_q = len(queues.list_sessions(conn, ("open", "closed")))
             act_p = len(polls.list_polls(conn, status="active", limit=50))
-            maint_str = "🛠 Увімкнено" if is_maintenance_active(conn) else "🟢 Штатний режим"
-            info_lines.append("")
-            info_lines.append(f"• 📋 Активних черг: <b>{act_q}</b>")
-            info_lines.append(f"• 🗳 Активних опитувань: <b>{act_p}</b>")
-            info_lines.append(f"• ⚙️ Статус системи: <b>{maint_str}</b>")
+            maint_str = "🛠 Техроботи" if is_maintenance_active(conn) else "🟢 Працює"
+            info_lines.append(
+                f"<i>Черг: <b>{act_q}</b> • Опитувань: <b>{act_p}</b> • Статус: <b>{maint_str}</b></i>"
+            )
         except Exception:
             pass
-    info_lines.append("\nОберіть категорію керування на кнопках нижче 👇")
+    info_lines.extend([
+        "",
+        "🧭 <b>Швидка навігація по розділах:</b>",
+        "• <b>📋 Черги та студенти</b> — додати студентів у чергу, змінити порядок, позначити здачу, закрити/архівувати чергу.",
+        "• <b>📅 Розклад і заміни</b> — додати заміни за фото, робоча субота, оновити розклад.",
+        "• <b>🗳 Опитування</b> — створити голосування для групи (з таймером або без).",
+        "• <b>📊 Звіти та статистика</b> — загальна успішність та вивантаження таблиць Excel/CSV.",
+        "• <b>👥 Список групи</b> — база ПІБ студентів групи та блокування.",
+        "• <b>⚙️ Налаштування</b> — оголошення на всю групу, техроботи, список адмінів.",
+        "",
+        "💡 <i>Щоб самому записатися в чергу або здати лабу як студент — натисніть <b>«🏠 Головне меню (Як студент)»</b> внизу!</i>",
+    ])
     await message.answer(
         "\n".join(info_lines),
         reply_markup=get_admin_reply_menu(),
     )
 
 
-@router.message(F.text == "📋 Черги", StateFilter("*"))
+@router.message(F.text.in_({"📋 Черги та студенти", "📋 Черги", "🎓 Студенти в чергах", "👥 Студенти"}), StateFilter("*"))
 async def admin_category_queues(message: Message, state: FSMContext):
     await state.set_state(AdminPanelState.in_queues_menu)
     await message.answer(
-        "📋 <b>Керування чергами</b>\n\nОберіть дію нижче 👇",
+        "📋 <b>Керування чергами та студентами в чергах</b>\n\n"
+        "• <b>👀 Активні черги</b> — відкрити будь-яку чергу (всередині можна додати студентів, змінити порядок, закрити чи завершити її)\n"
+        "• <b>➕ Створити чергу</b> — відкрити нову чергу на пару або консультацію\n"
+        "• <b>📝 Додати студента</b> — швидко вписати студента (або список) у чергу\n"
+        "• <b>🔢 Змінити порядок</b> — посунути студента вище/нижче, задати номер або позначити «Здав»\n"
+        "• <b>🔒 Відкрити/закрити</b> — тимчасово зупинити або відновити запис\n"
+        "• <b>📦 Історія</b> — переглянути завершені черги",
         reply_markup=get_admin_queues_menu(),
     )
 
 
-@router.message(F.text.in_({"🎓 Студенти в чергах", "👥 Студенти"}), StateFilter("*"))
 async def admin_category_students(message: Message, state: FSMContext):
-    await state.set_state(AdminPanelState.in_students_menu)
-    await message.answer(
-        "🎓 <b>Керування студентами в чергах</b>\n\nОберіть дію нижче 👇",
-        reply_markup=get_admin_students_menu(),
-    )
+    await admin_category_queues(message, state)
 
 
 @router.message(F.text == "📅 Розклад і заміни", StateFilter("*"))
@@ -260,13 +309,24 @@ async def admin_category_schedule(message: Message, state: FSMContext):
     await state.set_state(AdminPanelState.in_schedule_menu)
     await message.answer(
         "📅 <b>Керування розкладом та замінами</b>\n\n"
-        "• <b>Отримати schedule.json</b> — завантажити поточний JSON-файл базового розкладу\n"
-        "• <b>Завантажити розклад</b> — інструкція щодо оновлення розкладу через JSON\n"
-        "• <b>Робоча субота</b> — призначення робочої суботи з розкладом іншого дня\n"
-        "• <b>Архів замін</b> — перегляд історії попередніх замін\n"
-        "• <b>Очистити всі заміни</b> — видалити активні заміни пар для групи\n"
-        "• <b>Статус системи</b> — стан бота, бази даних та розпізнавання\n\n"
-        "💡 <i>Ви також можете надіслати в чат фотографію таблиці замін або новий файл <code>schedule.json</code> як документ у будь-який момент! Попередні заміни архівуються автоматично.</i>",
+        "• <b>📸 Додати заміни (фото)</b> — надіслати скріншот/фото таблиці замін для автоматичного розпізнавання та розсилки групі\n"
+        "• <b>🔄 Активні заміни</b> — переглянути поточні збережені заміни\n"
+        "• <b>🏢 Робоча субота</b> — призначити суботу навчальним днем за розкладом іншого дня\n"
+        "• <b>📦 Архів замін</b> — переглянути історію попередніх замін\n"
+        "• <b>📥 Отримати / 📤 Завантажити розклад</b> — редагування базового файлу <code>schedule.json</code>\n"
+        "• <b>🗑 Очистити всі заміни</b> — видалити поточні заміни пар",
+        reply_markup=get_admin_schedule_menu(),
+    )
+
+
+@router.message(F.text == "📸 Додати заміни (фото)", StateFilter("*"))
+async def admin_add_replacement_photo_hint(message: Message):
+    await message.answer(
+        "📸 <b>Додавання замін за фотографією</b>\n\n"
+        "Просто <b>надішліть фото або скріншот таблиці замін</b> прямо сюди в чат!\n\n"
+        "1️⃣ Бот автоматично знайде пари групи <b>ПІ-231</b>.\n"
+        "2️⃣ Покаже вам попередній перегляд із кнопкою <b>«✏️ Внести корективи»</b> (якщо потрібно підправити пару, аудиторію чи дату).\n"
+        "3️⃣ Після натискання <b>«✅ Підтвердити заміни»</b> бот збереже їх і автоматично розішле сповіщення всій групі!",
         reply_markup=get_admin_schedule_menu(),
     )
 
@@ -629,12 +689,14 @@ async def admin_broadcast_working_saturday_send(callback: CallbackQuery, conn):
 
 
 
-@router.message(F.text.in_({"👥 База користувачів", "👥 Користувачі"}), StateFilter("*"))
+@router.message(F.text.in_({"👥 Список групи", "👥 База користувачів", "👥 Користувачі"}), StateFilter("*"))
 async def admin_category_users(message: Message, state: FSMContext):
     await state.clear()
     await state.set_state(AdminUserState.in_users_menu)
     await message.answer(
-        "👥 <b>База користувачів</b>\n\nОберіть дію нижче 👇",
+        "👥 <b>Список групи (база користувачів)</b>\n\n"
+        "Тут зберігаються профілі всіх студентів групи ПІ-231.\n"
+        "Оберіть дію нижче 👇",
         reply_markup=get_admin_users_menu(),
     )
 

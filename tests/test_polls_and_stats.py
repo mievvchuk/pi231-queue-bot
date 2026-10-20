@@ -164,19 +164,24 @@ def test_global_statistics_and_full_csv(conn, make_user):
 def test_new_grouped_keyboards(conn):
     student_kb = get_reply_menu(conn, 999)
     student_texts = [btn.text for row in student_kb.keyboard for btn in row]
-    assert "🗳 Опитування" in student_texts
     assert "📋 Усі черги" in student_texts
+    assert "👥 Мої черги" in student_texts
+    assert "➕ Відкрити чергу" in student_texts
+    assert "📅 Розклад" in student_texts
     assert "❓ Допомога" in student_texts
+    # Адмінські функції (опитування, заміни) не повинні бути в меню студента:
+    assert "🗳 Опитування" not in student_texts
+    assert "🔄 Заміни" not in student_texts
 
     admin_kb = get_admin_reply_menu()
     admin_texts = [btn.text for row in admin_kb.keyboard for btn in row]
-    assert "📋 Черги" in admin_texts
-    assert "🎓 Студенти в чергах" in admin_texts
+    assert "📋 Черги та студенти" in admin_texts
     assert "🗳 Опитування" in admin_texts
     assert "📊 Звіти та статистика" in admin_texts
     assert "📅 Розклад і заміни" in admin_texts
-    assert "👥 База користувачів" in admin_texts
+    assert "👥 Список групи" in admin_texts
     assert "⚙️ Налаштування" in admin_texts
+    assert "🏠 Головне меню (Як студент)" in admin_texts
 
     polls_kb = get_admin_polls_menu()
     polls_texts = [btn.text for row in polls_kb.keyboard for btn in row]
