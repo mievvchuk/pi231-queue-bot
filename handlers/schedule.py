@@ -47,12 +47,20 @@ _private_only = F.chat.type == "private"
 async def open_schedule_menu(message: Message, state: FSMContext, conn):
     await state.clear()
     sch_data = get_schedule_data()
-    today_dt = schedule.get_current_date()
-    today_text = schedule.format_schedule_for_date(conn, sch_data, today_dt, config.STUDENT_GROUP)
+    now = datetime.datetime.now(ZoneInfo(config.TIMEZONE))
+
+    if now.hour >= 15:
+        target_dt = schedule.get_tomorrow_date()
+        date_heading = f"на завтра ({target_dt.strftime('%d.%m.%Y')})"
+    else:
+        target_dt = schedule.get_current_date()
+        date_heading = f"на сьогодні ({target_dt.strftime('%d.%m.%Y')})"
+
+    schedule_text = schedule.format_schedule_for_date(conn, sch_data, target_dt, config.STUDENT_GROUP)
 
     await message.answer(
-        f"📅 <b>Розклад занять групи {html.escape(config.STUDENT_GROUP)}</b>\n\n"
-        f"{today_text}\n\n"
+        f"📅 <b>Розклад занять {date_heading}:</b>\n\n"
+        f"{schedule_text}\n\n"
         "Оберіть потрібний період або дію в меню нижче 👇",
         reply_markup=get_schedule_reply_menu(),
     )

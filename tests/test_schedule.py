@@ -396,4 +396,37 @@ def test_updated_help_sections():
     assert "Миттєві сповіщення" in HELP_SECTIONS["📅 Розклад та заміни"]
 
 
+@pytest.mark.asyncio
+async def test_open_schedule_menu_time_of_day_switch(conn):
+    from unittest.mock import AsyncMock, MagicMock, patch
+    from aiogram.fsm.context import FSMContext
+    from aiogram.fsm.storage.memory import MemoryStorage
+    from aiogram.fsm.storage.base import StorageKey
+    from handlers.schedule import open_schedule_menu
+
+    storage = MemoryStorage()
+    state = FSMContext(storage=storage, key=StorageKey(bot_id=1, chat_id=10, user_id=10))
+
+    message = MagicMock()
+    message.from_user.id = 10
+    message.answer = AsyncMock()
+
+    # 1. До 15:00 показує "на сьогодні"
+    morning_dt = datetime.datetime(2026, 10, 21, 10, 30, tzinfo=datetime.timezone.utc)
+    with patch("datetime.datetime") as mock_dt:
+        mock_dt.now.return_value = morning_dt
+        await open_schedule_menu(message, state, conn)
+        text = message.answer.call_args[0][0]
+        assert "на сьогодні" in text
+
+    # 2. Після 15:00 показує "на завтра"
+    evening_dt = datetime.datetime(2026, 10, 21, 15, 30, tzinfo=datetime.timezone.utc)
+    with patch("datetime.datetime") as mock_dt:
+        mock_dt.now.return_value = evening_dt
+        await open_schedule_menu(message, state, conn)
+        text = message.answer.call_args[0][0]
+        assert "на завтра" in text
+
+
+
 
