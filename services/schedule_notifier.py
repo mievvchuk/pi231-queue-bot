@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from aiogram import Bot
@@ -35,7 +35,7 @@ def mark_sent_today(conn, today_key: str) -> None:
 
 
 async def start_schedule_notifier(bot: Bot, conn, interval_sec: int = 60) -> None:
-    """Фонова задача для щоденної ранкової розсилки актуального розкладу."""
+    """Фонова задача для щоденної розсилки о 17:00 актуального розкладу на наступний день."""
     log.info(f"Schedule daily notifier started (target time: {config.NOTIFICATION_TIME} {config.TIMEZONE})")
     target_hour, target_minute = map(int, config.NOTIFICATION_TIME.split(":"))
 
@@ -47,16 +47,16 @@ async def start_schedule_notifier(bot: Bot, conn, interval_sec: int = 60) -> Non
             # Перевіряємо, чи настав час розсилки і чи не надсилали сьогодні
             if now.hour == target_hour and now.minute >= target_minute and not has_sent_today(conn, today_key):
                 sch_data = schedule.load_schedule_data(config.SCHEDULE_PATH)
-                today_dt = now.date()
-                lessons, reps = schedule.get_actual_schedule(conn, sch_data, today_dt, config.STUDENT_GROUP)
+                tomorrow_dt = now.date() + timedelta(days=1)
+                lessons, reps = schedule.get_actual_schedule(conn, sch_data, tomorrow_dt, config.STUDENT_GROUP)
 
                 if lessons:
                     text = (
-                        f"🌅 <b>Доброго ранку! Розклад на сьогодні:</b>\n\n"
-                        f"{schedule.format_schedule_for_date(conn, sch_data, today_dt, config.STUDENT_GROUP)}"
+                        f"🌆 <b>Розклад занять на завтра:</b>\n\n"
+                        f"{schedule.format_schedule_for_date(conn, sch_data, tomorrow_dt, config.STUDENT_GROUP)}"
                     )
                     uids = updates.get_active_user_ids(conn)
-                    log.info(f"Надсилаю ранковий розклад для {len(uids)} користувачів...")
+                    log.info(f"Надсилаю вечірній розклад на завтра для {len(uids)} користувачів...")
                     await updates.broadcast_message_to_users(bot, uids, text)
 
                 mark_sent_today(conn, today_key)

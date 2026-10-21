@@ -392,7 +392,7 @@ def test_format_replacements_broadcast():
 def test_updated_help_sections():
     from handlers.start import HELP_SECTIONS
     assert "Хочу вище / ⬇️ Хочу нижче" in HELP_SECTIONS["⚙️ Дії в черзі"]
-    assert "Ранковий розклад" in HELP_SECTIONS["📅 Розклад та заміни"]
+    assert "17:00" in HELP_SECTIONS["📅 Розклад та заміни"]
     assert "Миттєві сповіщення" in HELP_SECTIONS["📅 Розклад та заміни"]
 
 
