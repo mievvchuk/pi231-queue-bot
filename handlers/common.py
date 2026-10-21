@@ -177,8 +177,20 @@ def get_admin_queues_menu() -> ReplyKeyboardMarkup:
         ["👀 Активні черги", "➕ Створити чергу"],
         ["📝 Додати студента", "🔢 Змінити порядок"],
         ["🔒 Відкрити/закрити", "📦 Історія"],
-        ["🔙 В адмін-панель"],
+        ["📚 Предмети та викладачі", "🔙 В адмін-панель"],
     ])
+
+
+def get_admin_subjects_menu(is_owner: bool = False) -> ReplyKeyboardMarkup:
+    """Меню керування предметами та викладачами."""
+    rows = [
+        ["👨‍🏫 Додати викладача", "➕ Додати предмет"],
+    ]
+    if is_owner:
+        rows.append(["✏️ Перейменувати предмет", "🗑 Відкріпити викладача"])
+        rows.append(["🗑 Видалити предмет"])
+    rows.append(["🔙 Назад до черг"])
+    return make_reply_keyboard(rows)
 
 
 def get_admin_students_menu() -> ReplyKeyboardMarkup:

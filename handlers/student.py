@@ -7,7 +7,10 @@ from aiogram import F, Router
 from aiogram.filters import StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
+
+import config
+import subjects as subjects_module
 
 from handlers.common import (
     categorize_sessions,
@@ -54,6 +57,11 @@ class StudentFlow(StatesGroup):
     creating_queue_type = State()
     creating_queue_subject = State()
     creating_queue_teacher = State()
+    suggesting_choice = State()
+    suggesting_subject_for_teacher = State()
+    suggesting_teacher_name = State()
+    suggesting_new_subject_name = State()
+    suggesting_new_subject_teacher = State()
 
 
 def get_session_or_fail(conn, session_id: int):
@@ -1006,6 +1014,7 @@ async def queue_type_selected(message: Message, state: FSMContext, subjects):
     type_name = "консультації" if q_type == "consultation" else "пари"
     available_subjects = [s for s in subjects if "курсов" not in s["name"].lower()] if q_type == "lesson" else subjects
     rows = [[f"➕ {s['name']}"] for s in available_subjects]
+    rows.append(["💡 Додати предмет / викладача"])
     rows.append(["🔙 Назад", "🏠 Головне меню"])
     await message.answer(
         f"Оберіть предмет для {type_name} на кнопках внизу 👇",
@@ -1016,6 +1025,295 @@ async def queue_type_selected(message: Message, state: FSMContext, subjects):
 @router.message(StudentFlow.creating_queue_subject, F.text == "🔙 Назад")
 async def back_to_queue_type(message: Message, state: FSMContext, conn, subjects):
     await start_open_queue(message, state, conn, subjects)
+
+
+@router.message(StudentFlow.creating_queue_subject, F.text == "💡 Додати предмет / викладача")
+@router.message(StudentFlow.creating_queue_teacher, F.text == "💡 Додати предмет / викладача")
+async def prompt_student_subject_proposal(message: Message, state: FSMContext):
+    await state.set_state(StudentFlow.suggesting_choice)
+    keyboard = make_reply_keyboard([
+        ["👨‍🏫 Додати викладача до предмету"],
+        ["📚 Запропонувати новий предмет"],
+        ["🔙 Скасувати"],
+    ])
+    await message.answer(
+        "💡 <b>Запропонувати викладача або предмет</b>\n\n"
+        "Оберіть, що саме ви хочете додати. Ваша заявка буде перевірена власником бота, "
+        "після чого предмет/викладач з'явиться в меню для всієї групи 👇",
+        reply_markup=keyboard,
+    )
+
+
+@router.message(StudentFlow.suggesting_choice, F.text == "👨‍🏫 Додати викладача до предмету")
+async def student_suggest_teacher_pick_subject(message: Message, state: FSMContext, subjects):
+    await state.set_state(StudentFlow.suggesting_subject_for_teacher)
+    rows = [[f"📚 {s['name']}"] for s in subjects]
+    rows.append(["🔙 Скасувати"])
+    await message.answer(
+        "Оберіть предмет, до якого потрібно додати викладача 👇",
+        reply_markup=make_reply_keyboard(rows),
+    )
+
+
+@router.message(StudentFlow.suggesting_subject_for_teacher, F.text.startswith("📚 "))
+async def student_suggest_teacher_subject_selected(message: Message, state: FSMContext, subjects):
+    sub_name = message.text.removeprefix("📚 ").strip()
+    matched_sub = next((s for s in subjects if s["name"].lower() == sub_name.lower()), None)
+    if not matched_sub:
+        await message.answer("Оберіть предмет на кнопках внизу:")
+        return
+
+    await state.set_state(StudentFlow.suggesting_teacher_name)
+    await state.update_data(suggest_sub_id=matched_sub["id"], suggest_sub_name=matched_sub["name"])
+
+    # Показуємо кнопки вже відомих викладачів групи для швидкого вибору в 1 клік
+    all_teachers = subjects_module.list_all_teachers(subjects)
+    curr_ids = {t["id"] for t in matched_sub.get("teachers", [])}
+    other_teachers = [t["name"] for t in all_teachers if t["id"] not in curr_ids]
+
+    rows = []
+    for i in range(0, len(other_teachers), 2):
+        rows.append(other_teachers[i:i+2])
+    rows.append(["🔙 Скасувати"])
+
+    await message.answer(
+        f"👨‍🏫 <b>Додавання викладача до предмета «{matched_sub['name']}»</b>\n\n"
+        "Оберіть викладача на кнопках нижче або <b>напишіть ПІБ текстом</b> (наприклад: <code>Барабаш Д.С.</code>) 👇",
+        reply_markup=make_reply_keyboard(rows),
+    )
+
+
+@router.message(StudentFlow.suggesting_teacher_name, F.text)
+async def student_suggest_teacher_name_received(message: Message, state: FSMContext, conn, subjects):
+    if message.text in {"🔙 Скасувати", "↩️ Скасувати", "🔙 Назад"}:
+        await state.clear()
+        await message.answer("Скасовано. Головне меню 👇", reply_markup=get_reply_menu(conn, message.from_user.id))
+        return
+
+    teacher_name = message.text.strip()
+    if len(teacher_name) < 3 or len(teacher_name) > 60:
+        await message.answer("ПІБ викладача має бути від 3 до 60 символів (наприклад: Барабаш Д.С.). Спробуйте ще раз:")
+        return
+
+    data = await state.get_data()
+    sub_id = data.get("suggest_sub_id")
+    sub_name = data.get("suggest_sub_name", "Предмет")
+    user = users.get_user(conn, message.from_user.id)
+    user_name = user["full_name"] if user else (message.from_user.full_name or "Студент")
+
+    req = subjects_module.create_subject_request(
+        conn=conn,
+        user_telegram_id=message.from_user.id,
+        user_name=user_name,
+        req_type="add_teacher",
+        subject_id=sub_id,
+        subject_name=sub_name,
+        teacher_name=teacher_name,
+    )
+    await state.clear()
+
+    # Сповіщення власнику бота для підтвердження в 1 клік
+    owner_kb = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="✅ Додати в бот", callback_data=f"subreq_ok:{req['id']}"),
+                InlineKeyboardButton(text="❌ Відхилити", callback_data=f"subreq_no:{req['id']}"),
+            ]
+        ]
+    )
+    owner_id = getattr(config, "OWNER_ID", 5937915430)
+    uname_str = f" (@{html.escape(message.from_user.username)})" if message.from_user.username else ""
+    with suppress(Exception):
+        await message.bot.send_message(
+            chat_id=owner_id,
+            text=(
+                f"💡 <b>Заявка на викладача від студента {html.escape(user_name)}</b>{uname_str}\n\n"
+                f"📌 Дія: <b>Додати викладача до предмету</b>\n"
+                f"📚 Предмет: <b>{html.escape(sub_name)}</b>\n"
+                f"👨‍🏫 Викладач: <b>{html.escape(teacher_name)}</b>\n\n"
+                "Підтвердити додавання в бот?"
+            ),
+            reply_markup=owner_kb,
+        )
+
+    await message.answer(
+        f"✅ <b>Заявку успішно надіслано!</b>\n\n"
+        f"Викладача <b>{html.escape(teacher_name)}</b> запропоновано для предмета <b>{html.escape(sub_name)}</b>.\n"
+        "Власник бота отримав сповіщення. Щойно заявку буде підтверджено — викладач з'явиться в меню і вам надійде повідомлення.",
+        reply_markup=get_reply_menu(conn, message.from_user.id),
+    )
+
+
+@router.message(StudentFlow.suggesting_choice, F.text == "📚 Запропонувати новий предмет")
+async def student_suggest_new_subject_start(message: Message, state: FSMContext, conn):
+    await state.set_state(StudentFlow.suggesting_new_subject_name)
+    await message.answer(
+        "📚 <b>Новий предмет</b>\n\nВведіть повну назву предмета (наприклад: <code>Програмування мовою Rust</code>):",
+        reply_markup=make_reply_keyboard([["🔙 Скасувати"]]),
+    )
+
+
+@router.message(StudentFlow.suggesting_new_subject_name, F.text)
+async def student_suggest_new_subject_name_received(message: Message, state: FSMContext, conn, subjects):
+    if message.text in {"🔙 Скасувати", "↩️ Скасувати", "🔙 Назад"}:
+        await state.clear()
+        await message.answer("Скасовано. Головне меню 👇", reply_markup=get_reply_menu(conn, message.from_user.id))
+        return
+
+    sub_name = message.text.strip()
+    if len(sub_name) < 2 or len(sub_name) > 80:
+        await message.answer("Назва предмета має бути від 2 до 80 символів. Спробуйте ще раз:")
+        return
+
+    await state.set_state(StudentFlow.suggesting_new_subject_teacher)
+    await state.update_data(suggest_new_sub_name=sub_name)
+
+    all_teachers = subjects_module.list_all_teachers(subjects)
+    rows = []
+    for i in range(0, len(all_teachers), 2):
+        names = [t["name"] for t in all_teachers[i:i+2]]
+        rows.append(names)
+    rows.append(["🔙 Скасувати"])
+
+    await message.answer(
+        f"Тепер вкажіть викладача для предмета «<b>{html.escape(sub_name)}</b>».\n\n"
+        "Оберіть викладача на кнопках або <b>введіть ПІБ текстом</b> 👇",
+        reply_markup=make_reply_keyboard(rows),
+    )
+
+
+@router.message(StudentFlow.suggesting_new_subject_teacher, F.text)
+async def student_suggest_new_subject_teacher_received(message: Message, state: FSMContext, conn):
+    if message.text in {"🔙 Скасувати", "↩️ Скасувати", "🔙 Назад"}:
+        await state.clear()
+        await message.answer("Скасовано. Головне меню 👇", reply_markup=get_reply_menu(conn, message.from_user.id))
+        return
+
+    teacher_name = message.text.strip()
+    if len(teacher_name) < 3 or len(teacher_name) > 60:
+        await message.answer("ПІБ викладача має бути від 3 до 60 символів. Спробуйте ще раз:")
+        return
+
+    data = await state.get_data()
+    sub_name = data.get("suggest_new_sub_name", "Новий предмет")
+    user = users.get_user(conn, message.from_user.id)
+    user_name = user["full_name"] if user else (message.from_user.full_name or "Студент")
+
+    req = subjects_module.create_subject_request(
+        conn=conn,
+        user_telegram_id=message.from_user.id,
+        user_name=user_name,
+        req_type="add_subject",
+        subject_id=None,
+        subject_name=sub_name,
+        teacher_name=teacher_name,
+    )
+    await state.clear()
+
+    owner_kb = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="✅ Додати в бот", callback_data=f"subreq_ok:{req['id']}"),
+                InlineKeyboardButton(text="❌ Відхилити", callback_data=f"subreq_no:{req['id']}"),
+            ]
+        ]
+    )
+    owner_id = getattr(config, "OWNER_ID", 5937915430)
+    uname_str = f" (@{html.escape(message.from_user.username)})" if message.from_user.username else ""
+    with suppress(Exception):
+        await message.bot.send_message(
+            chat_id=owner_id,
+            text=(
+                f"💡 <b>Заявка на новий предмет від студента {html.escape(user_name)}</b>{uname_str}\n\n"
+                f"📌 Дія: <b>Додати новий предмет</b>\n"
+                f"📚 Назва: <b>{html.escape(sub_name)}</b>\n"
+                f"👨‍🏫 Викладач: <b>{html.escape(teacher_name)}</b>\n\n"
+                "Підтвердити додавання в бот?"
+            ),
+            reply_markup=owner_kb,
+        )
+
+    await message.answer(
+        f"✅ <b>Заявку успішно надіслано!</b>\n\n"
+        f"Предмет <b>«{html.escape(sub_name)}»</b> з викладачем <b>{html.escape(teacher_name)}</b> передано на модерацію власнику бота.\n"
+        "Щойно заявку буде підтверджено — вона з'явиться для всієї групи!",
+        reply_markup=get_reply_menu(conn, message.from_user.id),
+    )
+
+
+@router.message(StudentFlow.suggesting_choice, F.text.in_({"🔙 Скасувати", "↩️ Скасувати", "🔙 Назад"}))
+@router.message(StudentFlow.suggesting_subject_for_teacher, F.text.in_({"🔙 Скасувати", "↩️ Скасувати", "🔙 Назад"}))
+async def cancel_student_suggest(message: Message, state: FSMContext, conn):
+    await state.clear()
+    await message.answer("Скасовано. Головне меню 👇", reply_markup=get_reply_menu(conn, message.from_user.id))
+
+
+# ---------- Обробка заявок студентів власником бота ----------
+
+@router.callback_query(F.data.startswith("subreq_ok:"))
+async def owner_approve_subject_request(callback: CallbackQuery, conn, subjects):
+    if not admins.is_owner(conn, callback.from_user.id):
+        await callback.answer("Тільки для власника бота.", show_alert=True)
+        return
+
+    req_id = callback.data.split(":")[1]
+    req = subjects_module.get_subject_request(conn, req_id)
+    if not req or req.get("status") != "pending":
+        await callback.answer("Заявка вже оброблена або застаріла.", show_alert=True)
+        return
+
+    try:
+        if req["type"] == "add_teacher":
+            subjects_module.add_teacher_to_subject(
+                conn, subjects, req["subject_id"], req["teacher_name"], path=config.SUBJECTS_PATH
+            )
+            item_desc = f"викладача <b>{html.escape(req['teacher_name'])}</b> до предмета <b>{html.escape(req['subject_name'])}</b>"
+        else:
+            subjects_module.add_new_subject(
+                conn, subjects, req["subject_name"], req["teacher_name"], path=config.SUBJECTS_PATH
+            )
+            item_desc = f"предмет <b>«{html.escape(req['subject_name'])}»</b> ({html.escape(req['teacher_name'])})"
+    except Exception as e:
+        await callback.answer(f"Помилка: {e}", show_alert=True)
+        return
+
+    subjects_module.update_subject_request_status(conn, req_id, "approved")
+    await callback.answer("Схвалено та додано в бот!")
+    await callback.message.edit_text(f"✅ <b>Заявку #{req_id} схвалено!</b>\nУспішно додано {item_desc}.", reply_markup=None)
+
+    # Сповіщаємо студента
+    with suppress(Exception):
+        await callback.bot.send_message(
+            chat_id=req["user_telegram_id"],
+            text=(
+                f"🎉 <b>Вашу заявку схвалено!</b>\n\n"
+                f"Успішно додано {item_desc}.\n"
+                "Тепер ви можете створити чергу через «➕ Відкрити чергу»!"
+            ),
+        )
+
+
+@router.callback_query(F.data.startswith("subreq_no:"))
+async def owner_reject_subject_request(callback: CallbackQuery, conn):
+    if not admins.is_owner(conn, callback.from_user.id):
+        await callback.answer("Тільки для власника бота.", show_alert=True)
+        return
+
+    req_id = callback.data.split(":")[1]
+    req = subjects_module.get_subject_request(conn, req_id)
+    if not req or req.get("status") != "pending":
+        await callback.answer("Заявка вже оброблена або застаріла.", show_alert=True)
+        return
+
+    subjects_module.update_subject_request_status(conn, req_id, "rejected")
+    await callback.answer("Заявку відхилено.")
+    await callback.message.edit_text(f"❌ <b>Заявку #{req_id} відхилено.</b>", reply_markup=None)
+
+    with suppress(Exception):
+        await callback.bot.send_message(
+            chat_id=req["user_telegram_id"],
+            text=f"❌ Вашу заявку на додавання «{html.escape(req['subject_name'])}» було відхилено адміністратором.",
+        )
 
 
 @router.message(StudentFlow.creating_queue_subject, F.text.startswith("➕"))
@@ -1065,6 +1363,7 @@ async def new_queue_subject_selected(message: Message, state: FSMContext, conn, 
 
     await state.set_state(StudentFlow.creating_queue_teacher)
     rows = [[f"👨‍🏫 {matched_sub['name']} — {t['name']}"] for t in matched_sub["teachers"]]
+    rows.append(["💡 Додати предмет / викладача"])
     rows.append(["🔙 Назад", "🏠 Головне меню"])
     await message.answer(f"Оберіть викладача для предмета «{matched_sub['name']}» 👇", reply_markup=make_reply_keyboard(rows))
 
@@ -1077,6 +1376,7 @@ async def back_to_queue_subject(message: Message, state: FSMContext, subjects):
     await state.set_state(StudentFlow.creating_queue_subject)
     available_subjects = [s for s in subjects if "курсов" not in s["name"].lower()] if q_type == "lesson" else subjects
     rows = [[f"➕ {s['name']}"] for s in available_subjects]
+    rows.append(["💡 Додати предмет / викладача"])
     rows.append(["🔙 Назад", "🏠 Головне меню"])
     await message.answer(
         f"Оберіть предмет для {type_name} на кнопках внизу 👇",

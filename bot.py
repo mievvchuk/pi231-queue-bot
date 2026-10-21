@@ -58,7 +58,7 @@ async def main() -> None:
     from handlers import schedule as schedule_handler
 
     # conn і subjects доступні в обробниках як іменовані параметри
-    dp = Dispatcher(conn=conn, subjects=load_subjects(config.SUBJECTS_PATH))
+    dp = Dispatcher(conn=conn, subjects=load_subjects(config.SUBJECTS_PATH, conn=conn))
     dp.message.outer_middleware(Guard())
     dp.callback_query.outer_middleware(Guard())
     dp.include_routers(
