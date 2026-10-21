@@ -135,7 +135,7 @@ async def show_replacements(message: Message, conn):
         )
         await message.answer(
             f"🔄 <b>Активні заміни для групи {html.escape(config.STUDENT_GROUP)}:</b>\n\n"
-            f"Наразі немає збережених замін пар.{admin_hint}"
+            f"Замін ще немає.{admin_hint}"
         )
         return
 

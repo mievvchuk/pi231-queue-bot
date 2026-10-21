@@ -131,7 +131,15 @@ def test_lesson_number_and_expansions():
 
 
 def test_admin_schedule_keyboards():
-    from handlers.common import get_admin_reply_menu, get_admin_schedule_menu
+    from handlers.common import get_admin_reply_menu, get_admin_schedule_menu, get_schedule_reply_menu
+
+    student_sch_menu = get_schedule_reply_menu()
+    student_sch_texts = [btn.text for row in student_sch_menu.keyboard for btn in row]
+    assert "📅 Сьогодні" in student_sch_texts
+    assert "➡️ Завтра" in student_sch_texts
+    assert "🗓 Весь тиждень" in student_sch_texts
+    assert "🔄 Заміни" in student_sch_texts
+    assert "🏠 Головне меню" in student_sch_texts
 
     admin_menu = get_admin_reply_menu()
     button_texts = [btn.text for row in admin_menu.keyboard for btn in row]
