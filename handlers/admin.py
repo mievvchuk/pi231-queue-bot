@@ -253,6 +253,7 @@ async def admin_switch_to_student_queue_view(message: Message, state: FSMContext
 async def admin_panel_open(message: Message, state: FSMContext, conn=None):
     await state.clear()
     await state.set_state(AdminPanelState.in_main_menu)
+    owner_flag = admins.is_owner(conn, message.from_user.id) if conn is not None else admins.is_owner(None, message.from_user.id)
     info_lines = ["⚡ <b>Адмін-панель старости (ПІ-231)</b>"]
     if conn is not None:
         try:
@@ -274,13 +275,16 @@ async def admin_panel_open(message: Message, state: FSMContext, conn=None):
         "• <b>🗳 Опитування</b> — створити голосування для групи (з таймером або без).",
         "• <b>📊 Звіти та статистика</b> — загальна успішність та вивантаження таблиць Excel/CSV.",
         "• <b>👥 Список групи</b> — база ПІБ студентів групи та блокування.",
-        "• <b>⚙️ Налаштування</b> — оголошення на всю групу, техроботи, список адмінів.",
+    ])
+    if owner_flag:
+        info_lines.append("• <b>⚙️ Налаштування</b> — баг-репорти, оголошення на всю групу, техроботи, список адмінів.")
+    info_lines.extend([
         "",
         "💡 <i>Щоб самому записатися в чергу або здати лабу як студент — натисніть <b>«🏠 Головне меню (Як студент)»</b> внизу!</i>",
     ])
     await message.answer(
         "\n".join(info_lines),
-        reply_markup=get_admin_reply_menu(),
+        reply_markup=get_admin_reply_menu(is_owner=owner_flag),
     )
 
 
@@ -977,11 +981,12 @@ async def admin_confirm_delete_user(message: Message, state: FSMContext, conn):
 
 @router.message(F.text == "⚙️ Налаштування", StateFilter("*"))
 async def admin_category_settings(message: Message, state: FSMContext, conn=None):
+    admins.require_owner(conn, message.from_user.id)
     from services.maintenance import is_maintenance_active
     is_maint = is_maintenance_active(conn) if conn else False
     await state.set_state(AdminPanelState.in_settings_menu)
     await message.answer(
-        "⚙️ <b>Налаштування</b>\n\nОберіть розділ нижче 👇",
+        "⚙️ <b>Налаштування (Тільки для власника)</b>\n\nОберіть розділ нижче 👇",
         reply_markup=get_admin_settings_menu(is_maintenance=is_maint),
     )
 
@@ -1854,7 +1859,8 @@ async def unblock_student_click(message: Message, state: FSMContext, conn):
 # ---------- Керування адміністраторами ----------
 
 @router.message(F.text == "👥 Адміністратори", StateFilter("*"))
-async def admins_menu(message: Message, state: FSMContext):
+async def admins_menu(message: Message, state: FSMContext, conn=None):
+    admins.require_owner(conn, message.from_user.id)
     await state.clear()
     rows = [
         ["📋 Список адміністраторів", "➕ Додати адміністратора"],
@@ -1865,6 +1871,7 @@ async def admins_menu(message: Message, state: FSMContext):
 
 @router.message(F.text == "📋 Список адміністраторів", StateFilter("*"))
 async def list_admins_message(message: Message, conn):
+    admins.require_owner(conn, message.from_user.id)
     adm_list = admins.list_admins(conn)
     lines = ["👥 <b>Адміністратори:</b>"]
     for r in adm_list:
@@ -1878,7 +1885,8 @@ async def list_admins_message(message: Message, conn):
 
 
 @router.message(F.text == "➕ Додати адміністратора", StateFilter("*"))
-async def ask_admin_id(message: Message, state: FSMContext):
+async def ask_admin_id(message: Message, state: FSMContext, conn=None):
+    admins.require_owner(conn, message.from_user.id)
     await state.set_state(AdminManageState.add_admin_id)
     rows = [["↩️ Скасувати", "🔙 Назад"]]
     await message.answer("Введіть числовий Telegram ID нового адміністратора:", reply_markup=make_reply_keyboard(rows))
@@ -1886,8 +1894,9 @@ async def ask_admin_id(message: Message, state: FSMContext):
 
 @router.message(AdminManageState.add_admin_id, F.text)
 async def receive_admin_id(message: Message, state: FSMContext, conn):
+    admins.require_owner(conn, message.from_user.id)
     if message.text in {"↩️ Скасувати", "🔙 Скасувати", "🔙 Назад"}:
-        await admins_menu(message, state)
+        await admins_menu(message, state, conn=conn)
         return
     text = message.text.strip()
     if not text.isdigit() or int(text) <= 0:
@@ -1905,6 +1914,7 @@ async def receive_admin_id(message: Message, state: FSMContext, conn):
 
 @router.message(F.text == "❌ Видалити адміністратора", StateFilter("*"))
 async def choose_admin_to_remove(message: Message, state: FSMContext, conn):
+    admins.require_owner(conn, message.from_user.id)
     adm_list = admins.list_admins(conn)
     rows = []
     for r in adm_list:
@@ -1919,6 +1929,7 @@ async def choose_admin_to_remove(message: Message, state: FSMContext, conn):
 
 @router.message(AdminManageState.select_admin_to_remove, F.text.startswith("❌ Видалити: "))
 async def confirm_remove_admin_text(message: Message, state: FSMContext, conn):
+    admins.require_owner(conn, message.from_user.id)
     match = re.search(r"\((\d+)\)$", message.text)
     if not match:
         return
@@ -1930,15 +1941,16 @@ async def confirm_remove_admin_text(message: Message, state: FSMContext, conn):
 
 
 @router.message(AdminManageState.select_admin_to_remove, F.text.in_({"↩️ Скасувати", "🔙 Скасувати", "🔙 Назад"}))
-async def cancel_remove_admin(message: Message, state: FSMContext):
+async def cancel_remove_admin(message: Message, state: FSMContext, conn=None):
     await state.clear()
-    await admins_menu(message, state)
+    await admins_menu(message, state, conn=conn)
 
 
 # ---------- Розсилка повідомлень усім користувачам ----------
 
 @router.message(F.text == "📢 Оголошення для всіх", StateFilter("*"))
 async def start_broadcast_flow(message: Message, state: FSMContext, conn):
+    admins.require_owner(conn, message.from_user.id)
     from services.updates import get_active_user_ids
     uids = get_active_user_ids(conn)
     await state.set_state(AdminManageState.entering_broadcast)
@@ -1953,9 +1965,10 @@ async def start_broadcast_flow(message: Message, state: FSMContext, conn):
 
 @router.message(AdminManageState.entering_broadcast, F.text)
 async def preview_broadcast_message(message: Message, state: FSMContext, conn):
+    admins.require_owner(conn, message.from_user.id)
     if message.text in {"🔙 Скасувати", "🔙 Назад", "↩️ Скасувати"}:
         await state.clear()
-        await admin_category_settings(message, state)
+        await admin_category_settings(message, state, conn=conn)
         return
     text = message.text.strip()
     if not text:
@@ -1977,9 +1990,10 @@ async def preview_broadcast_message(message: Message, state: FSMContext, conn):
 
 @router.message(AdminManageState.confirming_broadcast, F.text)
 async def perform_broadcast(message: Message, state: FSMContext, conn):
+    admins.require_owner(conn, message.from_user.id)
     if message.text in {"🔙 Скасувати", "🔙 Назад", "↩️ Скасувати"}:
         await state.clear()
-        await admin_category_settings(message, state)
+        await admin_category_settings(message, state, conn=conn)
         return
     if message.text != "✅ Надіслати всім":
         await message.answer("Оберіть дію на кнопках: «✅ Надіслати всім» або «🔙 Скасувати» 👇")
@@ -1989,7 +2003,7 @@ async def perform_broadcast(message: Message, state: FSMContext, conn):
     text = data.get("broadcast_text")
     if not text:
         await state.clear()
-        await admin_category_settings(message, state)
+        await admin_category_settings(message, state, conn=conn)
         return
 
     from services.updates import get_active_user_ids, broadcast_message_to_users
@@ -2011,6 +2025,7 @@ async def perform_broadcast(message: Message, state: FSMContext, conn):
 
 @router.message(F.text == "🛠 Увімкнути техроботи", StateFilter("*"))
 async def start_maintenance_prompt(message: Message, state: FSMContext, conn):
+    admins.require_owner(conn, message.from_user.id)
     from services.maintenance import is_maintenance_active
     if is_maintenance_active(conn):
         await message.answer(
@@ -2035,6 +2050,7 @@ async def start_maintenance_prompt(message: Message, state: FSMContext, conn):
 
 @router.message(AdminManageState.entering_maintenance_time, F.text)
 async def process_maintenance_time_entry(message: Message, state: FSMContext, conn):
+    admins.require_owner(conn, message.from_user.id)
     if message.text in {"🔙 Скасувати", "🔙 Назад"}:
         await state.set_state(AdminPanelState.in_settings_menu)
         from services.maintenance import is_maintenance_active
@@ -2080,6 +2096,7 @@ async def process_maintenance_time_entry(message: Message, state: FSMContext, co
 
 @router.message(F.text == "🟢 Вимкнути техроботи", StateFilter("*"))
 async def disable_maintenance(message: Message, state: FSMContext, conn):
+    admins.require_owner(conn, message.from_user.id)
     from services.maintenance import broadcast_maintenance_end, set_maintenance_mode
     set_maintenance_mode(conn, False)
     admins.log_action(conn, message.from_user.id, "toggle_maintenance", "active=False")

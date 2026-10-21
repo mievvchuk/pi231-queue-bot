@@ -242,7 +242,8 @@ async def receive_bug_report(message: Message, state: FSMContext, conn):
 
 @router.message(F.text == "🐞 Баг-репорти", StateFilter("*"))
 async def admin_view_bug_reports(message: Message, state: FSMContext, conn):
-    if not admins.is_admin(conn, message.from_user.id):
+    if not admins.is_owner(conn, message.from_user.id):
+        await message.answer("⛔ Цей розділ доступний лише власнику бота.")
         return
     from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
     from handlers.common import get_admin_settings_menu
@@ -279,8 +280,8 @@ async def admin_view_bug_reports(message: Message, state: FSMContext, conn):
 
 @router.callback_query(F.data.startswith("bug_resolve:"))
 async def admin_resolve_bug_callback(callback: CallbackQuery, conn):
-    if not admins.is_admin(conn, callback.from_user.id):
-        await callback.answer("Тільки для адміністраторів.", show_alert=True)
+    if not admins.is_owner(conn, callback.from_user.id):
+        await callback.answer("Тільки для власника бота.", show_alert=True)
         return
     from contextlib import suppress
     from services import bugs
@@ -311,8 +312,8 @@ async def admin_resolve_bug_callback(callback: CallbackQuery, conn):
 
 @router.callback_query(F.data.startswith("bug_reply:"))
 async def admin_reply_bug_callback(callback: CallbackQuery, state: FSMContext, conn):
-    if not admins.is_admin(conn, callback.from_user.id):
-        await callback.answer("Тільки для адміністраторів.", show_alert=True)
+    if not admins.is_owner(conn, callback.from_user.id):
+        await callback.answer("Тільки для власника бота.", show_alert=True)
         return
     from services import bugs
 
@@ -334,6 +335,9 @@ async def admin_reply_bug_callback(callback: CallbackQuery, state: FSMContext, c
 
 @router.message(NameForm.admin_replying_bug, F.text)
 async def admin_send_bug_reply(message: Message, state: FSMContext, conn):
+    if not admins.is_owner(conn, message.from_user.id):
+        await state.clear()
+        return
     from contextlib import suppress
     from handlers.common import get_admin_reply_menu
     from services import bugs

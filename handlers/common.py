@@ -109,14 +109,18 @@ def get_queue_actions_reply_menu(
     return make_reply_keyboard([["🔙 Назад до черги"]])
 
 
-def get_admin_reply_menu() -> ReplyKeyboardMarkup:
-    """Головне меню адмін-панелі: зрозумілі категорії без дублювання."""
-    return make_reply_keyboard([
+def get_admin_reply_menu(is_owner: bool = True) -> ReplyKeyboardMarkup:
+    """Головне меню адмін-панелі: зрозумілі категорії без дублювання (Налаштування — лише для власника)."""
+    rows = [
         ["📋 Черги та студенти", "📅 Розклад і заміни"],
         ["🗳 Опитування", "📊 Звіти та статистика"],
-        ["👥 Список групи", "⚙️ Налаштування"],
-        ["🏠 Головне меню (Як студент)"],
-    ])
+    ]
+    if is_owner:
+        rows.append(["👥 Список групи", "⚙️ Налаштування"])
+    else:
+        rows.append(["👥 Список групи"])
+    rows.append(["🏠 Головне меню (Як студент)"])
+    return make_reply_keyboard(rows)
 
 
 def get_admin_polls_menu() -> ReplyKeyboardMarkup:

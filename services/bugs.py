@@ -105,9 +105,8 @@ async def notify_admins_new_bug(bot: Bot, conn, report_id: int) -> None:
         ]
     )
 
-    admin_rows = admins.list_admins(conn)
-    for adm in admin_rows:
-        adm_id = adm["telegram_id"]
+    owner_ids = admins.get_owner_ids(conn)
+    for adm_id in owner_ids:
         if not adm_id or adm_id <= 0:
             continue
         with suppress(Exception):

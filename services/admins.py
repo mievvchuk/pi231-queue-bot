@@ -9,6 +9,30 @@ def is_admin(conn: sqlite3.Connection, telegram_id: int) -> bool:
     return row is not None
 
 
+def get_owner_ids(conn: sqlite3.Connection | None = None) -> set[int]:
+    import config
+    owners = {config.OWNER_ID}
+    if conn is not None:
+        has_configured_owner = any(
+            conn.execute("SELECT 1 FROM admins WHERE telegram_id = ?", (oid,)).fetchone()
+            for oid in owners
+        )
+        if not has_configured_owner:
+            row = conn.execute("SELECT telegram_id FROM admins ORDER BY id ASC LIMIT 1").fetchone()
+            if row:
+                return {row["telegram_id"]}
+    return owners
+
+
+def is_owner(conn: sqlite3.Connection | None, telegram_id: int) -> bool:
+    return telegram_id in get_owner_ids(conn)
+
+
+def require_owner(conn: sqlite3.Connection | None, telegram_id: int) -> None:
+    if not is_owner(conn, telegram_id):
+        raise PermissionDenied("Ця функція доступна лише головному адміністратору (власнику бота).")
+
+
 def require_admin(conn: sqlite3.Connection, telegram_id: int) -> None:
     """Серверна перевірка ролі: викликається в кожній адмін-операції."""
     if not is_admin(conn, telegram_id):

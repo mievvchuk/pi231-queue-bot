@@ -35,6 +35,9 @@ def get_bot_token() -> str:
     return token
 
 
+OWNER_ID = int(os.getenv("OWNER_ID", "5937915430"))
+
+
 def get_initial_admin_ids() -> list[int]:
-    raw = os.getenv("INITIAL_ADMIN_IDS", "5937915430")
+    raw = os.getenv("INITIAL_ADMIN_IDS", str(OWNER_ID))
     return [int(part) for part in raw.replace(" ", "").split(",") if part.isdigit()]
