@@ -42,10 +42,15 @@ async def start_schedule_notifier(bot: Bot, conn, interval_sec: int = 60) -> Non
     while True:
         try:
             now = datetime.now(UK_TZ)
-            today_key = now.strftime("%Y-%m-%d")
+            today_key = f"evening_{now.strftime('%Y-%m-%d')}"
 
-            # Перевіряємо, чи настав час розсилки і чи не надсилали сьогодні
-            if now.hour == target_hour and now.minute >= target_minute and not has_sent_today(conn, today_key):
+            # Надсилаємо у вечірній час (починаючи з 17:00 і до 22:00), якщо ще не надсилали вечірнє сповіщення сьогодні
+            is_time_to_send = (
+                (now.hour == target_hour and now.minute >= target_minute)
+                or (target_hour < now.hour < 22)
+            )
+
+            if is_time_to_send and not has_sent_today(conn, today_key):
                 sch_data = schedule.load_schedule_data(config.SCHEDULE_PATH)
                 tomorrow_dt = now.date() + timedelta(days=1)
                 lessons, reps = schedule.get_actual_schedule(conn, sch_data, tomorrow_dt, config.STUDENT_GROUP)
