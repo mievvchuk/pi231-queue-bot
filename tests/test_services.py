@@ -127,10 +127,37 @@ def test_remove_entry(conn, filled):
     assert positions(conn, filled) == [1, 2, 3, 4]
 
 
-def test_leave_queue_renumbers(conn, filled):
+def test_leave_queue_leaves_free_slot(conn, filled):
     queues.leave_queue(conn, 1, filled)
-    assert positions(conn, filled) == [1, 2, 3, 4]
-    assert queues.get_user_position(conn, 2, filled) == 1
+    # Місця не збиваються: на позиції 1 залишається вільне місце
+    assert positions(conn, filled) == [1, 2, 3, 4, 5]
+    assert names(conn, filled)[0] is None
+    assert queues.get_user_position(conn, 2, filled) == 2
+
+
+def test_join_end_does_not_fill_free_slot(conn, filled):
+    # Студент 2 виходить, залишаючи вільне місце на №2
+    queues.leave_queue(conn, 2, filled)
+    assert names(conn, filled)[1] is None
+    # Новий студент записується в кінець черги
+    users.register_user(conn, 99, "Хтось Новий")
+    pos, total = queues.join_queue(conn, 99, filled)
+    # Повинен потрапити на останнє місце (6), а не у вільне місце 2!
+    assert pos == 6
+    assert total == 6
+    assert names(conn, filled)[1] is None
+    assert names(conn, filled)[5] == "Хтось Новий"
+
+
+def test_leave_queue_at_tail_trims(conn, make_user, session):
+    make_user(1, "Студент Перший")
+    make_user(2, "Студент Другий")
+    queues.join_queue(conn, 1, session)
+    queues.join_queue(conn, 2, session)
+    # Студент Другий у хвості виходить — вільне місце в кінці не накопичується
+    queues.leave_queue(conn, 2, session)
+    assert positions(conn, session) == [1]
+    assert names(conn, session) == ["Студент Перший"]
 
 
 # 9. Здача
@@ -165,11 +192,11 @@ def test_carry_over_with_chosen_positions(conn, filled):
     rows = queues.get_entries(conn, new_id)
     assert [r["full_name"] for r in rows] == [None, "Шевченко Максим", None, "Мельник Олег"]
     assert positions(conn, new_id) == [1, 2, 3, 4]
-    # Нові студенти займають вільні місця 1 і 3
+    # Нові студенти займають вільні місця 1 і 3 через вибір місця
     for number, name in [(10, "Новий Студент"), (11, "Другий Студент")]:
         users.register_user(conn, number, name)
-    assert queues.join_queue(conn, 10, new_id) == (1, 4)
-    assert queues.join_queue(conn, 11, new_id) == (3, 4)
+    assert queues.join_queue(conn, 10, new_id, position=1) == (1, 4)
+    assert queues.join_queue(conn, 11, new_id, position=3) == (3, 4)
     # Перенесеним не потрібна повторна реєстрація; наступний іде в кінець
     users.register_user(conn, 12, "Третій Студент")
     assert queues.join_queue(conn, 12, new_id) == (5, 5)

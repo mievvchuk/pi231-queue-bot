@@ -427,7 +427,7 @@ async def show_queue_actions(message: Message, state: FSMContext, conn):
     session = get_session_or_fail(conn, session_id)
     is_in_queue = queues.get_user_position(conn, message.from_user.id, session_id) is not None
     is_open = session["status"] == "open"
-    can_pick = not queues.are_first_10_occupied(conn, session_id)
+    can_pick = not queues.are_first_10_occupied(conn, session_id) or queues.has_free_slots(conn, session_id)
     swap_wish = queues.get_swap_wish(conn, message.from_user.id, session_id) if is_in_queue else None
     ready_to_swap = queues.is_ready_to_swap(conn, message.from_user.id, session_id) if is_in_queue else False
     markup = get_queue_actions_reply_menu(
@@ -605,7 +605,7 @@ async def ask_specific_number(message: Message, state: FSMContext, conn, subject
     session = get_session_or_fail(conn, session_id)
     if session["status"] != "open":
         raise BotError("Запис у цю чергу закрито.")
-    if queues.are_first_10_occupied(conn, session_id):
+    if queues.are_first_10_occupied(conn, session_id) and not queues.has_free_slots(conn, session_id):
         position, total = queues.join_queue(conn, message.from_user.id, session_id)
         await open_queue_screen(
             message, conn, subjects, session_id,
@@ -614,8 +614,13 @@ async def ask_specific_number(message: Message, state: FSMContext, conn, subject
         return
     await state.set_state(StudentFlow.pick_position)
     await state.update_data(session_id=session_id)
+    prompt = (
+        "🔢 <b>Вибір місця</b>\n\nВведіть номер вільного місця (наприклад 3 чи 7):"
+        if queues.has_free_slots(conn, session_id)
+        else "🔢 <b>Вибір місця</b>\n\nВведіть бажаний вільний номер від 1 до 10 (наприклад 3 чи 7):"
+    )
     await message.answer(
-        "🔢 <b>Вибір місця</b>\n\nВведіть бажаний вільний номер від 1 до 10 (наприклад 3 чи 7):",
+        prompt,
         reply_markup=make_reply_keyboard([["🔙 Назад до черги"]]),
     )
 

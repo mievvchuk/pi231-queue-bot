@@ -138,15 +138,7 @@ def join_queue(conn: sqlite3.Connection, telegram_id: int, session_id: int,
 
 
 def _place_user(conn, session_id: int, user_id: int) -> None:
-    # Спочатку займаємо вільне зарезервоване місце, інакше — кінець черги
-    slot = conn.execute(
-        """SELECT id FROM queue_entries WHERE session_id = ? AND status = 'active'
-           AND user_id IS NULL ORDER BY position LIMIT 1""",
-        (session_id,),
-    ).fetchone()
-    if slot:
-        _take_slot(conn, slot["id"], user_id)
-        return
+    # Завжди додаємо студента в кінець черги (навіть якщо всередині є вільні місця)
     last = conn.execute(
         "SELECT COALESCE(MAX(position), 0) FROM queue_entries "
         "WHERE session_id = ? AND status = 'active'",
@@ -160,7 +152,7 @@ def _place_user(conn, session_id: int, user_id: int) -> None:
 
 def _take_slot(conn, entry_id: int, user_id: int) -> None:
     conn.execute(
-        "UPDATE queue_entries SET user_id = ?, created_at = CURRENT_TIMESTAMP WHERE id = ?",
+        "UPDATE queue_entries SET user_id = ?, ready_to_swap = FALSE, swap_wish = NULL, created_at = CURRENT_TIMESTAMP WHERE id = ?",
         (user_id, entry_id),
     )
 
@@ -173,28 +165,38 @@ def are_first_10_occupied(conn: sqlite3.Connection, session_id: int) -> bool:
     return all(e["user_id"] is not None for e in entries[:10])
 
 
+def has_free_slots(conn: sqlite3.Connection, session_id: int) -> bool:
+    """Перевіряє, чи є вільні місця (user_id IS NULL) в черзі."""
+    entries = get_entries(conn, session_id)
+    return any(e["user_id"] is None for e in entries)
+
+
 def _place_user_at(conn, session_id: int, user_id: int, position: int, allow_shift: bool = False) -> None:
     """Вставляє студента на вибране місце.
     Якщо allow_shift=False (для студентів):
-      - Дозволені лише вільні номери від 1 до 10.
+      - Можна зайняти будь-яке існуюче вільне місце (в т.ч. > 10).
+      - Нові місця можна обирати лише від 1 до 10.
       - Якщо номер уже зайнятий студентом — викидає помилку (заборонено займати вже зайняті номери).
       - Якщо перші 10 місць уже повністю зайняті — викидає помилку (запис лише в кінець).
     Якщо allow_shift=True (для старости):
       - Дозволені номери від 1 до 100, при зайнятості наступні зсуваються вниз."""
-    max_pos = 100 if allow_shift else 10
-    if not 1 <= position <= max_pos:
+    if not 1 <= position <= 100:
         if allow_shift:
             raise BotError("Оберіть номер від 1 до 100.")
         raise BotError("Оберіть вільний номер від 1 до 10. Після 10-го місця запис ведеться в кінець черги.")
 
-    if not allow_shift and are_first_10_occupied(conn, session_id):
-        raise BotError("Перші 10 місць уже зайняті. Запис ведеться в кінець черги.")
-
     entries = get_entries(conn, session_id)
-    # Якщо вибране місце вже існує і воно пусте (зарезервоване)
+    # Якщо вибране місце вже існує і воно пусте (зарезервоване / вільне)
     if position <= len(entries) and entries[position - 1]["user_id"] is None:
         _take_slot(conn, entries[position - 1]["id"], user_id)
         return
+
+    # Якщо звичайний студент намагається зайняти новий слот > 10 або коли перші 10 зайняті
+    if not allow_shift:
+        if position > 10:
+            raise BotError("Оберіть вільний номер від 1 до 10 або займіть наявне вільне місце в черзі.")
+        if are_first_10_occupied(conn, session_id):
+            raise BotError("Перші 10 місць уже зайняті. Запис ведеться в кінець черги.")
 
     # Якщо вибране місце вже зайняте студентом
     if position <= len(entries):
@@ -236,9 +238,58 @@ def _own_active_entry(conn, telegram_id: int, session_id: int):
     return entry
 
 
+def _trim_trailing_empty_slots(conn, session_id: int) -> None:
+    """Видаляє порожні місця (user_id IS NULL) у кінці черги після останнього реального студента."""
+    max_student_pos = conn.execute(
+        """SELECT COALESCE(MAX(position), 0) FROM queue_entries
+           WHERE session_id = ? AND status = 'active' AND user_id IS NOT NULL""",
+        (session_id,),
+    ).fetchone()[0]
+    conn.execute(
+        """DELETE FROM queue_entries
+           WHERE session_id = ? AND status = 'active' AND user_id IS NULL AND position > ?""",
+        (session_id, max_student_pos),
+    )
+
+
 def leave_queue(conn: sqlite3.Connection, telegram_id: int, session_id: int) -> None:
+    """Студент покидає чергу.
+    Якщо після нього в черзі є інші активні записи, його місце стає вільним слотом (user_id = NULL),
+    щоб не збивати номери наступних студентів.
+    Якщо це був останній запис у черзі — він видаляється, а хвостові вільні місця очищаються.
+    Дія студента завжди фіксується в історії як 'left'."""
     with transaction(conn):
-        _close_entry(conn, _own_active_entry(conn, telegram_id, session_id), "left")
+        entry = _own_active_entry(conn, telegram_id, session_id)
+        entry_session_id = entry["session_id"]
+        pos = entry["position"]
+
+        # Фіксуємо вихід в історії
+        conn.execute(
+            """INSERT INTO queue_entries (session_id, user_id, position, status, completed_at)
+               VALUES (?, ?, NULL, 'left', CURRENT_TIMESTAMP)""",
+            (entry_session_id, entry["user_id"]),
+        )
+
+        # Перевіряємо, чи є в черзі активні записи після цієї позиції
+        has_subsequent = conn.execute(
+            """SELECT 1 FROM queue_entries
+               WHERE session_id = ? AND status = 'active' AND position > ?
+               LIMIT 1""",
+            (entry_session_id, pos),
+        ).fetchone() is not None
+
+        if has_subsequent:
+            # Залишаємо вільне місце на поточній позиції, щоб не збивати номери наступних
+            conn.execute(
+                """UPDATE queue_entries
+                   SET user_id = NULL, ready_to_swap = FALSE, swap_wish = NULL
+                   WHERE id = ?""",
+                (entry["id"],),
+            )
+        else:
+            # Останній запис у черзі — видаляємо його з активних
+            conn.execute("DELETE FROM queue_entries WHERE id = ?", (entry["id"],))
+            _trim_trailing_empty_slots(conn, entry_session_id)
 
 
 def create_queue(conn: sqlite3.Connection, telegram_id: int, subject_id: int,

@@ -226,6 +226,7 @@ async def test_bug_reports_flow(conn, make_user):
 
 
 def test_chart_generators_produce_valid_png(conn, make_user):
+    pytest.importorskip("PIL")
     from services import charts
 
     subjects = load_subjects(config.SUBJECTS_PATH)
