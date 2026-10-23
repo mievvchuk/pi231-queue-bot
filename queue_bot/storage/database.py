@@ -329,6 +329,9 @@ class PGConnectionWrapper:
 
     def __init__(self, raw_conn, clean_url: str):
         self.raw = raw_conn
+        # Avoid stale result descriptors after additive migrations by another
+        # deployment, including connections routed through a PostgreSQL pooler.
+        self.raw.prepare_threshold = None
         self.clean_url = clean_url
         self._init_schema()
 
@@ -337,7 +340,7 @@ class PGConnectionWrapper:
         last_err = None
         for attempt in range(5):
             try:
-                return psycopg.connect(self.clean_url, autocommit=True)
+                return psycopg.connect(self.clean_url, autocommit=True, prepare_threshold=None)
             except Exception as e:
                 last_err = e
                 time.sleep(1.5)
@@ -422,7 +425,7 @@ def connect(db_target: str):
         last_err = None
         for attempt in range(5):
             try:
-                raw = psycopg.connect(clean_url, autocommit=True)
+                raw = psycopg.connect(clean_url, autocommit=True, prepare_threshold=None)
                 break
             except Exception as e:
                 last_err = e
