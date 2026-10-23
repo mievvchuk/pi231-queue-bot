@@ -4,10 +4,10 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from aiogram.types import CallbackQuery, Message
 
-import db
-from handlers.common import Guard
-from services import admins, queues, users, restrictions
-from services.errors import BotError, PermissionDenied
+from queue_bot.storage import database as db
+from queue_bot.handlers.common import Guard
+from queue_bot.services import admins, queues, users, restrictions
+from queue_bot.services.errors import BotError, PermissionDenied
 
 
 @pytest.fixture
@@ -107,7 +107,7 @@ def test_existing_indefinite_toggle_removes_queues(conn, student):
 
 
 def test_banned_private_poll_answer_and_counts_are_ignored(conn, student):
-    from services import polls
+    from queue_bot.services import polls
     pid = polls.create_poll(conn, 100, 'Питання', ['Так', 'Ні'])
     polls.register_poll_instance(conn, pid, 1, 1, 'poll-a')
     restrictions.set_restriction(conn, 100, student['id'], days=1)
@@ -145,7 +145,7 @@ def test_sqlite_upgrade_preserves_existing_user_and_queue(tmp_path):
 
 
 def test_expired_ban_restores_notifications_without_student_message(conn, student, monkeypatch):
-    from services.updates import get_active_user_ids
+    from queue_bot.services.updates import get_active_user_ids
     now = datetime.now(timezone.utc)
     restrictions.set_restriction(conn, 100, student['id'], days=1, now=now)
     monkeypatch.setattr(restrictions, 'utc_now', lambda: now + timedelta(days=2))
@@ -172,7 +172,7 @@ def test_expired_placeholder_can_complete_registration(conn, monkeypatch):
 
 
 def test_banned_identifiable_group_vote_cannot_return_via_poll_totals(conn, student):
-    from services import polls
+    from queue_bot.services import polls
     pid = polls.create_poll(conn, 100, 'Питання', ['Так', 'Ні'], is_anonymous=False, target='group')
     polls.register_poll_instance(conn, pid, -1, 1, 'group-a')
     restrictions.set_restriction(conn, 100, student['id'], days=1)

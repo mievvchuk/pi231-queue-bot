@@ -1,6 +1,6 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock
-from services.updates import (
+from queue_bot.services.updates import (
     ensure_updates_table,
     is_version_sent,
     mark_version_sent,

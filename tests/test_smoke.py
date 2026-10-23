@@ -1,11 +1,11 @@
 import pytest
 from aiogram import Dispatcher
 
-import config
-from handlers import admin, polls, start, student
-from handlers.common import Guard, format_queue
-from services import queues
-from subjects import load_subjects
+from queue_bot import config
+from queue_bot.handlers import admin, polls, start, student
+from queue_bot.handlers.common import Guard, format_queue
+from queue_bot.services import queues
+from queue_bot.services.subjects import load_subjects
 
 
 def test_subjects_json_is_valid():
@@ -81,7 +81,7 @@ async def test_group_chat_protection_blocks_keyboards_and_photos_but_allows_sche
     from unittest.mock import AsyncMock
     from aiogram.fsm.storage.memory import MemoryStorage
     from aiogram.types import Chat, Message, PhotoSize, Update, User
-    from handlers import schedule as schedule_handler
+    from queue_bot.handlers import schedule as schedule_handler
 
     subjects = load_subjects(config.SUBJECTS_PATH)
     for r in (

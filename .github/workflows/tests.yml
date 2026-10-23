@@ -36,4 +36,4 @@ jobs:
           cache: pip
       - run: python -m pip install -r requirements.txt
       - run: python -m pytest -q --tb=short
-      - run: python -m compileall -q bot.py config.py db.py subjects.py handlers services
+      - run: python -m compileall -q bot.py queue_bot

@@ -6,9 +6,9 @@ from aiogram import Dispatcher
 from aiogram.fsm.storage.base import StorageKey
 from aiogram.types import Chat, Message, Update, User
 
-from handlers import admin, bans, navigation, start, student
-from handlers.common import Guard
-from services import queues, users
+from queue_bot.handlers import admin, bans, navigation, start, student
+from queue_bot.handlers.common import Guard
+from queue_bot.services import queues, users
 
 
 @pytest.fixture
@@ -148,7 +148,7 @@ async def test_cancel_switch_during_queue_ban_preserves_selected_queue(conn, app
 @pytest.mark.asyncio
 async def test_stale_unblock_card_never_installs_permanent_ban(conn, app, monkeypatch):
     from datetime import timedelta, timezone
-    from services import restrictions
+    from queue_bot.services import restrictions
     now = datetime.now(timezone.utc)
     user = users.get_user(conn, 1)
     restrictions.set_restriction(conn, 100, user['id'], days=1, now=now)

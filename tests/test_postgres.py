@@ -5,8 +5,8 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-import db
-from services import admins, queues, restrictions, users
+from queue_bot.storage import database as db
+from queue_bot.services import admins, queues, restrictions, users
 
 
 @pytest.fixture

@@ -2,9 +2,9 @@ import threading
 
 import pytest
 
-import db
-from services import admins, queues, users
-from services.errors import BotError, PermissionDenied
+from queue_bot.storage import database as db
+from queue_bot.services import admins, queues, users
+from queue_bot.services.errors import BotError, PermissionDenied
 
 ADMIN = 100
 

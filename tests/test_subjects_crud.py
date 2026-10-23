@@ -5,10 +5,10 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.fsm.storage.base import StorageKey
 
-import config
-import subjects as subjects_module
-from services import admins
-from services.errors import BotError, PermissionDenied
+from queue_bot import config
+from queue_bot.services import subjects as subjects_module
+from queue_bot.services import admins
+from queue_bot.services.errors import BotError, PermissionDenied
 
 
 @pytest.fixture
@@ -121,7 +121,7 @@ def test_student_proposals_persistence_and_approval(conn, sample_subjects):
 
 @pytest.mark.asyncio
 async def test_owner_only_restrictions_on_subjects(conn, sample_subjects):
-    from handlers.admin import admin_rename_subject_start, admin_delete_subject_start
+    from queue_bot.handlers.admin import admin_rename_subject_start, admin_delete_subject_start
 
     storage = MemoryStorage()
     state = FSMContext(storage=storage, key=StorageKey(bot_id=1, chat_id=200, user_id=200))

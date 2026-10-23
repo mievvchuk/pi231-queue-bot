@@ -4,13 +4,15 @@
 Стек: Python 3.11+, aiogram 3, PostgreSQL (робочий запуск), SQLite (локальні тести), FSM.
 
 Gitflow, порядок релізу, бан і перемикання режимів: [CONTRIBUTING.md](CONTRIBUTING.md).
+Усі параметри середовища й підготовка до перезапуску: [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
 
 ## Запуск (Windows PowerShell)
 
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\pip install -r requirements.txt
-Copy-Item .env.example .env      # впишіть BOT_TOKEN, DATABASE_URL та INITIAL_ADMIN_IDS
+Copy-Item .env.example .env      # впишіть BOT_TOKEN, DATABASE_URL та OWNER_ID
+.\.venv\Scripts\python -m queue_bot.check_config
 .\.venv\Scripts\python bot.py
 ```
 
@@ -21,10 +23,12 @@ Copy-Item .env.example .env      # впишіть BOT_TOKEN, DATABASE_URL та I
 | Змінна | Призначення |
 |---|---|
 | `BOT_TOKEN` | токен бота (у коді не зберігається) |
+| `OWNER_ID` | обов'язковий Telegram ID власника без персонального значення в коді |
 | `INITIAL_ADMIN_IDS` | ID початкових адмінів через кому; застосовується лише коли в базі немає адмінів |
 | `DATABASE_URL` | обов'язкове підключення до БД; вбудованого пароля чи автоматичної нової бази немає |
 | `TEST_DATABASE_URL` | тільки окрема тестова PostgreSQL для інтеграційних тестів; не робоча база |
-| `SUBJECTS_PATH` | файл предметів, за замовчуванням `subjects.json` |
+| `SUBJECTS_PATH` | файл предметів; типовий шлях `data/subjects.json`, з підтримкою старого файла в корені |
+| `SCHEDULE_PATH` | файл розкладу; типовий шлях `data/schedule.json`, з підтримкою старого файла в корені |
 
 Свій Telegram ID можна дізнатися, наприклад, у бота @userinfobot.
 
@@ -44,14 +48,21 @@ PostgreSQL-тести виконуються за наявності `TEST_DATAB
 ## Структура
 
 ```
-bot.py            запуск і підключення роутерів
-config.py         змінні середовища
-subjects.py       завантаження й перевірка subjects.json
-subjects.json     предмети й викладачі
-db.py             SQLite, міграції (PRAGMA user_version), транзакції
-services/         бізнес-логіка без Telegram: users, admins, queues
-handlers/         aiogram: start (реєстрація), student, admin, common
-tests/            pytest
+bot.py                    сумісна команда запуску для хостингу
+queue_bot/
+  application.py          запуск і завершення процесу та фонових задач
+  config.py               усі параметри середовища та їх перевірка
+  check_config.py         безпечна перевірка налаштувань без мережі
+  routing.py              порядок роутерів та middleware
+  web.py                  HTTP healthcheck
+  storage/database.py     SQLite/PostgreSQL, міграції, транзакції
+  services/               бізнес-логіка, розпізнавання та каталог предметів
+  handlers/               Telegram-інтерфейс студента, розкладу, банів
+    admin/                окремі модулі черг, користувачів, предметів,
+                          розкладу, звітів і налаштувань; спільні стани
+data/                     початкові subjects.json та schedule.json
+tests/                    регресійні й PostgreSQL-перевірки
+docs/                     конфігурація та плани
 ```
 
 ## Як це працює
@@ -71,7 +82,7 @@ tests/            pytest
   «1. Новий, 2. Шевченко, 3. Новий, 4. Мельник» нумерація лишається послідовною).
 - **Журнал.** Адмін-дії пишуться в таблицю `admin_log`.
 - **Міграції.** Схема версіонується через `PRAGMA user_version`; існуюча база не видаляється.
-  Нові зміни додаються в кінець списку `MIGRATIONS` у `db.py`.
+  Нові зміни додаються в кінець списку `MIGRATIONS` у `queue_bot/storage/database.py`.
 - **Застарілі кнопки.** Невідомі або прострочені inline-кнопки отримують підказку натиснути `/start`.
 
 ## Обмеження

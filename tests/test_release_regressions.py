@@ -1,4 +1,4 @@
-from services import queues, users, replacements
+from queue_bot.services import queues, users, replacements
 
 
 def test_consultation_renewal_preserves_type_with_parallel_lesson(conn):
@@ -30,7 +30,7 @@ def test_latest_replacement_still_archives_earlier_package(conn):
 
 def test_database_url_has_no_embedded_default(monkeypatch):
     import importlib
-    import config
+    from queue_bot import config
     monkeypatch.delenv('DATABASE_URL', raising=False)
     importlib.reload(config)
     has_default = bool(config.DATABASE_URL)
@@ -40,7 +40,7 @@ def test_database_url_has_no_embedded_default(monkeypatch):
 def test_startup_rejects_missing_database_before_health_server(monkeypatch):
     import asyncio
     from unittest.mock import AsyncMock
-    import bot
+    from queue_bot import application as bot
     monkeypatch.setattr(bot.config, 'DATABASE_URL', '')
     server = AsyncMock()
     monkeypatch.setattr(bot, 'run_web_server', server)
