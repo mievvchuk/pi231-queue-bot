@@ -1262,7 +1262,12 @@ async def admin_toggle_user_block(message: Message, state: FSMContext, conn):
     user_id = data.get("current_user_id")
     if not user_id:
         raise BotError("Користувача не обрано.")
-    new_state = users.admin_toggle_block_user(conn, message.from_user.id, user_id)
+    from services import restrictions
+    new_state = message.text == '⛔ Заблокувати'
+    if new_state:
+        restrictions.set_restriction(conn, message.from_user.id, user_id)
+    else:
+        restrictions.clear_restriction(conn, message.from_user.id, user_id)
     if new_state:
         note = "⛔ <b>Користувача заблоковано</b> (знято з усіх черг)."
     else:
@@ -2013,7 +2018,12 @@ async def student_toggle_block(message: Message, state: FSMContext, conn, subjec
     user = conn.execute("SELECT * FROM users WHERE id = ?", (entry["user_id"],)).fetchone() if entry["user_id"] else None
     if not user:
         raise BotError("Користувача не знайдено.")
-    new_state = users.admin_toggle_block_user(conn, message.from_user.id, user["id"])
+    from services import restrictions
+    new_state = message.text == '⛔ Заблокувати'
+    if new_state:
+        restrictions.set_restriction(conn, message.from_user.id, user['id'])
+    else:
+        restrictions.clear_restriction(conn, message.from_user.id, user['id'])
     if new_state:
         await state.set_state(AdminOrderState.picking_student)
         await open_admin_student_list(

@@ -159,3 +159,23 @@ def test_admin_can_add_student_after_ban_expires(conn, student, monkeypatch):
     monkeypatch.setattr(restrictions, 'utc_now', lambda: now + timedelta(days=2))
     sid = queues.create_session(conn, 100, 1, 1)
     assert queues.add_student_by_admin(conn, 100, sid, student['id']) == 1
+
+
+def test_expired_placeholder_can_complete_registration(conn, monkeypatch):
+    now = datetime.now(timezone.utc)
+    user = users.admin_create_placeholder(conn, 100, 'Мельник Олег')
+    restrictions.set_restriction(conn, 100, user['id'], days=1, now=now)
+    monkeypatch.setattr(restrictions, 'utc_now', lambda: now + timedelta(days=2))
+    claimed = users.register_user(conn, 5, 'Мельник Олег')
+    assert claimed['id'] == user['id']
+    assert not claimed['is_blocked']
+
+
+def test_banned_identifiable_group_vote_cannot_return_via_poll_totals(conn, student):
+    from services import polls
+    pid = polls.create_poll(conn, 100, 'Питання', ['Так', 'Ні'], is_anonymous=False, target='group')
+    polls.register_poll_instance(conn, pid, -1, 1, 'group-a')
+    restrictions.set_restriction(conn, 100, student['id'], days=1)
+    assert polls.record_poll_answer(conn, 'group-a', 1, 'Петренко Іван', [0]) is None
+    polls.record_poll_state_update(conn, 'group-a', [1, 0])
+    assert polls.get_poll_results(conn, pid)['total_votes_cast'] == 0

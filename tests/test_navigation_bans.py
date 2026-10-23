@@ -129,3 +129,32 @@ async def test_admin_selected_queue_stays_admin_on_refresh(conn, app):
     assert (await app[0].storage.get_state(key) or '').startswith('Admin')
     await send(app, '🔄 Оновити')
     assert 'Режим адміна' in app[1].call_args[0][0].text
+
+
+@pytest.mark.asyncio
+async def test_cancel_switch_during_queue_ban_preserves_selected_queue(conn, app):
+    sid = queues.create_session(conn, 100, 1, 1)
+    queues.join_queue(conn, 1, sid)
+    entry = queues.get_entries(conn, sid)[0]
+    key = StorageKey(bot_id=5, chat_id=100, user_id=100)
+    await app[0].storage.set_state(key, admin.AdminOrderState.managing_entry)
+    await app[0].storage.set_data(key, {'session_id': sid, 'entry_id': entry['id']})
+    await send(app, '⏳ Бан на N днів')
+    await send(app, '👤 Режим студента')
+    assert (await data(app)) == {'session_id': sid, 'ui_mode': 'student'}
+    assert not users.get_user(conn, 1)['is_blocked']
+
+
+@pytest.mark.asyncio
+async def test_stale_unblock_card_never_installs_permanent_ban(conn, app, monkeypatch):
+    from datetime import timedelta, timezone
+    from services import restrictions
+    now = datetime.now(timezone.utc)
+    user = users.get_user(conn, 1)
+    restrictions.set_restriction(conn, 100, user['id'], days=1, now=now)
+    key = StorageKey(bot_id=5, chat_id=100, user_id=100)
+    await app[0].storage.set_state(key, admin.AdminUserState.viewing_card)
+    await app[0].storage.set_data(key, {'current_user_id': user['id']})
+    monkeypatch.setattr(restrictions, 'utc_now', lambda: now + timedelta(days=2))
+    await send(app, '🟢 Розблокувати')
+    assert not users.get_user(conn, 1)['is_blocked']

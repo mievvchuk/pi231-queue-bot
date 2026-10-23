@@ -23,7 +23,8 @@ class AdminBanFlow(StatesGroup):
 
 async def restore_card(message, state, conn, note=''):
     from handlers.admin import AdminUserState, format_user_card
-    uid = (await state.get_data()).get('ban_user_id')
+    data = await state.get_data()
+    uid = data.get('ban_user_id')
     user = users.get_user_by_id(conn, uid) if uid else None
     await state.clear()
     if not user:
@@ -32,6 +33,8 @@ async def restore_card(message, state, conn, note=''):
         return
     await state.set_state(AdminUserState.viewing_card)
     await state.update_data(current_user_id=uid, ui_mode='admin')
+    if data.get('session_id'):
+        await state.update_data(session_id=data['session_id'])
     await message.answer(note + format_user_card(dict(user)), reply_markup=get_user_card_menu(bool(user['is_blocked'])))
 
 
@@ -51,6 +54,8 @@ async def start_ban(message, state, conn):
     await state.clear()
     await state.set_state(AdminBanFlow.entering_days)
     await state.update_data(ban_user_id=uid, ui_mode='admin')
+    if data.get('session_id'):
+        await state.update_data(session_id=data['session_id'])
     await message.answer(f'⏳ Бан для <b>{html.escape(user["full_name"])}</b>\n'
                          'Введіть кількість днів (1 день = 24 години). Студента буде знято з активних черг.',
                          reply_markup=make_reply_keyboard([['🔙 Скасувати бан']]))

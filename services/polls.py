@@ -237,7 +237,7 @@ def get_poll_results(conn, poll_id: int) -> dict:
     total_voters = len(unique_voters)
 
     # Якщо опитування в групі та є дані з Poll update (особливо для анонімних у групі)
-    if poll["target"] == "group":
+    if poll["target"] == "group" and bool(poll['is_anonymous']):
         instances = get_poll_instances(conn, poll_id)
         for inst in instances:
             if inst["options_counts_json"]:

@@ -31,6 +31,8 @@ def get_user_by_id(conn, user_id: int):
 
 
 def register_user(conn: sqlite3.Connection, telegram_id: int, full_name: str):
+    from services.restrictions import require_available
+    require_available(conn, telegram_id)
     existing = get_user(conn, telegram_id)
     if existing:
         if bool(existing["is_blocked"]):
@@ -44,6 +46,8 @@ def register_user(conn: sqlite3.Connection, telegram_id: int, full_name: str):
     ).fetchone()
 
     if placeholder:
+        require_available(conn, placeholder['telegram_id'])
+        placeholder = get_user_by_id(conn, placeholder['id'])
         if bool(placeholder["is_blocked"]):
             raise BotError("Вас заблоковано адміністратором.")
         conn.execute("UPDATE users SET telegram_id = ? WHERE id = ?", (telegram_id, placeholder["id"]))
