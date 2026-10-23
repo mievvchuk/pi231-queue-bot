@@ -62,3 +62,18 @@ def test_postgres_consultation_renewal(pg_conn):
     renewed = queues.finish_session(pg_conn, 100, consultation, create_new=True)
     assert queues.get_session(pg_conn, renewed)['queue_type'] == 'consultation'
     assert queues.get_session(pg_conn, lesson)['status'] == 'open'
+
+
+def test_postgres_select_survives_schema_change_and_reconnect(pg_conn):
+    # Reproduce a hot SELECT * cached before another deployment adds a column.
+    query = 'SELECT * FROM users WHERE telegram_id = ?'
+    for _ in range(12):
+        assert pg_conn.execute(query, (1,)).fetchone()['full_name'] == 'Петренко Іван'
+    import psycopg
+    with psycopg.connect(pg_conn.clean_url, autocommit=True) as migration:
+        migration.execute('ALTER TABLE users ADD COLUMN plan_regression TEXT')
+    assert pg_conn.execute(query, (1,)).fetchone()['plan_regression'] is None
+    pg_conn.close()
+    # The adapter reconnects automatically; the policy must survive reconnection.
+    assert pg_conn.execute(query, (1,)).fetchone()['full_name'] == 'Петренко Іван'
+    assert pg_conn.raw.prepare_threshold is None
