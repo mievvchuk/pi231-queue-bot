@@ -1,8 +1,8 @@
 import pytest
 import sqlite3
 
-from services import admins, queues, users
-from services.errors import BotError, PermissionDenied
+from queue_bot.services import admins, queues, users
+from queue_bot.services.errors import BotError, PermissionDenied
 
 ADMIN_ID = 100
 NON_ADMIN_ID = 999

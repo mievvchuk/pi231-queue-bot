@@ -4,16 +4,16 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-import config
-from handlers.common import (
+from queue_bot import config
+from queue_bot.handlers.common import (
     get_admin_polls_menu,
     get_admin_reply_menu,
     get_admin_reports_menu,
     get_reply_menu,
 )
-from services import polls, queues
-from services.errors import BotError
-from subjects import load_subjects
+from queue_bot.services import polls, queues
+from queue_bot.services.errors import BotError
+from queue_bot.services.subjects import load_subjects
 
 UK_TZ = ZoneInfo(config.TIMEZONE)
 
@@ -182,7 +182,7 @@ def test_new_grouped_keyboards(conn):
     assert "📅 Розклад і заміни" in admin_texts
     assert "👥 Список групи" in admin_texts
     assert "⚙️ Налаштування" in admin_texts
-    assert "🏠 Головне меню (Як студент)" in admin_texts
+    assert "👤 Режим студента" in admin_texts
 
     polls_kb = get_admin_polls_menu()
     polls_texts = [btn.text for row in polls_kb.keyboard for btn in row]
@@ -199,7 +199,7 @@ def test_new_grouped_keyboards(conn):
 
 @pytest.mark.asyncio
 async def test_bug_reports_flow(conn, make_user):
-    from services import bugs
+    from queue_bot.services import bugs
 
     make_user(301, "Сидоренко Ілля")
     rep_id = bugs.create_bug_report(
@@ -227,7 +227,7 @@ async def test_bug_reports_flow(conn, make_user):
 
 def test_chart_generators_produce_valid_png(conn, make_user):
     pytest.importorskip("PIL")
-    from services import charts
+    from queue_bot.services import charts
 
     subjects = load_subjects(config.SUBJECTS_PATH)
     make_user(401, "Мельник Софія")

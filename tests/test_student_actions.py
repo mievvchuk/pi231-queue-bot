@@ -1,7 +1,7 @@
 import pytest
 
-from services import queues, users
-from services.errors import BotError
+from queue_bot.services import queues, users
+from queue_bot.services.errors import BotError
 from tests.test_services import ADMIN, entry_id, filled, names, positions, session  # noqa: F401
 
 
@@ -136,10 +136,9 @@ def test_create_duplicate_queue_validation(conn, make_user):
 
 
 def test_coursework_grouping_menu(conn, make_user):
-    from handlers.common import get_queues_reply_menu, get_coursework_queues_menu
-    from subjects import load_subjects
-    import config
-
+    from queue_bot.handlers.common import get_queues_reply_menu, get_coursework_queues_menu
+    from queue_bot.services.subjects import load_subjects
+    from queue_bot import config
     subjects = load_subjects(config.SUBJECTS_PATH)
     make_user(100, "Адмін Тестовий")
 
@@ -171,10 +170,9 @@ def test_coursework_grouping_menu(conn, make_user):
 
 
 def test_consultation_queue_support(conn, make_user):
-    from handlers.common import find_session_by_label, queue_label
-    from subjects import load_subjects
-    import config
-
+    from queue_bot.handlers.common import find_session_by_label, queue_label
+    from queue_bot.services.subjects import load_subjects
+    from queue_bot import config
     subjects = load_subjects(config.SUBJECTS_PATH)
     make_user(100, "Адмін Тестовий")
 
@@ -208,7 +206,7 @@ def test_consultation_queue_support(conn, make_user):
 
 
 def test_ready_to_swap_toggle_and_format(conn, filled):
-    from handlers.common import format_entry, get_queue_actions_reply_menu
+    from queue_bot.handlers.common import format_entry, get_queue_actions_reply_menu
 
     # Початковий стан — False
     assert not queues.is_ready_to_swap(conn, 1, filled)
@@ -238,7 +236,7 @@ def test_ready_to_swap_toggle_and_format(conn, filled):
 
 
 def test_swap_wish_higher_and_lower(conn, filled):
-    from handlers.common import format_entry, get_queue_actions_reply_menu
+    from queue_bot.handlers.common import format_entry, get_queue_actions_reply_menu
 
     # 1. Встановлення "higher"
     assert queues.get_swap_wish(conn, 2, filled) is None
@@ -305,7 +303,7 @@ def test_ready_to_swap_cleared_on_swap_and_leave(conn, filled):
 @pytest.mark.asyncio
 async def test_notify_swap_wishes_and_smart_match(conn, filled):
     from unittest.mock import AsyncMock, MagicMock
-    from handlers.common import clear_swap_wish_cooldowns, notify_swap_wishes
+    from queue_bot.handlers.common import clear_swap_wish_cooldowns, notify_swap_wishes
 
     sample_subjects = [{"id": "sub1", "name": "КПЗ", "teachers": [{"id": "teach1", "name": "Кондратюк Є.С."}]}]
     clear_swap_wish_cooldowns()
@@ -347,7 +345,7 @@ async def test_notify_swap_wishes_and_smart_match(conn, filled):
 @pytest.mark.asyncio
 async def test_swap_request_from_notification_callback(conn, filled):
     from unittest.mock import AsyncMock, MagicMock
-    from handlers.student import swap_request_from_notification
+    from queue_bot.handlers.student import swap_request_from_notification
 
     sample_subjects = [{"id": "sub1", "name": "КПЗ", "teachers": [{"id": "teach1", "name": "Кондратюк Є.С."}]}]
 
@@ -379,10 +377,9 @@ async def test_swap_request_from_notification_callback(conn, filled):
 
 
 def test_format_queues_overview_and_filtering(conn, filled):
-    from handlers.common import format_queues_overview, format_my_queues_overview
-    from subjects import load_subjects
-    import config
-
+    from queue_bot.handlers.common import format_queues_overview, format_my_queues_overview
+    from queue_bot.services.subjects import load_subjects
+    from queue_bot import config
     subjects = load_subjects(config.SUBJECTS_PATH)
     sessions = queues.list_sessions(conn, ("open", "closed"))
 
@@ -403,16 +400,16 @@ def test_format_queues_overview_and_filtering(conn, filled):
 
 
 def test_queue_categories_option_1(conn, make_user):
-    from handlers.common import (
+    from queue_bot.handlers.common import (
         categorize_sessions,
         format_category_queues_overview,
         format_queue_categories_overview,
         get_category_queues_reply_menu,
         get_queue_categories_reply_menu,
     )
-    from handlers.student import is_category_button
-    from subjects import load_subjects
-    import config
+    from queue_bot.handlers.student import is_category_button
+    from queue_bot.services.subjects import load_subjects
+    from queue_bot import config
     from aiogram.types import Message
 
     subjects = load_subjects(config.SUBJECTS_PATH)

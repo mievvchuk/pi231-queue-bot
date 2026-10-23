@@ -1,7 +1,7 @@
 import datetime
 import pytest
 
-from services import replacements, schedule
+from queue_bot.services import replacements, schedule
 
 
 def test_week_type_parity():
@@ -107,7 +107,7 @@ def test_actual_schedule_with_replacements(conn):
 
 
 def test_lesson_number_and_expansions():
-    from services.recognition import expand_subject, expand_teacher, normalize_lesson_pair
+    from queue_bot.services.recognition import expand_subject, expand_teacher, normalize_lesson_pair
 
     # 1-2 уроки -> 1 пара
     assert normalize_lesson_pair(1, "1-2") == 1
@@ -131,7 +131,7 @@ def test_lesson_number_and_expansions():
 
 
 def test_admin_schedule_keyboards():
-    from handlers.common import get_admin_reply_menu, get_admin_schedule_menu, get_schedule_reply_menu
+    from queue_bot.handlers.common import get_admin_reply_menu, get_admin_schedule_menu, get_schedule_reply_menu
 
     student_sch_menu = get_schedule_reply_menu()
     student_sch_texts = [btn.text for row in student_sch_menu.keyboard for btn in row]
@@ -156,7 +156,7 @@ def test_admin_schedule_keyboards():
 
 
 def test_replacement_correction_menus_and_helpers():
-    from handlers.schedule import (
+    from queue_bot.handlers.schedule import (
         normalize_date_input,
         render_corrections_menu,
         render_item_edit_menu,
@@ -225,7 +225,7 @@ def test_replacement_correction_menus_and_helpers():
 
 
 def test_working_saturdays_flow(conn):
-    from services import working_days
+    from queue_bot.services import working_days
 
     sat_date = datetime.date(2026, 10, 17)
     sat_str = sat_date.isoformat()
@@ -295,7 +295,7 @@ def test_working_saturdays_flow(conn):
 
 def test_next_working_day_calculation(conn):
     from datetime import date
-    from services.working_days import get_next_working_day, set_working_saturday, remove_working_saturday
+    from queue_bot.services.working_days import get_next_working_day, set_working_saturday, remove_working_saturday
 
     # 1. Понеділок (12.10.2026) -> Вівторок (13.10.2026)
     mon = date(2026, 10, 12)
@@ -318,8 +318,8 @@ def test_next_working_day_calculation(conn):
 
 
 def test_auto_archive_previous_replacements(conn):
-    from services import replacements
-    from handlers.common import get_admin_schedule_menu
+    from queue_bot.services import replacements
+    from queue_bot.handlers.common import get_admin_schedule_menu
 
     # Перевірка наявності кнопки архіву в меню
     menu = get_admin_schedule_menu()
@@ -390,7 +390,7 @@ def test_format_replacements_broadcast():
 
 
 def test_updated_help_sections():
-    from handlers.start import HELP_SECTIONS
+    from queue_bot.handlers.start import HELP_SECTIONS
     assert "Хочу вище / ⬇️ Хочу нижче" in HELP_SECTIONS["⚙️ Дії в черзі"]
     assert "17:00" in HELP_SECTIONS["📅 Розклад та заміни"]
     assert "Миттєві сповіщення" in HELP_SECTIONS["📅 Розклад та заміни"]
@@ -402,7 +402,7 @@ async def test_open_schedule_menu_time_of_day_switch(conn):
     from aiogram.fsm.context import FSMContext
     from aiogram.fsm.storage.memory import MemoryStorage
     from aiogram.fsm.storage.base import StorageKey
-    from handlers.schedule import open_schedule_menu
+    from queue_bot.handlers.schedule import open_schedule_menu
 
     storage = MemoryStorage()
     state = FSMContext(storage=storage, key=StorageKey(bot_id=1, chat_id=10, user_id=10))

@@ -1,0 +1,16 @@
+name: Покращення
+description: Пропозиція для бота
+title: 'feature: '
+body:
+  - type: textarea
+    id: need
+    attributes:
+      label: Яку задачу це вирішує?
+    validations:
+      required: true
+  - type: textarea
+    id: behavior
+    attributes:
+      label: Як це має працювати?
+    validations:
+      required: true

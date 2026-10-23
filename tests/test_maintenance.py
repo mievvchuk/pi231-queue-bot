@@ -1,6 +1,6 @@
 import pytest
-from services import maintenance, queues, users
-from services.errors import BotError
+from queue_bot.services import maintenance, queues, users
+from queue_bot.services.errors import BotError
 
 
 def test_maintenance_flag_and_time(conn):
@@ -47,7 +47,7 @@ async def test_maintenance_handlers_flow(conn):
     from aiogram.fsm.context import FSMContext
     from aiogram.fsm.storage.memory import MemoryStorage
     from aiogram.fsm.storage.base import StorageKey
-    from handlers.admin import (
+    from queue_bot.handlers.admin import (
         start_maintenance_prompt,
         process_maintenance_time_entry,
         disable_maintenance,
