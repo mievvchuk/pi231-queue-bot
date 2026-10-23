@@ -46,14 +46,13 @@ async def run_web_server():
 async def main() -> None:
     logging.basicConfig(level=logging.INFO)
 
-    # 1. Запускаємо healthcheck сервер першим ділом, щоб Render/UptimeRobot миттєво отримували 200 OK
-    await run_web_server()
-
     if not config.DATABASE_URL:
         raise RuntimeError("DATABASE_URL is not set. Please specify Neon PostgreSQL URL in .env")
+    await run_web_server()
     conn = connect(config.DATABASE_URL)
     init_admins(conn, config.get_initial_admin_ids())
 
+    from handlers import bans, navigation
     from handlers import polls as polls_handler
     from handlers import schedule as schedule_handler
 
@@ -62,6 +61,8 @@ async def main() -> None:
     dp.message.outer_middleware(Guard())
     dp.callback_query.outer_middleware(Guard())
     dp.include_routers(
+        navigation.router,
+        bans.router,
         start.router,
         polls_handler.router,
         admin.router,

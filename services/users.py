@@ -26,7 +26,8 @@ def get_user(conn: sqlite3.Connection, telegram_id: int):
 
 
 def get_user_by_id(conn, user_id: int):
-    return conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+    row = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+    return dict(row) if row else None
 
 
 def register_user(conn: sqlite3.Connection, telegram_id: int, full_name: str):
@@ -86,6 +87,8 @@ def toggle_block_user(conn, user_id: int) -> bool:
 
 def list_blocked_users(conn):
     """Повертає список заблокованих студентів."""
+    from services.restrictions import expire_due_restrictions
+    expire_due_restrictions(conn)
     return conn.execute("SELECT * FROM users WHERE is_blocked ORDER BY LOWER(full_name), id").fetchall()
 
 
@@ -202,9 +205,9 @@ def admin_toggle_block_user(conn, actor_id: int, user_id: int) -> bool:
     if not user:
         raise BotError("Користувача не знайдено.")
 
-    with transaction(conn):
-        new_state = not bool(user["is_blocked"])
-        conn.execute("UPDATE users SET is_blocked = ? WHERE id = ?", (new_state, user_id))
-        action = "block_user" if new_state else "unblock_user"
-        admins.log_action(conn, actor_id, action, f"{user_id}: {user['full_name']}")
-        return new_state
+    from services import restrictions
+    if restrictions.restriction_message(conn, user['telegram_id']):
+        restrictions.clear_restriction(conn, actor_id, user_id)
+        return False
+    restrictions.set_restriction(conn, actor_id, user_id)
+    return True

@@ -67,7 +67,8 @@ def get_queue_view_reply_menu(is_admin: bool = False) -> ReplyKeyboardMarkup:
         ["🔄 Оновити", "🔙 До черг"],
     ]
     if is_admin:
-        rows.append(["⚡ Керувати чергою (Адмін)"])
+        rows.append(["⚡ Режим адміна"])
+    rows.append(['🏠 Головне меню'])
     return make_reply_keyboard(rows)
 
 
@@ -119,7 +120,7 @@ def get_admin_reply_menu(is_owner: bool = True) -> ReplyKeyboardMarkup:
         rows.append(["👥 Список групи", "⚙️ Налаштування"])
     else:
         rows.append(["👥 Список групи"])
-    rows.append(["🏠 Головне меню (Як студент)"])
+    rows.append(["👤 Режим студента"])
     return make_reply_keyboard(rows)
 
 
@@ -166,6 +167,7 @@ def get_user_card_menu(is_blocked: bool) -> ReplyKeyboardMarkup:
     """Клавіатура картки користувача."""
     block_btn = "🟢 Розблокувати" if is_blocked else "⛔ Заблокувати"
     return make_reply_keyboard([
+        ['⏳ Бан на N днів'],
         ["✏️ Змінити ПІБ", block_btn],
         ["🗑 Видалити", "🔙 До користувачів"],
     ])
@@ -664,6 +666,17 @@ class Guard(BaseMiddleware):
     async def __call__(self, handler, event, data):
         conn = data.get("conn")
         if conn:
+            from services.restrictions import restriction_message
+            user = getattr(event, 'from_user', None)
+            reason = restriction_message(conn, user.id) if user else None
+            if reason:
+                if isinstance(event, CallbackQuery):
+                    with suppress(TelegramBadRequest):
+                        await event.answer(reason, show_alert=True)
+                elif isinstance(event, Message) and event.chat.type == 'private':
+                    from aiogram.types import ReplyKeyboardRemove
+                    await event.answer(reason, reply_markup=ReplyKeyboardRemove())
+                return
             from services.maintenance import (
                 get_maintenance_end_time,
                 get_maintenance_message,

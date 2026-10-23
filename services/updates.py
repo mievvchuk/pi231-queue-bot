@@ -97,6 +97,8 @@ def mark_version_sent(conn, version: str, description: str) -> None:
 
 
 def get_active_user_ids(conn) -> list[int]:
+    from services.restrictions import expire_due_restrictions
+    expire_due_restrictions(conn)
     rows = conn.execute(
         "SELECT telegram_id FROM users WHERE telegram_id > 0 AND is_blocked IS NOT TRUE"
     ).fetchall()

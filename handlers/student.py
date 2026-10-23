@@ -88,7 +88,7 @@ async def open_queue_screen(message: Message, conn, subjects, session_id: int, n
     session = get_session_or_fail(conn, session_id)
     entries = queues.get_entries(conn, session_id)
     is_adm = admins.is_admin(conn, message.from_user.id)
-    text = format_queue(subjects, session, entries, message.from_user.id, show_id=is_adm)
+    text = '👤 <b>Режим студента</b>\n\n' + format_queue(subjects, session, entries, message.from_user.id, show_id=is_adm)
     if note:
         text = f"{note}\n\n{text}"
     markup = get_queue_view_reply_menu(is_admin=is_adm)

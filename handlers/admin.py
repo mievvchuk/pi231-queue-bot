@@ -157,7 +157,7 @@ def get_admin_queue_menu(is_open: bool) -> ReplyKeyboardMarkup:
     rows = [
         ["➕ Додати студентів", "🔢 Керувати студентами"],
         [lock_text, "📦 Завершити чергу"],
-        ["👤 Як студент (Моє місце)", "🔄 Оновити"],
+        ["👤 Режим студента", "🔄 Оновити"],
         ["🔙 Назад", "🔙 В адмін-панель"],
     ]
     return make_reply_keyboard(rows)
@@ -167,6 +167,7 @@ def get_admin_student_menu(is_blocked: bool) -> ReplyKeyboardMarkup:
     block_btn = "🟢 Розблокувати" if is_blocked else "⛔ Заблокувати"
     rows = [
         ["⬆️ Вище", "⬇️ Нижче"],
+        ['⏳ Бан на N днів'],
         ["🔢 Задати номер", "✏️ Змінити ім'я"],
         [block_btn, "✅ Позначити «Здав»"],
         ["❌ Видалити з черги"],
@@ -175,10 +176,14 @@ def get_admin_student_menu(is_blocked: bool) -> ReplyKeyboardMarkup:
     return make_reply_keyboard(rows)
 
 
-async def open_admin_queue_manager(message: Message, conn, subjects, session_id: int, note: str = ""):
+async def open_admin_queue_manager(message: Message, conn, subjects, session_id: int, note: str = "", state=None):
+    if state is not None:
+        from handlers.navigation import AdminNavigation
+        await state.set_state(AdminNavigation.queue)
+        await state.update_data(session_id=session_id, ui_mode='admin')
     session = get_open_session(conn, session_id)
     entries = queues.get_entries(conn, session_id)
-    text = format_queue(subjects, session, entries, show_id=True)
+    text = '⚡ <b>Режим адміна</b>\n\n' + format_queue(subjects, session, entries, show_id=True)
     if note:
         text = f"{note}\n\n{text}"
     await message.answer(text, reply_markup=get_admin_queue_menu(session["status"] == "open"))
@@ -214,7 +219,7 @@ async def open_admin_student_manager(message: Message, conn, subjects, entry_id:
     lines.append(f"📚 <b>{html.escape(subject)} — {html.escape(teacher)}</b>")
     user_name = html.escape(user["full_name"]) if user else "— вільне місце —"
     tg_info = f" <code>[ID: {user['telegram_id']}]</code>" if user and user["telegram_id"] and user["telegram_id"] > 0 else " [без TG]"
-    status_info = "⛔ Заблокований" if user and user.get("is_blocked") else "✅ Активний"
+    status_info = "⛔ Заблокований" if user and user["is_blocked"] else "✅ Активний"
     lines.append(f"👤 Студент: <b>{user_name}</b>{tg_info} — {status_info}")
     lines.append(f"📍 Поточна позиція в черзі: <b>{entry['position']}</b>")
     lines.append("")
@@ -223,7 +228,7 @@ async def open_admin_student_manager(message: Message, conn, subjects, entry_id:
     if note:
         text = f"{note}\n\n{text}"
 
-    is_blocked = bool(user and user.get("is_blocked"))
+    is_blocked = bool(user and user["is_blocked"])
     await message.answer(text, reply_markup=get_admin_student_menu(is_blocked))
 
 
@@ -243,7 +248,7 @@ async def admin_quick_manage_from_student_view(message: Message, state: FSMConte
         conn,
         subjects,
         session_id,
-        note="⚡ <b>Режим старости/адміна:</b> тут можна додати студентів за списком, змінити порядок або завершити чергу.",
+        note="⚡ <b>Режим старости/адміна:</b> тут можна додати студентів за списком, змінити порядок або завершити чергу.", state=state,
     )
 
 
@@ -297,7 +302,7 @@ async def admin_panel_open(message: Message, state: FSMContext, conn=None):
         info_lines.append("• <b>⚙️ Налаштування</b> — баг-репорти, оголошення на всю групу, техроботи, список адмінів.")
     info_lines.extend([
         "",
-        "💡 <i>Щоб самому записатися в чергу або здати лабу як студент — натисніть <b>«🏠 Головне меню (Як студент)»</b> внизу!</i>",
+        "💡 <i>Щоб самому записатися в чергу або здати лабу як студент — натисніть <b>«👤 Режим студента»</b> внизу!</i>",
     ])
     await message.answer(
         "\n".join(info_lines),
@@ -1036,7 +1041,13 @@ async def admin_category_users(message: Message, state: FSMContext):
 def format_user_card(user) -> str:
     is_placeholder = bool(user["telegram_id"] and user["telegram_id"] < 0)
     tg_status = "ще не прив’язано" if is_placeholder else "прив’язано"
+    user = dict(user)
     status_text = "⛔ заблокований" if user.get("is_blocked") else "активний"
+    if user.get('is_blocked') and user.get('banned_until'):
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+        until = datetime.fromisoformat(user['banned_until']).astimezone(ZoneInfo(config.TIMEZONE))
+        status_text = f'⏳ бан до {until:%d.%m.%Y %H:%M} (за Києвом)'
     lines = [
         "👤 <b>Користувач</b>",
         "",
@@ -1253,7 +1264,6 @@ async def admin_toggle_user_block(message: Message, state: FSMContext, conn):
         raise BotError("Користувача не обрано.")
     new_state = users.admin_toggle_block_user(conn, message.from_user.id, user_id)
     if new_state:
-        queues.remove_user_from_all_queues(conn, message.from_user.id, user_id)
         note = "⛔ <b>Користувача заблоковано</b> (знято з усіх черг)."
     else:
         note = "🟢 <b>Користувача розблоковано.</b>"
@@ -1693,9 +1703,9 @@ async def admin_selected_queue_view(message: Message, state: FSMContext, conn, s
     if not session:
         await message.answer("⚠️ Чергу не знайдено. Оберіть зі списку на кнопках внизу 👇")
         return
-    await state.clear()
     await state.update_data(session_id=session["id"])
-    await open_admin_queue_manager(message, conn, subjects, session["id"])
+    from handlers.navigation import switch_admin
+    await switch_admin(message, state, conn, subjects)
 
 
 @router.message(AdminPanelState.select_queue_for_add_student, F.text.startswith("📋 "))
@@ -1737,7 +1747,7 @@ async def admin_selected_queue_close(message: Message, state: FSMContext, conn, 
     note = "🟢 <b>Запис відкрито</b>" if make_open else "🔴 <b>Запис закрито</b>"
     await state.clear()
     await state.update_data(session_id=session["id"])
-    await open_admin_queue_manager(message, conn, subjects, session["id"], note=note)
+    await open_admin_queue_manager(message, conn, subjects, session["id"], note=note, state=state)
 
 
 # ---------- Керування обраною чергою ----------
@@ -1768,7 +1778,7 @@ async def receive_student_names(message: Message, state: FSMContext, conn, subje
         await state.clear()
         if session_id and message.text == "🔙 Назад до черги":
             await state.update_data(session_id=session_id)
-            await open_admin_queue_manager(message, conn, subjects, session_id)
+            await open_admin_queue_manager(message, conn, subjects, session_id, state=state)
         else:
             await admin_panel_open(message, state)
         return
@@ -1807,7 +1817,7 @@ async def receive_student_names(message: Message, state: FSMContext, conn, subje
     if skipped:
         result_text += f"\n\n⚠️ Пропущено: {len(skipped)}"
 
-    await open_admin_queue_manager(message, conn, subjects, session_id, note=result_text)
+    await open_admin_queue_manager(message, conn, subjects, session_id, note=result_text, state=state)
 
 
 @router.message(F.text.in_({"🔒 Закрити запис", "🔓 Відкрити запис"}), StateFilter("*"))
@@ -1820,7 +1830,7 @@ async def toggle_signup_in_manager(message: Message, state: FSMContext, conn, su
     make_open = session["status"] == "closed"
     queues.set_signup_open(conn, message.from_user.id, session_id, make_open)
     note = "🟢 <b>Запис відкрито</b>" if make_open else "🔴 <b>Запис закрито</b>"
-    await open_admin_queue_manager(message, conn, subjects, session_id, note=note)
+    await open_admin_queue_manager(message, conn, subjects, session_id, note=note, state=state)
 
 
 @router.message(F.text == "🔢 Керувати студентами", StateFilter("*"))
@@ -1895,7 +1905,7 @@ async def back_to_queue_manager_from_any(message: Message, state: FSMContext, co
         return
     await state.clear()
     await state.update_data(session_id=session_id)
-    await open_admin_queue_manager(message, conn, subjects, session_id)
+    await open_admin_queue_manager(message, conn, subjects, session_id, state=state)
 
 
 # ---------- Дії над студентом ----------
@@ -2003,9 +2013,8 @@ async def student_toggle_block(message: Message, state: FSMContext, conn, subjec
     user = conn.execute("SELECT * FROM users WHERE id = ?", (entry["user_id"],)).fetchone() if entry["user_id"] else None
     if not user:
         raise BotError("Користувача не знайдено.")
-    new_state = users.toggle_block_user(conn, user["id"])
+    new_state = users.admin_toggle_block_user(conn, message.from_user.id, user["id"])
     if new_state:
-        queues.remove_user_from_all_queues(conn, message.from_user.id, user["id"])
         await state.set_state(AdminOrderState.picking_student)
         await open_admin_student_list(
             message, conn, subjects, session_id,
@@ -2087,7 +2096,7 @@ async def confirm_finish_new(message: Message, state: FSMContext, conn, subjects
     new_id = queues.finish_session(conn, message.from_user.id, session_id, create_new=True)
     await state.clear()
     await state.update_data(session_id=new_id)
-    await open_admin_queue_manager(message, conn, subjects, new_id, note=f"✅ Чергу архівовано. Нову чергу створено (№{new_id})!")
+    await open_admin_queue_manager(message, conn, subjects, new_id, note=f"✅ Чергу архівовано. Нову чергу створено (№{new_id})!", state=state)
 
 
 # ---------- Історія черг ----------
@@ -2179,7 +2188,8 @@ async def unblock_student_click(message: Message, state: FSMContext, conn):
         user = conn.execute("SELECT * FROM users WHERE full_name = ? AND is_blocked = TRUE", (name,)).fetchone()
     if not user:
         raise BotError("Студента не знайдено.")
-    users.toggle_block_user(conn, user["id"])
+    from services.restrictions import clear_restriction
+    clear_restriction(conn, message.from_user.id, user['id'])
     await message.answer(f"🟢 Студента «{html.escape(user['full_name'])}» успішно розблоковано!")
     await show_blocked_list(message, state, conn)
 

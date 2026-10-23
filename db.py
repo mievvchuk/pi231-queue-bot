@@ -162,6 +162,9 @@ MIGRATIONS = [
         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
     """,
+    """
+    ALTER TABLE users ADD COLUMN banned_until TEXT DEFAULT NULL;
+    """,
 ]
 
 PG_SCHEMA = """
@@ -357,6 +360,7 @@ class PGConnectionWrapper:
         with self.raw.cursor() as cur:
             cur.execute(PG_SCHEMA)
             cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_blocked BOOLEAN NOT NULL DEFAULT FALSE;")
+            cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS banned_until TEXT DEFAULT NULL;")
             cur.execute("ALTER TABLE queue_sessions ADD COLUMN IF NOT EXISTS queue_type TEXT NOT NULL DEFAULT 'lesson';")
             cur.execute("ALTER TABLE queue_entries ADD COLUMN IF NOT EXISTS ready_to_swap BOOLEAN NOT NULL DEFAULT FALSE;")
             cur.execute("ALTER TABLE queue_entries ADD COLUMN IF NOT EXISTS swap_wish TEXT DEFAULT NULL;")

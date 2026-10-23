@@ -3,6 +3,7 @@ import sqlite3
 from db import transaction
 from services.admins import log_action, require_admin
 from services.errors import BotError
+from services.restrictions import require_available
 
 UNFINISHED = ("open", "closed")
 
@@ -112,6 +113,7 @@ def join_queue(conn: sqlite3.Connection, telegram_id: int, session_id: int,
                position: int | None = None) -> tuple[int, int]:
     """Повертає (місце студента, усього в черзі).
     position=None — у кінець; інакше студент вставляється на вибраний номер."""
+    require_available(conn, telegram_id)
     with transaction(conn):
         from services.maintenance import get_maintenance_end_time, is_maintenance_active
         if is_maintenance_active(conn):
@@ -228,6 +230,7 @@ def _place_user_at(conn, session_id: int, user_id: int, position: int, allow_shi
 
 def _own_active_entry(conn, telegram_id: int, session_id: int):
     """Студент працює лише з власним записом (шукаємо за його Telegram ID)."""
+    require_available(conn, telegram_id)
     entry = conn.execute(
         """SELECT e.* FROM queue_entries e JOIN users u ON u.id = e.user_id
            WHERE e.session_id = ? AND u.telegram_id = ? AND e.status = 'active'""",
@@ -295,6 +298,7 @@ def leave_queue(conn: sqlite3.Connection, telegram_id: int, session_id: int) -> 
 def create_queue(conn: sqlite3.Connection, telegram_id: int, subject_id: int,
                  teacher_id: int, lesson_title: str = "", queue_type: str = "lesson") -> int:
     """Будь-який зареєстрований студент може відкрити чергу."""
+    require_available(conn, telegram_id)
     with transaction(conn):
         from services.maintenance import get_maintenance_end_time, is_maintenance_active
         if is_maintenance_active(conn):
@@ -418,9 +422,9 @@ def add_student_by_admin(conn, actor_id: int, session_id: int, user_id: int, pos
     with transaction(conn):
         require_admin(conn, actor_id)
         session = _require_session(conn, session_id)
-        user = conn.execute("SELECT is_blocked FROM users WHERE id = ?", (user_id,)).fetchone()
-        if user and bool(user["is_blocked"]):
-            raise BotError("Цього студента заблоковано адміністратором.")
+        user = conn.execute("SELECT telegram_id FROM users WHERE id = ?", (user_id,)).fetchone()
+        if user:
+            require_available(conn, user['telegram_id'])
         # Перевіряємо чи студент уже є в черзі
         exists = conn.execute(
             "SELECT 1 FROM queue_entries WHERE session_id = ? AND user_id = ? AND status = 'active'",
@@ -597,7 +601,8 @@ def finish_session(conn, actor_id: int, session_id: int, create_new: bool = Fals
         new_id = None
         if create_new:
             new_id = _insert_session(
-                conn, session["subject_id"], session["teacher_id"], session["lesson_title"]
+                conn, session["subject_id"], session["teacher_id"], session["lesson_title"],
+                queue_type=session['queue_type'],
             )
             _fill_new_queue(conn, new_id, entries, carry)
         log_action(conn, actor_id, "finish_session", f"{session_id} -> {new_id}")

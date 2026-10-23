@@ -182,7 +182,7 @@ def test_new_grouped_keyboards(conn):
     assert "📅 Розклад і заміни" in admin_texts
     assert "👥 Список групи" in admin_texts
     assert "⚙️ Налаштування" in admin_texts
-    assert "🏠 Головне меню (Як студент)" in admin_texts
+    assert "👤 Режим студента" in admin_texts
 
     polls_kb = get_admin_polls_menu()
     polls_texts = [btn.text for row in polls_kb.keyboard for btn in row]

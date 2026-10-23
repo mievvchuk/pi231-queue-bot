@@ -132,6 +132,9 @@ def record_poll_answer(
     option_ids: list[int],
 ) -> int | None:
     """Обробляє подію PollAnswer (голосування користувача у неанонімному опитуванні)."""
+    from services.restrictions import restriction_message
+    if restriction_message(conn, voter_telegram_id):
+        return None
     inst = conn.execute(
         "SELECT * FROM poll_instances WHERE tg_poll_id = ?",
         (str(tg_poll_id),),
@@ -174,6 +177,10 @@ def record_poll_state_update(
     poll_id = inst["poll_id"]
     poll = get_poll(conn, poll_id)
     if not poll:
+        return None
+
+    from services.restrictions import restriction_message
+    if poll['target'] == 'private' and restriction_message(conn, inst['chat_id']):
         return None
 
     with transaction(conn):
