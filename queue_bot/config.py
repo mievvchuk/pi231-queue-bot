@@ -58,6 +58,7 @@ OWNER_ID = integer('OWNER_ID', 0)
 GROUP_CHAT_ID = os.getenv('GROUP_CHAT_ID', '').strip()
 SUBJECTS_PATH = data_path('SUBJECTS_PATH', 'subjects.json')
 SCHEDULE_PATH = data_path('SCHEDULE_PATH', 'schedule.json')
+LAB_CATALOG_PATH = data_path('LAB_CATALOG_PATH', 'lab_catalog.json')
 STUDENT_GROUP = os.getenv('STUDENT_GROUP', 'ПІ-231')
 NOTIFICATION_TIME = os.getenv('NOTIFICATION_TIME', '17:00')
 TIMEZONE = os.getenv('TZ', 'Europe/Kyiv')
@@ -101,6 +102,8 @@ def get_initial_admin_ids():
 
 
 def validate_runtime():
+    from queue_bot.services.lab_catalog import load_catalog
+    load_catalog(LAB_CATALOG_PATH)
     if not DATABASE_URL:
         raise RuntimeError('Set DATABASE_URL in the hosting environment or .env')
     get_bot_token()

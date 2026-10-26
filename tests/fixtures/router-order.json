@@ -290,7 +290,9 @@
       "owner_reject_subject_request",
       "legacy_view_queue",
       "legacy_button_finish",
-      "legacy_ask_leave"
+      "legacy_ask_leave",
+      "lab_selection_callback",
+      "passed_selection_callback"
     ]
   },
   {

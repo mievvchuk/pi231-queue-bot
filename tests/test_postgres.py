@@ -97,12 +97,16 @@ def test_postgres_existing_entry_upgrades_to_unknown_count(pg_conn):
     pg_conn.raw.execute('ALTER TABLE queue_entries DROP COLUMN lab_count')
     pg_conn.raw.execute('ALTER TABLE queue_entries DROP COLUMN planned_minutes')
     pg_conn.raw.execute('ALTER TABLE queue_entries DROP COLUMN labs_passed')
+    pg_conn.raw.execute('ALTER TABLE queue_entries DROP COLUMN selected_labs')
+    pg_conn.raw.execute('ALTER TABLE queue_entries DROP COLUMN passed_labs')
+    pg_conn.raw.execute('ALTER TABLE queue_entries DROP COLUMN entry_revision')
     sid = pg_conn.raw.execute('INSERT INTO queue_sessions (subject_id, teacher_id) VALUES (1, 1) RETURNING id').fetchone()[0]
     pg_conn.raw.execute('INSERT INTO queue_entries (session_id, user_id, position) VALUES (%s, 1, 1)', (sid,))
     pg_conn._init_schema()
     row = queues.get_entries(pg_conn, sid)[0]
     assert row['lab_count'] is None and row['planned_minutes'] is None and row['telegram_id'] == 1 and row['position'] == 1
     assert row['labs_passed'] == 0
+    assert row['selected_labs'] is None and row['passed_labs'] == '[]' and row['entry_revision'] == 0
     pg_conn._init_schema()  # Repeated deploys are idempotent.
     assert len(queues.get_entries(pg_conn, sid)) == 1
 
@@ -118,3 +122,19 @@ def test_postgres_partial_completion_survives_restart(pg_conn):
     assert current['lab_count'] == 2 and current['planned_minutes'] == 15
     assert queues.record_own_passed_labs(pg_conn, 1, sid, 2, entry_id=current['id'], expected_count=2) == 0
     assert queues.get_history(pg_conn, sid)[0]['labs_passed'] == 3
+
+
+def test_postgres_numbered_labs_partial_transfer_and_restart(pg_conn):
+    import json
+    sid = queues.create_session(pg_conn, 100, 5, 1)
+    queues.join_queue(pg_conn, 1, sid, lab_numbers=[1, 2], planned_minutes=35)
+    old = queues.get_entries(pg_conn, sid)[0]
+    assert queues.record_own_passed_lab_numbers(pg_conn, 1, sid, [1], entry_id=old['id'], expected_revision=old['entry_revision']) == [2]
+    pg_conn.close()
+    row = queues.get_entries(pg_conn, sid)[0]
+    assert row['planned_minutes'] == 10 and row['position'] == 1
+    assert json.loads(row['selected_labs']) == [2] and json.loads(row['passed_labs']) == [1]
+    renewed = queues.finish_session(pg_conn, 100, sid, create_new=True, carry={old['id']: 2})
+    current = queues.get_entries(pg_conn, renewed)[1]
+    assert json.loads(current['selected_labs']) == [2] and current['passed_labs'] == '[]'
+    assert current['labs_passed'] == 0

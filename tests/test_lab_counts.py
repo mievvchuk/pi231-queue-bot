@@ -81,9 +81,10 @@ def test_edit_is_own_only_closed_allowed_banned_rejected(conn, make_user):
 def test_old_sqlite_migrates_without_filling_unknown_counts(tmp_path):
     path = str(tmp_path / 'old.db')
     raw = sqlite3.connect(path, isolation_level=None)
-    for migration in database.MIGRATIONS[:-1]:
+    # Before the four additive workload migrations: count, minutes, passed count, identities.
+    for migration in database.MIGRATIONS[:-4]:
         raw.executescript(migration)
-    raw.execute(f'PRAGMA user_version = {len(database.MIGRATIONS) - 1}')
+    raw.execute(f'PRAGMA user_version = {len(database.MIGRATIONS) - 4}')
     raw.execute("INSERT INTO users (telegram_id, full_name) VALUES (1, 'Петренко Іван')")
     raw.execute('INSERT INTO queue_sessions (subject_id, teacher_id) VALUES (1, 1)')
     raw.execute('INSERT INTO queue_entries (session_id, user_id, position) VALUES (1, 1, 1)')
@@ -91,6 +92,9 @@ def test_old_sqlite_migrates_without_filling_unknown_counts(tmp_path):
     conn = database.connect(path)
     try:
         assert queues.get_entries(conn, 1)[0]['lab_count'] is None
+        assert queues.get_entries(conn, 1)[0]['planned_minutes'] is None
+        assert queues.get_entries(conn, 1)[0]['labs_passed'] == 0
+        assert queues.get_entries(conn, 1)[0]['selected_labs'] is None
         assert queues.get_entries(conn, 1)[0]['full_name'] == 'Петренко Іван'
     finally:
         conn.close()

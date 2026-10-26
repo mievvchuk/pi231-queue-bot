@@ -40,10 +40,11 @@ from queue_bot.handlers.common import (
 )
 from queue_bot.services import admins, queues, users
 from queue_bot.services.errors import BotError
-from queue_bot.handlers.completions import CompletionFlow, begin_completion, receive_passed_labs
+from queue_bot.handlers.completions import CompletionFlow, begin_completion, receive_passed_labs, passed_selection_callback
+from queue_bot.services import lab_catalog
 from queue_bot.handlers.lab_counts import (
     LAB_COUNT_BUTTON, TIME_BUTTON, LabCountFlow, ask_lab_count, ask_planned_minutes,
-    begin_lab_count, receive_lab_count, receive_planned_minutes,
+    begin_lab_count, receive_lab_count, receive_planned_minutes, lab_selection_callback,
 )
 
 log = logging.getLogger(__name__)
@@ -88,15 +89,16 @@ async def ensure_session_id(message: Message, state: FSMContext) -> int | None:
     return session_id
 
 
-async def open_queue_screen(message: Message, conn, subjects, session_id: int, note: str = ""):
+async def open_queue_screen(message: Message, conn, subjects, session_id: int, note: str = "", *, telegram_id=None):
     session = get_session_or_fail(conn, session_id)
     entries = queues.get_entries(conn, session_id)
-    is_adm = admins.is_admin(conn, message.from_user.id)
-    text = '👤 <b>Режим студента</b>\n\n' + format_queue(subjects, session, entries, message.from_user.id, show_id=is_adm)
+    uid = telegram_id if telegram_id is not None else message.from_user.id
+    is_adm = admins.is_admin(conn, uid)
+    text = '👤 <b>Режим студента</b>\n\n' + format_queue(subjects, session, entries, uid, show_id=is_adm)
     if note:
         text = f"{note}\n\n{text}"
-    in_queue = queues.get_user_position(conn, message.from_user.id, session_id) is not None
-    markup = get_queue_view_reply_menu(is_admin=is_adm, can_edit_labs=in_queue and session['status'] != 'archived')
+    in_queue = queues.get_user_position(conn, uid, session_id) is not None
+    markup = get_queue_view_reply_menu(is_admin=is_adm, can_edit_labs=in_queue and session['status'] != 'archived' and bool(lab_catalog.labs_for_session(session)))
     await message.answer(text, reply_markup=markup)
 
 
@@ -436,7 +438,9 @@ async def show_queue_actions(message: Message, state: FSMContext, conn):
     swap_wish = queues.get_swap_wish(conn, message.from_user.id, session_id) if is_in_queue else None
     ready_to_swap = queues.is_ready_to_swap(conn, message.from_user.id, session_id) if is_in_queue else False
     markup = get_queue_actions_reply_menu(
-        is_in_queue, is_open=is_open, can_pick_number=can_pick, swap_wish=swap_wish, ready_to_swap=ready_to_swap
+        is_in_queue, is_open=is_open, can_pick_number=can_pick, swap_wish=swap_wish, ready_to_swap=ready_to_swap,
+        labs_available=bool(lab_catalog.labs_for_session(session)),
+        consultation=session['queue_type'] == 'consultation' or session['subject_id'] == 7,
     )
     await message.answer("⚙️ <b>Оберіть дію:</b>", reply_markup=markup)
 
@@ -535,12 +539,12 @@ async def back_to_current_queue(message: Message, state: FSMContext, conn, subje
     await open_queue_screen(message, conn, subjects, session_id)
 
 
-@router.message(F.text.in_({"✅ Здав", "здав", "здала"}), not_admin_state_filter)
+@router.message(F.text.in_({"✅ Здав", "здав", "здала", '✅ Завершити консультацію'}), not_admin_state_filter)
 async def mark_passed(message: Message, state: FSMContext, conn, subjects):
     session_id = await ensure_session_id(message, state)
     if not session_id:
         return
-    await begin_completion(message, state, conn, session_id)
+    await begin_completion(message, state, conn, session_id, subjects=subjects)
 
 
 @router.message(F.text.in_({"❌ Не здав", "не здав", "не здала"}), not_admin_state_filter)
@@ -589,7 +593,7 @@ async def join_queue_end(message: Message, state: FSMContext, conn, subjects):
     session = get_session_or_fail(conn, session_id)
     if session["status"] != "open":
         raise BotError("Запис у цю чергу закрито.")
-    await begin_lab_count(message, state, conn, session_id)
+    await begin_lab_count(message, state, conn, session_id, subjects=subjects)
 
 
 @router.message(F.text.in_({"🔢 Обрати місце", "🔢 Обрати номер"}), not_admin_state_filter)
@@ -601,8 +605,8 @@ async def ask_specific_number(message: Message, state: FSMContext, conn, subject
     if session["status"] != "open":
         raise BotError("Запис у цю чергу закрито.")
     if queues.are_first_10_occupied(conn, session_id) and not queues.has_free_slots(conn, session_id):
-        await message.answer('ℹ️ Перші 10 місць уже зайняті. Записуємо в кінець після вибору кількості лабораторних.')
-        await begin_lab_count(message, state, conn, session_id)
+        await message.answer('ℹ️ Перші 10 місць уже зайняті. Записуємо в кінець черги.')
+        await begin_lab_count(message, state, conn, session_id, subjects=subjects)
         return
     await state.set_state(StudentFlow.pick_position)
     await state.update_data(session_id=session_id)
@@ -640,13 +644,13 @@ async def handle_join_number(message: Message, state: FSMContext, conn, subjects
         await message.answer('Оберіть вільне місце від 1 до 10 або наявне вільне місце в черзі.')
         return
     try:
-        await begin_lab_count(message, state, conn, session_id, position=pos)
+        await begin_lab_count(message, state, conn, session_id, position=pos, subjects=subjects)
     except BotError as err:
         await message.answer(f"{err}\nСпробуйте інший номер або натисніть «🔙 Назад до черги»:")
         return
 
 
-router.message(F.text == LAB_COUNT_BUTTON, not_admin_state_filter)(ask_lab_count)
+router.message(F.text.in_({LAB_COUNT_BUTTON, '🧪 Кількість лабораторних'}), not_admin_state_filter)(ask_lab_count)
 router.message(F.text == TIME_BUTTON, not_admin_state_filter)(ask_planned_minutes)
 
 
@@ -1454,7 +1458,7 @@ async def legacy_button_finish(callback: CallbackQuery, conn, subjects, state: F
     session_id = int(session_id)
     passed = prefix == "sd"
     if passed:
-        await begin_completion(callback.message, state, conn, session_id, telegram_id=callback.from_user.id)
+        await begin_completion(callback.message, state, conn, session_id, telegram_id=callback.from_user.id, subjects=subjects)
         return
     queues.finish_own_entry(conn, callback.from_user.id, session_id, passed)
     note = "✅ <b>Здачу зараховано</b>\n\nВас знято з черги." if passed else "❌ <b>Позначено: не здав</b>"
@@ -1474,3 +1478,5 @@ async def legacy_ask_leave(callback: CallbackQuery, conn):
 router.message(LabCountFlow.entering, F.text)(receive_lab_count)
 router.message(LabCountFlow.minutes, F.text)(receive_planned_minutes)
 router.message(CompletionFlow.count, F.text)(receive_passed_labs)
+router.callback_query(F.data.startswith('labpick:'))(lab_selection_callback)
+router.callback_query(F.data.startswith('labdone:'))(passed_selection_callback)

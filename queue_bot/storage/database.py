@@ -176,6 +176,11 @@ MIGRATIONS = [
     """
     ALTER TABLE queue_entries ADD COLUMN labs_passed INTEGER NOT NULL DEFAULT 0 CHECK (labs_passed >= 0);
     """,
+    """
+    ALTER TABLE queue_entries ADD COLUMN selected_labs TEXT DEFAULT NULL;
+    ALTER TABLE queue_entries ADD COLUMN passed_labs TEXT NOT NULL DEFAULT '[]';
+    ALTER TABLE queue_entries ADD COLUMN entry_revision INTEGER NOT NULL DEFAULT 0;
+    """,
 ]
 
 PG_SCHEMA = """
@@ -378,6 +383,9 @@ class PGConnectionWrapper:
             cur.execute("ALTER TABLE queue_entries ADD COLUMN IF NOT EXISTS lab_count INTEGER DEFAULT NULL CHECK (lab_count IS NULL OR lab_count BETWEEN 1 AND 20);")
             cur.execute("ALTER TABLE queue_entries ADD COLUMN IF NOT EXISTS planned_minutes INTEGER DEFAULT NULL CHECK (planned_minutes IS NULL OR planned_minutes >= 5);")
             cur.execute("ALTER TABLE queue_entries ADD COLUMN IF NOT EXISTS labs_passed INTEGER NOT NULL DEFAULT 0 CHECK (labs_passed >= 0);")
+            cur.execute("ALTER TABLE queue_entries ADD COLUMN IF NOT EXISTS selected_labs TEXT DEFAULT NULL;")
+            cur.execute("ALTER TABLE queue_entries ADD COLUMN IF NOT EXISTS passed_labs TEXT NOT NULL DEFAULT '[]';")
+            cur.execute("ALTER TABLE queue_entries ADD COLUMN IF NOT EXISTS entry_revision INTEGER NOT NULL DEFAULT 0;")
             cur.execute("ALTER TABLE queue_sessions ADD COLUMN IF NOT EXISTS queue_type TEXT NOT NULL DEFAULT 'lesson';")
             cur.execute("ALTER TABLE queue_entries ADD COLUMN IF NOT EXISTS ready_to_swap BOOLEAN NOT NULL DEFAULT FALSE;")
             cur.execute("ALTER TABLE queue_entries ADD COLUMN IF NOT EXISTS swap_wish TEXT DEFAULT NULL;")
