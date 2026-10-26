@@ -18,8 +18,11 @@
 - Legacy SQLite/PostgreSQL upgrades preserve old metadata without guessing lab identities; transfer/history retain chosen/completed numbers.
 
 ## Tasks
-- [ ] Write failing service tests for full catalogue, summed limits, numbered signup/edit/completion, revision protection, preservation and exemptions.
-- [ ] Add catalogue validation, additive schema and queue services; verify SQLite and PostgreSQL.
-- [ ] Write failing dispatcher tests for multiselect, numeric text, bounds, partial completion, stale buttons and consultation bypass.
-- [ ] Implement picker/flows, update shared display and obsolete labels, preserve router order elsewhere.
-- [ ] Run full suite/compileall/actionlint/diffcheck; fresh review and important fixes; update PR3 and docs without merge/deploy.
+- [x] Write failing service tests for full catalogue, summed limits, numbered signup/edit/completion, revision protection, preservation and exemptions.
+- [x] Add catalogue validation, additive schema and queue services; verify SQLite and PostgreSQL.
+- [x] Write failing dispatcher tests for multiselect, numeric text, bounds, partial completion, stale buttons and consultation bypass.
+- [x] Implement picker/flows, update shared display and obsolete labels, preserve router order elsewhere.
+- [x] Run full suite/compileall/actionlint/diffcheck; fresh review and important fixes; update PR3 and docs without merge/deploy.
+
+## Final evidence
+233 tests passed with PostgreSQL16 in73.55s; compileall, actionlint and diffcheck passed. Fresh static review of484f106..11c21b9 found no Critical/Important/Minor findings. Both earlier nonblocking concerns are covered by revision guards and pre-workload SQLite upgrade coverage. Existing PR3 updated; no merge or live deployment. Temporary PostgreSQL removed.
