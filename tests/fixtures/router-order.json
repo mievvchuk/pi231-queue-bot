@@ -257,6 +257,7 @@
       "ask_specific_number",
       "handle_join_number",
       "ask_lab_count",
+      "ask_planned_minutes",
       "start_swap_flow",
       "paginate_swap_targets",
       "swap_target_chosen",
@@ -277,7 +278,9 @@
       "new_queue_subject_selected",
       "back_to_queue_subject",
       "new_queue_teacher_selected",
-      "receive_lab_count"
+      "receive_lab_count",
+      "receive_planned_minutes",
+      "receive_passed_labs"
     ],
     "callback_query": [
       "swap_accept",

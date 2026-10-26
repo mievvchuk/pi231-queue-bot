@@ -82,22 +82,39 @@ def test_postgres_select_survives_schema_change_and_reconnect(pg_conn):
 def test_postgres_lab_count_migration_transfer_and_reconnect(pg_conn):
     # Fixture creates the old users table and starts the real additive adapter.
     sid = queues.create_session(pg_conn, 100, 1, 1)
-    queues.join_queue(pg_conn, 1, sid, lab_count=2)
+    queues.join_queue(pg_conn, 1, sid, lab_count=2, planned_minutes=17)
     entry = queues.get_entries(pg_conn, sid)[0]
-    assert entry['lab_count'] == 2
+    assert entry['lab_count'] == 2 and entry['planned_minutes'] == 17
     new = queues.finish_session(pg_conn, 100, sid, create_new=True, carry={entry['id']: 2})
     pg_conn.close()
     assert [r['lab_count'] for r in queues.get_entries(pg_conn, new)] == [None, 2]
+    assert [r['planned_minutes'] for r in queues.get_entries(pg_conn, new)] == [None, 17]
     queues.set_own_lab_count(pg_conn, 1, new, 3)
     assert queues.get_entries(pg_conn, new)[1]['lab_count'] == 3
 
 
 def test_postgres_existing_entry_upgrades_to_unknown_count(pg_conn):
     pg_conn.raw.execute('ALTER TABLE queue_entries DROP COLUMN lab_count')
+    pg_conn.raw.execute('ALTER TABLE queue_entries DROP COLUMN planned_minutes')
+    pg_conn.raw.execute('ALTER TABLE queue_entries DROP COLUMN labs_passed')
     sid = pg_conn.raw.execute('INSERT INTO queue_sessions (subject_id, teacher_id) VALUES (1, 1) RETURNING id').fetchone()[0]
     pg_conn.raw.execute('INSERT INTO queue_entries (session_id, user_id, position) VALUES (%s, 1, 1)', (sid,))
     pg_conn._init_schema()
     row = queues.get_entries(pg_conn, sid)[0]
-    assert row['lab_count'] is None and row['telegram_id'] == 1 and row['position'] == 1
+    assert row['lab_count'] is None and row['planned_minutes'] is None and row['telegram_id'] == 1 and row['position'] == 1
+    assert row['labs_passed'] == 0
     pg_conn._init_schema()  # Repeated deploys are idempotent.
     assert len(queues.get_entries(pg_conn, sid)) == 1
+
+
+def test_postgres_partial_completion_survives_restart(pg_conn):
+    sid = queues.create_session(pg_conn, 100, 1, 1)
+    queues.join_queue(pg_conn, 1, sid, lab_count=3, planned_minutes=15)
+    entry = queues.get_entries(pg_conn, sid)[0]
+    assert queues.record_own_passed_labs(pg_conn, 1, sid, 1, entry_id=entry['id'], expected_count=3) == 2
+    pg_conn.close()
+    current = queues.get_entries(pg_conn, sid)[0]
+    assert current['position'] == 1 and current['labs_passed'] == 1
+    assert current['lab_count'] == 2 and current['planned_minutes'] == 15
+    assert queues.record_own_passed_labs(pg_conn, 1, sid, 2, entry_id=current['id'], expected_count=2) == 0
+    assert queues.get_history(pg_conn, sid)[0]['labs_passed'] == 3

@@ -40,8 +40,10 @@ from queue_bot.handlers.common import (
 )
 from queue_bot.services import admins, queues, users
 from queue_bot.services.errors import BotError
+from queue_bot.handlers.completions import CompletionFlow, begin_completion, receive_passed_labs
 from queue_bot.handlers.lab_counts import (
-    LAB_COUNT_BUTTON, LabCountFlow, ask_lab_count, begin_lab_count, receive_lab_count,
+    LAB_COUNT_BUTTON, TIME_BUTTON, LabCountFlow, ask_lab_count, ask_planned_minutes,
+    begin_lab_count, receive_lab_count, receive_planned_minutes,
 )
 
 log = logging.getLogger(__name__)
@@ -538,13 +540,7 @@ async def mark_passed(message: Message, state: FSMContext, conn, subjects):
     session_id = await ensure_session_id(message, state)
     if not session_id:
         return
-    my_pos = queues.get_user_position(conn, message.from_user.id, session_id)
-    queues.finish_own_entry(conn, message.from_user.id, session_id, passed=True)
-    await notify_next_students(message.bot, conn, subjects, session_id, removed_position=my_pos)
-    await open_queue_screen(
-        message, conn, subjects, session_id,
-        note="✅ <b>Здачу зараховано</b>\n\nВас знято з черги.",
-    )
+    await begin_completion(message, state, conn, session_id)
 
 
 @router.message(F.text.in_({"❌ Не здав", "не здав", "не здала"}), not_admin_state_filter)
@@ -651,6 +647,7 @@ async def handle_join_number(message: Message, state: FSMContext, conn, subjects
 
 
 router.message(F.text == LAB_COUNT_BUTTON, not_admin_state_filter)(ask_lab_count)
+router.message(F.text == TIME_BUTTON, not_admin_state_filter)(ask_planned_minutes)
 
 
 # ---------- Обмін місцями між студентами ----------
@@ -1452,10 +1449,13 @@ async def legacy_view_queue(callback: CallbackQuery, conn, subjects, state: FSMC
 
 
 @router.callback_query(F.data.startswith(("sd:", "sn:")))
-async def legacy_button_finish(callback: CallbackQuery, conn, subjects):
+async def legacy_button_finish(callback: CallbackQuery, conn, subjects, state: FSMContext):
     prefix, session_id = callback.data.split(":")
     session_id = int(session_id)
     passed = prefix == "sd"
+    if passed:
+        await begin_completion(callback.message, state, conn, session_id, telegram_id=callback.from_user.id)
+        return
     queues.finish_own_entry(conn, callback.from_user.id, session_id, passed)
     note = "✅ <b>Здачу зараховано</b>\n\nВас знято з черги." if passed else "❌ <b>Позначено: не здав</b>"
     with suppress(Exception):
@@ -1472,3 +1472,5 @@ async def legacy_ask_leave(callback: CallbackQuery, conn):
 
 # Specific navigation/actions must win over the quantity text fallback.
 router.message(LabCountFlow.entering, F.text)(receive_lab_count)
+router.message(LabCountFlow.minutes, F.text)(receive_planned_minutes)
+router.message(CompletionFlow.count, F.text)(receive_passed_labs)

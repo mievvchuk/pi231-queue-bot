@@ -96,28 +96,49 @@ def test_old_sqlite_migrates_without_filling_unknown_counts(tmp_path):
         conn.close()
 
 
-@pytest.mark.parametrize('count,want', [(None, ''), (1, '1 лаб. · ≈7–10 хв'), (2, '2 лаб. · ≈15–20 хв'), (3, '3 лаб. · ≈20–30 хв')])
-def test_queue_entry_displays_duration_only_for_known_quantity(count, want):
-    row = {'position': 1, 'full_name': 'Іван <Тест>', 'telegram_id': 1, 'lab_count': count}
+@pytest.mark.parametrize('count,minutes,want', [(None, None, ''), (1, 5, '1 лаб. · ≈5 хв'), (2, 17, '2 лаб. · ≈17 хв'), (None, 20, '≈20 хв'), (3, None, '3 лаб.')])
+def test_queue_entry_displays_only_student_supplied_duration(count, minutes, want):
+    row = {'position': 1, 'full_name': 'Іван <Тест>', 'telegram_id': 1, 'lab_count': count, 'planned_minutes': minutes}
     text = format_entry(row)
     assert 'Іван &lt;Тест&gt;' in text
     if want:
         assert want in text
-    else:
-        assert 'лаб.' not in text and 'хв' not in text
+    if minutes is None:
+        assert 'хв' not in text
 
 
-def test_estimates_use_configured_minutes(monkeypatch):
-    from queue_bot import config
-    monkeypatch.setattr(config, 'LAB_MIN_MINUTES', 10)
-    monkeypatch.setattr(config, 'LAB_MAX_MINUTES', 15)
-    text = format_entry({'position': 1, 'full_name': 'Іван', 'telegram_id': 1, 'lab_count': 2})
-    assert '2 лаб. · ≈20–30 хв' in text
+@pytest.mark.parametrize('bad', [0, 4, -5, 5.5, True, '10'])
+def test_manual_duration_rejects_under_five_and_non_integer_without_saving(conn, make_user, bad):
+    make_user(1, 'Петренко Іван')
+    sid = queues.create_session(conn, 100, 1, 1)
+    with pytest.raises(BotError):
+        queues.join_queue(conn, 1, sid, lab_count=2, planned_minutes=bad)
+    assert queues.get_entries(conn, sid) == []
+    queues.join_queue(conn, 1, sid, lab_count=2, planned_minutes=5)
+    with pytest.raises(BotError):
+        queues.set_own_planned_minutes(conn, 1, sid, bad)
+    assert queues.get_entries(conn, sid)[0]['planned_minutes'] == 5
 
 
-def test_inverted_duration_settings_fail_preflight(monkeypatch):
-    from queue_bot import config
-    monkeypatch.setattr(config, 'LAB_MIN_MINUTES', 15)
-    monkeypatch.setattr(config, 'LAB_MAX_MINUTES', 10)
-    with pytest.raises(RuntimeError, match='LAB_MIN_MINUTES'):
-        config.validate_runtime()
+def test_manual_duration_survives_swap_transfer_and_history_and_clears_slot(conn, make_user):
+    make_user(1, 'Петренко Іван')
+    make_user(2, 'Коваль Андрій')
+    sid = queues.create_session(conn, 100, 1, 1)
+    queues.join_queue(conn, 1, sid, lab_count=2, planned_minutes=17)
+    queues.join_queue(conn, 2, sid, planned_minutes=5)
+    a, b = queues.get_entries(conn, sid)
+    queues.swap_entries(conn, a['id'], b['id'])
+    assert [(r['telegram_id'], r['planned_minutes']) for r in queues.get_entries(conn, sid)] == [(2, 5), (1, 17)]
+    queues.leave_queue(conn, 2, sid)
+    assert queues.get_entries(conn, sid)[0]['planned_minutes'] is None
+    assert queues.get_history(conn, sid)[0]['planned_minutes'] == 5
+    new = queues.finish_session(conn, 100, sid, create_new=True, carry={a['id']: 2})
+    assert [r['planned_minutes'] for r in queues.get_entries(conn, new)] == [None, 17]
+    queues.set_own_planned_minutes(conn, 1, new, 30)
+    row = queues.get_entries(conn, new)[1]
+    assert row['lab_count'] == 2 and row['planned_minutes'] == 30 and row['position'] == 2
+    with pytest.raises(BotError):
+        queues.set_own_planned_minutes(conn, 2, new, 10)
+    queues.finish_session(conn, 100, new)
+    with pytest.raises(BotError):
+        queues.set_own_planned_minutes(conn, 1, new, 10)

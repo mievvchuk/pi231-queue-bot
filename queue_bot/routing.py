@@ -10,11 +10,11 @@ def ordered_routers():
 
 def create_dispatcher(conn, subjects):
     from queue_bot.handlers.common import Guard
-    from queue_bot.handlers.lab_counts import LabCountNavigation
+    from queue_bot.handlers.lab_counts import QueueDraftNavigation
     dp = Dispatcher(conn=conn, subjects=subjects)
     dp.message.outer_middleware(Guard())
     dp.callback_query.outer_middleware(Guard())
-    dp.message.middleware(LabCountNavigation())
-    dp.callback_query.middleware(LabCountNavigation())
+    dp.message.middleware(QueueDraftNavigation())
+    dp.callback_query.middleware(QueueDraftNavigation())
     dp.include_routers(*ordered_routers())
     return dp
