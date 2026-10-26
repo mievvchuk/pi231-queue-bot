@@ -257,7 +257,6 @@
       "ask_specific_number",
       "handle_join_number",
       "ask_lab_count",
-      "receive_lab_count",
       "start_swap_flow",
       "paginate_swap_targets",
       "swap_target_chosen",
@@ -277,7 +276,8 @@
       "cancel_student_suggest",
       "new_queue_subject_selected",
       "back_to_queue_subject",
-      "new_queue_teacher_selected"
+      "new_queue_teacher_selected",
+      "receive_lab_count"
     ],
     "callback_query": [
       "swap_accept",

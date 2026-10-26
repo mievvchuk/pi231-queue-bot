@@ -651,7 +651,6 @@ async def handle_join_number(message: Message, state: FSMContext, conn, subjects
 
 
 router.message(F.text == LAB_COUNT_BUTTON, not_admin_state_filter)(ask_lab_count)
-router.message(LabCountFlow.entering, F.text)(receive_lab_count)
 
 
 # ---------- Обмін місцями між студентами ----------
@@ -1469,3 +1468,7 @@ async def legacy_ask_leave(callback: CallbackQuery, conn):
     session_id = int(callback.data.split(":")[1])
     queues.leave_queue(conn, callback.from_user.id, session_id)
     await show(callback, "🚪 <b>Ви вийшли з черги.</b>")
+
+
+# Specific navigation/actions must win over the quantity text fallback.
+router.message(LabCountFlow.entering, F.text)(receive_lab_count)

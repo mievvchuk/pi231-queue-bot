@@ -2,12 +2,10 @@ from datetime import datetime
 from unittest.mock import AsyncMock
 
 import pytest
-from aiogram import Dispatcher
 from aiogram.fsm.storage.base import StorageKey
 from aiogram.types import Chat, Message, Update, User
 
-from queue_bot.handlers import navigation, start, student
-from queue_bot.handlers.common import Guard
+from queue_bot.routing import create_dispatcher, ordered_routers
 from queue_bot.services import queues, restrictions, users
 
 
@@ -17,11 +15,9 @@ def lab_app(conn, make_user):
     make_user(2, 'Коваль Андрій')
     sid = queues.create_session(conn, 100, 1, 1)
     subjects = [{'id': 1, 'name': 'Предмет', 'teachers': [{'id': 1, 'name': 'Викладач'}]}]
-    dp = Dispatcher(conn=conn, subjects=subjects)
-    for router in (navigation.router, student.router, start.fallback_router):
+    for router in ordered_routers():
         router._parent_router = None
-    dp.message.outer_middleware(Guard())
-    dp.include_routers(navigation.router, student.router, start.fallback_router)
+    dp = create_dispatcher(conn, subjects)
     bot = AsyncMock()
     bot.id = 5
     return dp, bot, sid
@@ -111,3 +107,29 @@ async def test_full_first_ten_still_prompts_before_appending(conn, lab_app, make
     await choose(lab_app, '20')
     assert queues.get_user_position(conn, 1, lab_app[2]) == 11
     assert queues.get_entries(conn, lab_app[2])[-1]['lab_count'] == 20
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('button', ['🔄 Оновити', '📍 Моє місце', '⚙️ Дії', '📅 Розклад', '🗳 Опитування'])
+@pytest.mark.parametrize('editing', [False, True])
+async def test_queue_navigation_discards_pending_count(conn, lab_app, button, editing):
+    sid = lab_app[2]
+    if editing:
+        queues.join_queue(conn, 1, sid, lab_count=2)
+    await choose(lab_app, '🧪 Кількість лабораторних' if editing else '📝 Стати в кінець', button, '4')
+    rows = queues.get_entries(conn, sid)
+    if editing:
+        assert rows[0]['lab_count'] == 2
+    else:
+        assert rows == []
+    key = StorageKey(bot_id=5, chat_id=1, user_id=1)
+    assert 'lab_action' not in await lab_app[0].storage.get_data(key)
+
+
+@pytest.mark.asyncio
+async def test_open_queue_command_is_not_swallowed_by_count_prompt(conn, lab_app):
+    await choose(lab_app, '📝 Стати в кінець', '➕ Відкрити чергу')
+    key = StorageKey(bot_id=5, chat_id=1, user_id=1)
+    assert await lab_app[0].storage.get_state(key) == 'StudentFlow:creating_queue_type'
+    assert 'lab_action' not in await lab_app[0].storage.get_data(key)
+    assert queues.get_user_position(conn, 1, lab_app[2]) is None

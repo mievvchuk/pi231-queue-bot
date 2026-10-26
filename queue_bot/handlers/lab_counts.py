@@ -1,4 +1,5 @@
 """Quantity prompt shared by signup and editing an existing queue entry."""
+from aiogram import BaseMiddleware
 from aiogram.fsm.state import State, StatesGroup
 
 from queue_bot.handlers.common import make_reply_keyboard
@@ -13,6 +14,23 @@ SKIP_COUNT = '➖ Не вказувати'
 
 class LabCountFlow(StatesGroup):
     entering = State()
+
+
+class LabCountNavigation(BaseMiddleware):
+    """Discard a pending quantity when another handler takes over the UI.
+
+    Runs as dispatcher inner middleware after handler selection, including
+    handlers belonging to schedule, polls and other routers.
+    """
+    async def __call__(self, handler, event, data):
+        state = data.get('state')
+        selected = getattr(data.get('handler'), 'callback', None)
+        if state and selected is not receive_lab_count and await state.get_state() == LabCountFlow.entering.state:
+            context = await state.get_data()
+            await state.clear()
+            await state.set_data({key: value for key, value in context.items()
+                                  if key not in {'lab_action', 'lab_position'}})
+        return await handler(event, data)
 
 
 async def begin_lab_count(message, state, conn, session_id, *, action='join', position=None):
