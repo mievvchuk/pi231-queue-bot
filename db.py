@@ -162,6 +162,9 @@ MIGRATIONS = [
         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
     """,
+    """
+    ALTER TABLE queue_entries ADD COLUMN labs_count INTEGER NOT NULL DEFAULT 1;
+    """,
 ]
 
 PG_SCHEMA = """
@@ -232,6 +235,7 @@ CREATE TABLE IF NOT EXISTS queue_entries (
         CHECK (status IN ('active', 'completed', 'left', 'removed', 'transferred')),
     ready_to_swap BOOLEAN NOT NULL DEFAULT FALSE,
     swap_wish TEXT DEFAULT NULL,
+    labs_count INTEGER NOT NULL DEFAULT 1,
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
     completed_at TIMESTAMP WITH TIME ZONE
 );
@@ -360,6 +364,7 @@ class PGConnectionWrapper:
             cur.execute("ALTER TABLE queue_sessions ADD COLUMN IF NOT EXISTS queue_type TEXT NOT NULL DEFAULT 'lesson';")
             cur.execute("ALTER TABLE queue_entries ADD COLUMN IF NOT EXISTS ready_to_swap BOOLEAN NOT NULL DEFAULT FALSE;")
             cur.execute("ALTER TABLE queue_entries ADD COLUMN IF NOT EXISTS swap_wish TEXT DEFAULT NULL;")
+            cur.execute("ALTER TABLE queue_entries ADD COLUMN IF NOT EXISTS labs_count INTEGER NOT NULL DEFAULT 1;")
             cur.execute("ALTER TABLE replacements ADD COLUMN IF NOT EXISTS is_archived BOOLEAN NOT NULL DEFAULT FALSE;")
             cur.execute("DROP INDEX IF EXISTS ux_one_unfinished_session;")
             cur.execute("""CREATE UNIQUE INDEX IF NOT EXISTS ux_one_unfinished_session

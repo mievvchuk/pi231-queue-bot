@@ -134,6 +134,7 @@ class AdminOrderState(StatesGroup):
     managing_entry = State()
     entering_number = State()
     entering_name = State()
+    entering_labs_count = State()
 
 
 class AdminManageState(StatesGroup):
@@ -168,8 +169,8 @@ def get_admin_student_menu(is_blocked: bool) -> ReplyKeyboardMarkup:
     rows = [
         ["⬆️ Вище", "⬇️ Нижче"],
         ["🔢 Задати номер", "✏️ Змінити ім'я"],
-        [block_btn, "✅ Позначити «Здав»"],
-        ["❌ Видалити з черги"],
+        ["🧪 Змінити к-сть лаб", block_btn],
+        ["✅ Позначити «Здав»", "❌ Видалити з черги"],
         ["🔙 До списку студентів", "🔙 Назад"],
     ]
     return make_reply_keyboard(rows)
@@ -217,6 +218,8 @@ async def open_admin_student_manager(message: Message, conn, subjects, entry_id:
     status_info = "⛔ Заблокований" if user and user.get("is_blocked") else "✅ Активний"
     lines.append(f"👤 Студент: <b>{user_name}</b>{tg_info} — {status_info}")
     lines.append(f"📍 Поточна позиція в черзі: <b>{entry['position']}</b>")
+    labs_count = entry["labs_count"] if "labs_count" in entry.keys() and entry["labs_count"] else 1
+    lines.append(f"🧪 Кількість лаб: <b>{labs_count}</b> ({queues.format_lab_estimate(labs_count)})")
     lines.append("")
     lines.append("Оберіть дію на кнопках внизу 👇")
     text = "\n".join(lines)
@@ -1990,6 +1993,45 @@ async def student_receive_rename(message: Message, state: FSMContext, conn, subj
         return
     await state.set_state(AdminOrderState.managing_entry)
     await open_admin_student_manager(message, conn, subjects, entry_id, note=f"✅ Ім'я змінено на «{html.escape(updated_user['full_name'])}».")
+
+
+@router.message(F.text == "🧪 Змінити к-сть лаб", StateFilter("*"))
+async def admin_ask_labs_count(message: Message, state: FSMContext):
+    data = await state.get_data()
+    entry_id = data.get("entry_id")
+    if not entry_id:
+        raise BotError("Студента не обрано.")
+    await state.set_state(AdminOrderState.entering_labs_count)
+    await message.answer(
+        "Введіть кількість робіт для студента (1–10) або оберіть кнопку нижче 👇",
+        reply_markup=make_reply_keyboard([
+            ["1", "2", "3", "4", "5"],
+            ["↩️ Скасувати"],
+        ]),
+    )
+
+
+@router.message(AdminOrderState.entering_labs_count, F.text)
+async def admin_receive_labs_count(message: Message, state: FSMContext, conn, subjects):
+    data = await state.get_data()
+    entry_id = data.get("entry_id")
+    if message.text in {"↩️ Скасувати", "🔙 Скасувати", "🔙 Назад"}:
+        await state.set_state(AdminOrderState.managing_entry)
+        await open_admin_student_manager(message, conn, subjects, entry_id)
+        return
+    text = message.text.strip()
+    match = re.match(r"^(\d+)", text)
+    if not match:
+        await message.answer("Введіть число від 1 до 10 або натисніть «↩️ Скасувати»:")
+        return
+    val = int(match.group(1))
+    try:
+        queues.set_entry_labs_count(conn, message.from_user.id, entry_id, val)
+    except BotError as err:
+        await message.answer(f"{err}\nСпробуйте ще раз:")
+        return
+    await state.set_state(AdminOrderState.managing_entry)
+    await open_admin_student_manager(message, conn, subjects, entry_id, note=f"🧪 Кількість лаб змінено на {val}.")
 
 
 @router.message(F.text.in_({"⛔ Заблокувати", "🟢 Розблокувати"}), StateFilter("*"))

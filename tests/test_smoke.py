@@ -35,8 +35,9 @@ def test_queue_text_marks_current_user(conn, make_user):
     queues.join_queue(conn, 2, session)
     text = format_queue(subjects, queues.get_session(conn, session),
                         queues.get_entries(conn, session), my_telegram_id=2)
-    assert "👉 2. Коваль Андрій — це ви" in text
-    assert "1. Петренко Іван" in text and "👉 1." not in text
+    assert "👉 2. Коваль Андрій (1 лаб.) орієнтовно 7-10хв — це ви" in text
+    assert "1. Петренко Іван (1 лаб.) орієнтовно 7-10хв" in text and "👉 1." not in text
+    assert "⏱ <b>Орієнтовна тривалість черги:</b> ~15-20 хв (усього 2 лаб.)" in text
 
 
 @pytest.mark.asyncio

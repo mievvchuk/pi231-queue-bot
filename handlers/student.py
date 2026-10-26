@@ -54,6 +54,7 @@ class StudentFlow(StatesGroup):
     pick_position = State()
     choosing_swap_target = State()
     confirm_swap = State()
+    choosing_labs_count = State()
     creating_queue_type = State()
     creating_queue_subject = State()
     creating_queue_teacher = State()
@@ -414,8 +415,29 @@ async def show_my_place(message: Message, state: FSMContext, conn, subjects):
     if not session_id:
         return
     place = queues.get_user_position(conn, message.from_user.id, session_id)
-    total = len(queues.get_entries(conn, session_id))
-    note = f"📍 Ваше місце: <b>{place}</b> із {total}." if place else "Ви не записані в цю чергу."
+    entries = queues.get_entries(conn, session_id)
+    total = len(entries)
+    if not place:
+        note = "Ви не записані в цю чергу."
+    else:
+        my_labs = queues.get_user_labs_count(conn, message.from_user.id, session_id)
+        my_est = queues.format_lab_estimate(my_labs)
+        lines = [
+            f"📍 Ваше місце: <b>{place}</b> із {total}.",
+            f"🧪 Ваша здача: {my_est}",
+        ]
+        if place == 1:
+            lines.append("⚡️ <b>Ви зараз перші в черзі!</b>")
+        else:
+            entries_before = [
+                e for e in entries
+                if ("user_id" in e.keys() and e["user_id"] is not None)
+                and ("position" in e.keys() and e["position"] and e["position"] < place)
+            ]
+            labs_before = sum(e["labs_count"] if ("labs_count" in e.keys() and e["labs_count"]) else 1 for e in entries_before)
+            w_min, w_max = queues.estimate_labs_time(labs_before)
+            lines.append(f"⏳ Орієнтовно до вашої черги: <b>~{w_min}-{w_max} хв</b> (перед вами {labs_before} лаб.)")
+        note = "\n".join(lines)
     await open_queue_screen(message, conn, subjects, session_id, note=note)
 
 
@@ -430,10 +452,72 @@ async def show_queue_actions(message: Message, state: FSMContext, conn):
     can_pick = not queues.are_first_10_occupied(conn, session_id) or queues.has_free_slots(conn, session_id)
     swap_wish = queues.get_swap_wish(conn, message.from_user.id, session_id) if is_in_queue else None
     ready_to_swap = queues.is_ready_to_swap(conn, message.from_user.id, session_id) if is_in_queue else False
+    labs_count = queues.get_user_labs_count(conn, message.from_user.id, session_id) if is_in_queue else 1
     markup = get_queue_actions_reply_menu(
-        is_in_queue, is_open=is_open, can_pick_number=can_pick, swap_wish=swap_wish, ready_to_swap=ready_to_swap
+        is_in_queue, is_open=is_open, can_pick_number=can_pick, swap_wish=swap_wish, ready_to_swap=ready_to_swap,
+        labs_count=labs_count,
     )
     await message.answer("⚙️ <b>Оберіть дію:</b>", reply_markup=markup)
+
+
+@router.message(F.text.startswith("🧪 Кількість лаб"), not_admin_state_filter)
+async def prompt_labs_count(message: Message, state: FSMContext, conn):
+    session_id = await ensure_session_id(message, state)
+    if not session_id:
+        return
+    if queues.get_user_position(conn, message.from_user.id, session_id) is None:
+        raise BotError("Ви не записані в цю чергу.")
+    cur_count = queues.get_user_labs_count(conn, message.from_user.id, session_id)
+    cur_est = queues.format_lab_estimate(cur_count)
+    await state.set_state(StudentFlow.choosing_labs_count)
+    await state.update_data(session_id=session_id)
+    markup = make_reply_keyboard([
+        ["1 лаб.", "2 лаб.", "3 лаб."],
+        ["4 лаб.", "5 лаб."],
+        ["🔙 Назад до черги"],
+    ])
+    await message.answer(
+        f"🧪 <b>Кількість робіт для здачі</b>\n\n"
+        f"Скільки лабораторних ви здаєте в цій черзі?\n"
+        f"Зараз встановлено: <b>{cur_count} лаб.</b> ({cur_est})\n\n"
+        f"Оберіть кількість на кнопках або введіть число від 1 до 10:",
+        reply_markup=markup,
+    )
+
+
+@router.message(StudentFlow.choosing_labs_count, F.text)
+async def handle_labs_count_selection(message: Message, state: FSMContext, conn, subjects):
+    data = await state.get_data()
+    session_id = data.get("session_id")
+    if not session_id:
+        await message.answer("⚠️ <b>Потрібно знову обрати чергу.</b>", reply_markup=get_lost_context_menu())
+        return
+
+    text = message.text.strip()
+    if text in {"🔙 Назад до черги", "🔙 Назад"}:
+        await state.clear()
+        await state.update_data(session_id=session_id)
+        await open_queue_screen(message, conn, subjects, session_id)
+        return
+
+    match = re.match(r"^(\d+)", text)
+    if not match:
+        await message.answer("Введіть число від 1 до 10 або оберіть кнопку нижче 👇")
+        return
+
+    val = int(match.group(1))
+    if not (1 <= val <= 10):
+        await message.answer("Кількість робіт має бути від 1 до 10. Спробуйте ще раз:")
+        return
+
+    queues.set_labs_count(conn, message.from_user.id, session_id, val)
+    estimate = queues.format_lab_estimate(val)
+    await state.clear()
+    await state.update_data(session_id=session_id)
+    await open_queue_screen(
+        message, conn, subjects, session_id,
+        note=f"✅ <b>Встановлено кількість робіт:</b> {estimate}",
+    )
 
 
 @router.message(F.text.in_({"⬆️ Хочу вище", "⏸ Зняти «Хочу вище»"}), not_admin_state_filter)
@@ -591,9 +675,15 @@ async def join_queue_end(message: Message, state: FSMContext, conn, subjects):
     if session["status"] != "open":
         raise BotError("Запис у цю чергу закрито.")
     position, total = queues.join_queue(conn, message.from_user.id, session_id)
+    est = queues.format_lab_estimate(1)
     await open_queue_screen(
         message, conn, subjects, session_id,
-        note=f"✅ <b>Ви записалися</b>\n\nВаше місце: <b>{position}</b> із {total}.",
+        note=(
+            f"✅ <b>Ви записалися</b>\n\n"
+            f"Ваше місце: <b>{position}</b> із {total}.\n"
+            f"🧪 Вказано для здачі: <b>{est}</b>.\n"
+            f"<i>(Змінити кількість робіт можна в меню «⚙️ Дії»)</i>"
+        ),
     )
 
 
@@ -607,9 +697,15 @@ async def ask_specific_number(message: Message, state: FSMContext, conn, subject
         raise BotError("Запис у цю чергу закрито.")
     if queues.are_first_10_occupied(conn, session_id) and not queues.has_free_slots(conn, session_id):
         position, total = queues.join_queue(conn, message.from_user.id, session_id)
+        est = queues.format_lab_estimate(1)
         await open_queue_screen(
             message, conn, subjects, session_id,
-            note=f"ℹ️ <b>Перші 10 місць уже зайняті.</b>\nВас автоматично записано в кінець черги на місце <b>{position}</b> із {total}.",
+            note=(
+                f"ℹ️ <b>Перші 10 місць уже зайняті.</b>\n"
+                f"Вас автоматично записано в кінець черги на місце <b>{position}</b> із {total}.\n"
+                f"🧪 Вказано для здачі: <b>{est}</b>.\n"
+                f"<i>(Змінити кількість робіт можна в меню «⚙️ Дії»)</i>"
+            ),
         )
         return
     await state.set_state(StudentFlow.pick_position)
@@ -651,9 +747,15 @@ async def handle_join_number(message: Message, state: FSMContext, conn, subjects
         return
     await state.clear()
     await state.update_data(session_id=session_id)
+    est = queues.format_lab_estimate(1)
     await open_queue_screen(
         message, conn, subjects, session_id,
-        note=f"✅ <b>Ви записалися</b>\n\nВаше місце: <b>{position}</b> із {total}.",
+        note=(
+            f"✅ <b>Ви записалися</b>\n\n"
+            f"Ваше місце: <b>{position}</b> із {total}.\n"
+            f"🧪 Вказано для здачі: <b>{est}</b>.\n"
+            f"<i>(Змінити кількість робіт можна в меню «⚙️ Дії»)</i>"
+        ),
     )
 
 

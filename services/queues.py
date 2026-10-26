@@ -27,7 +27,7 @@ def get_entry(conn: sqlite3.Connection, entry_id: int):
 def get_entries(conn: sqlite3.Connection, session_id: int) -> list[sqlite3.Row]:
     """Активні записи по порядку. full_name = NULL означає вільне місце."""
     return conn.execute(
-        """SELECT e.id, e.user_id, e.position, e.ready_to_swap, e.swap_wish, u.full_name, u.telegram_id, u.is_blocked
+        """SELECT e.id, e.user_id, e.position, e.ready_to_swap, e.swap_wish, e.labs_count, u.full_name, u.telegram_id, u.is_blocked
            FROM queue_entries e LEFT JOIN users u ON u.id = e.user_id
            WHERE e.session_id = ? AND e.status = 'active' ORDER BY e.position""",
         (session_id,),
@@ -106,12 +106,56 @@ def _close_entry(conn, entry, new_status: str) -> None:
     _set_order(conn, entry["session_id"], _ordered_ids(conn, entry["session_id"]))
 
 
+# ---------- Розрахунок часу здачі робіт ----------
+
+def estimate_labs_time(labs_count: int) -> tuple[int, int]:
+    """Повертає орієнтовний діапазон часу (хв_мін, хв_макс) на здачу вказаної кількості лаб."""
+    if labs_count <= 0:
+        return (0, 0)
+    if labs_count == 1:
+        return (7, 10)
+    if labs_count == 2:
+        return (15, 20)
+    if labs_count == 3:
+        return (20, 30)
+    if labs_count == 4:
+        return (30, 40)
+    if labs_count == 5:
+        return (35, 50)
+    min_m = int(round(labs_count * 7.5 / 5.0)) * 5
+    max_m = labs_count * 10
+    return (min_m, max_m)
+
+
+def format_lab_estimate(labs_count: int) -> str:
+    """Форматує напис для черги: (2 лаб.) орієнтовно 15-20хв"""
+    count = max(1, labs_count or 1)
+    min_m, max_m = estimate_labs_time(count)
+    return f"({count} лаб.) орієнтовно {min_m}-{max_m}хв"
+
+
+def calculate_queue_estimate(entries: list) -> dict:
+    """Розраховує сумарну кількість лаб та орієнтовну тривалість для списку активних записів."""
+    total_labs = sum(
+        e["labs_count"] if ("labs_count" in e.keys() and e["labs_count"]) else 1
+        for e in entries
+        if ("user_id" in e.keys() and e["user_id"] is not None)
+    )
+    min_m, max_m = estimate_labs_time(total_labs)
+    return {
+        "total_labs": total_labs,
+        "min_minutes": min_m,
+        "max_minutes": max_m,
+    }
+
+
 # ---------- Дії студента ----------
 
 def join_queue(conn: sqlite3.Connection, telegram_id: int, session_id: int,
-               position: int | None = None) -> tuple[int, int]:
+               position: int | None = None, labs_count: int = 1) -> tuple[int, int]:
     """Повертає (місце студента, усього в черзі).
     position=None — у кінець; інакше студент вставляється на вибраний номер."""
+    labs_count = max(1, min(10, labs_count))
     with transaction(conn):
         from services.maintenance import get_maintenance_end_time, is_maintenance_active
         if is_maintenance_active(conn):
@@ -130,14 +174,14 @@ def join_queue(conn: sqlite3.Connection, telegram_id: int, session_id: int,
             raise BotError("Ви вже записані в цю чергу.")
 
         if position is None:
-            _place_user(conn, session_id, user["id"])
+            _place_user(conn, session_id, user["id"], labs_count=labs_count)
         else:
-            _place_user_at(conn, session_id, user["id"], position)
+            _place_user_at(conn, session_id, user["id"], position, labs_count=labs_count)
     place = get_user_position(conn, telegram_id, session_id)
     return place, len(get_entries(conn, session_id))
 
 
-def _place_user(conn, session_id: int, user_id: int) -> None:
+def _place_user(conn, session_id: int, user_id: int, labs_count: int = 1) -> None:
     # Завжди додаємо студента в кінець черги (навіть якщо всередині є вільні місця)
     last = conn.execute(
         "SELECT COALESCE(MAX(position), 0) FROM queue_entries "
@@ -145,15 +189,15 @@ def _place_user(conn, session_id: int, user_id: int) -> None:
         (session_id,),
     ).fetchone()[0]
     conn.execute(
-        "INSERT INTO queue_entries (session_id, user_id, position) VALUES (?, ?, ?)",
-        (session_id, user_id, last + 1),
+        "INSERT INTO queue_entries (session_id, user_id, position, labs_count) VALUES (?, ?, ?, ?)",
+        (session_id, user_id, last + 1, labs_count),
     )
 
 
-def _take_slot(conn, entry_id: int, user_id: int) -> None:
+def _take_slot(conn, entry_id: int, user_id: int, labs_count: int = 1) -> None:
     conn.execute(
-        "UPDATE queue_entries SET user_id = ?, ready_to_swap = FALSE, swap_wish = NULL, created_at = CURRENT_TIMESTAMP WHERE id = ?",
-        (user_id, entry_id),
+        "UPDATE queue_entries SET user_id = ?, ready_to_swap = FALSE, swap_wish = NULL, labs_count = ?, created_at = CURRENT_TIMESTAMP WHERE id = ?",
+        (user_id, labs_count, entry_id),
     )
 
 
@@ -171,7 +215,7 @@ def has_free_slots(conn: sqlite3.Connection, session_id: int) -> bool:
     return any(e["user_id"] is None for e in entries)
 
 
-def _place_user_at(conn, session_id: int, user_id: int, position: int, allow_shift: bool = False) -> None:
+def _place_user_at(conn, session_id: int, user_id: int, position: int, allow_shift: bool = False, labs_count: int = 1) -> None:
     """Вставляє студента на вибране місце.
     Якщо allow_shift=False (для студентів):
       - Можна зайняти будь-яке існуюче вільне місце (в т.ч. > 10).
@@ -188,7 +232,7 @@ def _place_user_at(conn, session_id: int, user_id: int, position: int, allow_shi
     entries = get_entries(conn, session_id)
     # Якщо вибране місце вже існує і воно пусте (зарезервоване / вільне)
     if position <= len(entries) and entries[position - 1]["user_id"] is None:
-        _take_slot(conn, entries[position - 1]["id"], user_id)
+        _take_slot(conn, entries[position - 1]["id"], user_id, labs_count=labs_count)
         return
 
     # Якщо звичайний студент намагається зайняти новий слот > 10 або коли перші 10 зайняті
@@ -204,8 +248,8 @@ def _place_user_at(conn, session_id: int, user_id: int, position: int, allow_shi
             raise BotError(f"Місце №{position} уже зайняте. Оберіть інший вільний номер.")
         ids = [e["id"] for e in entries]
         new_id = conn.execute(
-            "INSERT INTO queue_entries (session_id, user_id, position) VALUES (?, ?, NULL)",
-            (session_id, user_id),
+            "INSERT INTO queue_entries (session_id, user_id, position, labs_count) VALUES (?, ?, NULL, ?)",
+            (session_id, user_id, labs_count),
         ).lastrowid
         ids.insert(position - 1, new_id)
         _set_order(conn, session_id, ids)
@@ -215,13 +259,13 @@ def _place_user_at(conn, session_id: int, user_id: int, position: int, allow_shi
     # Доповнюємо чергу пустими слотами до потрібного номера
     for p in range(len(entries) + 1, position):
         conn.execute(
-            "INSERT INTO queue_entries (session_id, user_id, position) VALUES (?, NULL, ?)",
+            "INSERT INTO queue_entries (session_id, user_id, position, labs_count) VALUES (?, NULL, ?, 1)",
             (session_id, p),
         )
     # Вставляємо користувача на бажану позицію
     conn.execute(
-        "INSERT INTO queue_entries (session_id, user_id, position) VALUES (?, ?, ?)",
-        (session_id, user_id, position),
+        "INSERT INTO queue_entries (session_id, user_id, position, labs_count) VALUES (?, ?, ?, ?)",
+        (session_id, user_id, position, labs_count),
     )
 
 
@@ -264,10 +308,11 @@ def leave_queue(conn: sqlite3.Connection, telegram_id: int, session_id: int) -> 
         pos = entry["position"]
 
         # Фіксуємо вихід в історії
+        labs = entry["labs_count"] if "labs_count" in entry.keys() and entry["labs_count"] else 1
         conn.execute(
-            """INSERT INTO queue_entries (session_id, user_id, position, status, completed_at)
-               VALUES (?, ?, NULL, 'left', CURRENT_TIMESTAMP)""",
-            (entry_session_id, entry["user_id"]),
+            """INSERT INTO queue_entries (session_id, user_id, position, status, labs_count, completed_at)
+               VALUES (?, ?, NULL, 'left', ?, CURRENT_TIMESTAMP)""",
+            (entry_session_id, entry["user_id"], labs),
         )
 
         # Перевіряємо, чи є в черзі активні записи після цієї позиції
@@ -282,7 +327,7 @@ def leave_queue(conn: sqlite3.Connection, telegram_id: int, session_id: int) -> 
             # Залишаємо вільне місце на поточній позиції, щоб не збивати номери наступних
             conn.execute(
                 """UPDATE queue_entries
-                   SET user_id = NULL, ready_to_swap = FALSE, swap_wish = NULL
+                   SET user_id = NULL, ready_to_swap = FALSE, swap_wish = NULL, labs_count = 1
                    WHERE id = ?""",
                 (entry["id"],),
             )
@@ -403,6 +448,31 @@ def is_ready_to_swap(conn: sqlite3.Connection, telegram_id: int, session_id: int
     return bool(row["ready_to_swap"]) if row["ready_to_swap"] is not None else False
 
 
+def set_labs_count(conn: sqlite3.Connection, telegram_id: int, session_id: int, labs_count: int) -> int:
+    """Оновлює кількість робіт для активного запису користувача (від 1 до 10)."""
+    if not (1 <= labs_count <= 10):
+        raise BotError("Кількість робіт має бути від 1 до 10.")
+    with transaction(conn):
+        entry = _own_active_entry(conn, telegram_id, session_id)
+        conn.execute(
+            "UPDATE queue_entries SET labs_count = ? WHERE id = ?",
+            (labs_count, entry["id"]),
+        )
+    return labs_count
+
+
+def get_user_labs_count(conn: sqlite3.Connection, telegram_id: int, session_id: int) -> int:
+    """Повертає кількість робіт для активного запису користувача (за замовчуванням 1)."""
+    row = conn.execute(
+        """SELECT e.labs_count FROM queue_entries e JOIN users u ON u.id = e.user_id
+           WHERE e.session_id = ? AND u.telegram_id = ? AND e.status = 'active'""",
+        (session_id, telegram_id),
+    ).fetchone()
+    if not row or row["labs_count"] is None:
+        return 1
+    return int(row["labs_count"])
+
+
 # ---------- Адмін: керування чергами ----------
 
 def create_session(conn, actor_id: int, subject_id: int, teacher_id: int, lesson_title: str = "", queue_type: str = "lesson"):
@@ -413,8 +483,9 @@ def create_session(conn, actor_id: int, subject_id: int, teacher_id: int, lesson
     return session_id
 
 
-def add_student_by_admin(conn, actor_id: int, session_id: int, user_id: int, position: int | None = None) -> int:
+def add_student_by_admin(conn, actor_id: int, session_id: int, user_id: int, position: int | None = None, labs_count: int = 1) -> int:
     """Додає студента в чергу від імені старости."""
+    labs_count = max(1, min(10, labs_count))
     with transaction(conn):
         require_admin(conn, actor_id)
         session = _require_session(conn, session_id)
@@ -430,9 +501,9 @@ def add_student_by_admin(conn, actor_id: int, session_id: int, user_id: int, pos
             raise BotError("Цей студент уже є в цій черзі.")
 
         if position is None:
-            _place_user(conn, session_id, user_id)
+            _place_user(conn, session_id, user_id, labs_count=labs_count)
         else:
-            _place_user_at(conn, session_id, user_id, position, allow_shift=True)
+            _place_user_at(conn, session_id, user_id, position, allow_shift=True, labs_count=labs_count)
         log_action(conn, actor_id, "admin_add_student", f"user={user_id} session={session_id}")
     
     row = conn.execute(
@@ -440,6 +511,21 @@ def add_student_by_admin(conn, actor_id: int, session_id: int, user_id: int, pos
         (session_id, user_id)
     ).fetchone()
     return row["position"] if row else len(get_entries(conn, session_id))
+
+
+def set_entry_labs_count(conn, actor_id: int, entry_id: int, labs_count: int) -> int:
+    """Встановлює кількість робіт для активного запису від імені адміністратора."""
+    if not (1 <= labs_count <= 10):
+        raise BotError("Кількість робіт має бути від 1 до 10.")
+    with transaction(conn):
+        require_admin(conn, actor_id)
+        entry = _require_active_entry(conn, entry_id)
+        conn.execute(
+            "UPDATE queue_entries SET labs_count = ? WHERE id = ?",
+            (labs_count, entry["id"]),
+        )
+        log_action(conn, actor_id, "set_entry_labs_count", f"entry={entry_id} labs={labs_count}")
+    return labs_count
 
 
 
@@ -636,9 +722,10 @@ def _fill_new_queue(conn, new_id: int, entries: dict, carry: dict[int, int]) -> 
     by_position = {position: entries[entry_id] for entry_id, position in carry.items()}
     for position in range(1, max(by_position, default=0) + 1):
         old = by_position.get(position)
+        labs = old["labs_count"] if old and "labs_count" in old.keys() and old["labs_count"] else 1
         conn.execute(
-            "INSERT INTO queue_entries (session_id, user_id, position) VALUES (?, ?, ?)",
-            (new_id, old["user_id"] if old else None, position),
+            "INSERT INTO queue_entries (session_id, user_id, position, labs_count) VALUES (?, ?, ?, ?)",
+            (new_id, old["user_id"] if old else None, position, labs),
         )
     # Старі записи залишаємо в історії як перенесені
     for entry_id in carry:

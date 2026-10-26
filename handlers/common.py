@@ -77,6 +77,7 @@ def get_queue_actions_reply_menu(
     can_pick_number: bool = True,
     swap_wish: str | None = None,
     ready_to_swap: bool = False,
+    labs_count: int = 1,
 ) -> ReplyKeyboardMarkup:
     """Меню «Дії» залежно від статусу запису студента."""
     if is_in_queue:
@@ -92,7 +93,7 @@ def get_queue_actions_reply_menu(
 
         return make_reply_keyboard([
             ["✅ Здав", "❌ Не здав"],
-            ["🔁 Обмінятися місцями"],
+            [f"🧪 Кількість лаб ({labs_count})", "🔁 Обмінятися місцями"],
             [btn_higher, btn_lower],
             ["🚪 Покинути чергу", "🔙 Назад до черги"],
         ])
@@ -614,6 +615,15 @@ def format_queue(subjects: list[dict], session, entries, my_telegram_id: int | N
         lines.append(format_entry(row, my_telegram_id, show_id=show_id))
     if not entries:
         lines.append("Черга порожня.")
+    else:
+        real_entries = [r for r in entries if ("user_id" in r.keys() and r["user_id"] is not None)]
+        if real_entries:
+            summary = queues.calculate_queue_estimate(real_entries)
+            lines.append("")
+            lines.append(
+                f"⏱ <b>Орієнтовна тривалість черги:</b> ~{summary['min_minutes']}-{summary['max_minutes']} хв "
+                f"(усього {summary['total_labs']} лаб.)"
+            )
     return "\n".join(lines)
 
 
@@ -629,6 +639,11 @@ def format_entry(row, my_telegram_id: int | None = None, marked: bool = False, s
     prefix = "👉 " if (is_me or marked) else ""
     suffix = " — це ви" if is_me else ""
 
+    labs_part = ""
+    if raw_name:
+        labs_count = row["labs_count"] if ("labs_count" in row.keys() and row["labs_count"]) else 1
+        labs_part = f" {queues.format_lab_estimate(labs_count)}"
+
     swap_wish = row["swap_wish"] if "swap_wish" in row.keys() and row["swap_wish"] else None
     if swap_wish == "higher":
         swap_badge = " ⬆️ [хочу вище]"
@@ -643,7 +658,7 @@ def format_entry(row, my_telegram_id: int | None = None, marked: bool = False, s
     if show_id and tg_id and tg_id > 0:
         id_part = f" <code>[ID: {tg_id}]</code>"
     pos = row["position"] if "position" in row.keys() else "?"
-    return f"{prefix}{pos}. {name}{swap_badge}{suffix}{id_part}"
+    return f"{prefix}{pos}. {name}{labs_part}{swap_badge}{suffix}{id_part}"
 
 
 async def show(callback: CallbackQuery, text: str, markup: InlineKeyboardMarkup | None = None):
