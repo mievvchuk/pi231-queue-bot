@@ -18,18 +18,21 @@
 - Legacy entries have no guessed time; edits require own active entry and enforce bans.
 
 ### Task 1: Storage and display
-- [ ] Watch tests fail for manual duration and minimum 5.
-- [ ] Add nullable migrations, join/update services, history/carry and manual-only formatting.
-- [ ] Remove obsolete automatic-time env settings and update current docs.
+- [x] Watch tests fail for manual duration and minimum 5.
+- [x] Add nullable migrations, join/update services, history/carry and manual-only formatting.
+- [x] Remove obsolete automatic-time env settings and update current docs.
 
 ### Task 2: Two-stage input
-- [ ] Watch dispatch tests fail for quantity→duration signup, validation and time-only editing.
-- [ ] Add duration input and edit shortcut; retain cancellation in both stages.
-- [ ] Run full PostgreSQL16 suite, compileall, actionlint, diff check; fresh review and fixes; update PR#3 without merge/deploy.
+- [x] Watch dispatch tests fail for quantity→duration signup, validation and time-only editing.
+- [x] Add duration input and edit shortcut; retain cancellation in both stages.
+- [x] Run full PostgreSQL16 suite, compileall, actionlint, diff check; fresh review and fixes; update PR#3 without merge/deploy.
 
 ### Task 3: Confirm actual completed lab count
 User additionally approved: after «Здав», ask actual quantity with «Усі»/numeric buttons. If 1 of 3 passed, keep position with 2 remaining. Full completion removes from queue. Preserve the student's declared time and offer manual editing, never automatically rescale it.
-- [ ] RED tests for partial/full completion, invalid or stale confirmations, cancellation and unknown planned quantity.
-- [ ] Add labs_passed counter per entry; partial updates remaining lab_count without moving, all closes entry. Expected entry ID/count prevent stale confirmation after edit/rejoin. Counter follows history, resets in vacant slots and new carried entry (old transferred history retains the completed work).
-- [ ] Wire student button and legacy passed callback to confirmation; quantity/time/completion drafts share navigation cancellation. Unknown planned quantity may enter actual 1–20 or explicitly finish without quantity.
-- [ ] Extend PostgreSQL tests and full verification, review combined change, update PR.
+- [x] RED tests for partial/full completion, invalid or stale confirmations, cancellation and unknown planned quantity.
+- [x] Add labs_passed counter per entry; partial updates remaining lab_count without moving, all closes entry. Expected entry ID/count prevent stale confirmation after edit/rejoin. Counter follows history, resets in vacant slots and new carried entry (old transferred history retains the completed work).
+- [x] Wire student button and legacy passed callback to confirmation; quantity/time/completion drafts share navigation cancellation. Unknown planned quantity may enter actual 1–20 or explicitly finish without quantity.
+- [x] Extend PostgreSQL tests and full verification, review combined change, update PR.
+
+## Results
+226 tests passed with PostgreSQL 16 (75.09s). compileall, actionlint and diff check passed. Independent review found no Critical/Important defects in the private-chat flow. Two nonblocking follow-ups are recorded in PR#3: stronger stale confirmation generation for a reused interior slot, and extending the SQLite upgrade fixture to pre-duration schema. No live deploy or production database changes.
