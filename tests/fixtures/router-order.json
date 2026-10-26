@@ -256,6 +256,8 @@
       "join_queue_end",
       "ask_specific_number",
       "handle_join_number",
+      "ask_lab_count",
+      "receive_lab_count",
       "start_swap_flow",
       "paginate_swap_targets",
       "swap_target_chosen",

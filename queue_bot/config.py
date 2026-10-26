@@ -67,6 +67,8 @@ LOG_LEVEL = os.getenv('LOG_LEVEL', 'INFO').upper()
 POLLING_RETRY_SECONDS = integer('POLLING_RETRY_SECONDS', 5, 1, 3600)
 POLLS_WATCH_INTERVAL = integer('POLLS_WATCH_INTERVAL', 15, 1, 3600)
 SCHEDULE_CHECK_INTERVAL = integer('SCHEDULE_CHECK_INTERVAL', 60, 1, 3600)
+LAB_MIN_MINUTES = integer('LAB_MIN_MINUTES', 7, 1, 120)
+LAB_MAX_MINUTES = integer('LAB_MAX_MINUTES', 10, 1, 120)
 RECOGNITION_API_KEY = os.getenv('RECOGNITION_API_KEY', '').strip() or os.getenv('OPENAI_API_KEY', '').strip()
 RECOGNITION_PROVIDER = os.getenv('RECOGNITION_PROVIDER', 'auto' if RECOGNITION_API_KEY else 'disabled').lower()
 GROQ_API_URL = os.getenv('GROQ_API_URL', 'https://api.groq.com/openai/v1/chat/completions')
@@ -101,6 +103,8 @@ def get_initial_admin_ids():
 
 
 def validate_runtime():
+    if LAB_MIN_MINUTES > LAB_MAX_MINUTES:
+        raise RuntimeError('LAB_MIN_MINUTES must not exceed LAB_MAX_MINUTES')
     if not DATABASE_URL:
         raise RuntimeError('Set DATABASE_URL in the hosting environment or .env')
     get_bot_token()

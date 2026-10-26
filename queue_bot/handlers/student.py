@@ -40,6 +40,9 @@ from queue_bot.handlers.common import (
 )
 from queue_bot.services import admins, queues, users
 from queue_bot.services.errors import BotError
+from queue_bot.handlers.lab_counts import (
+    LAB_COUNT_BUTTON, LabCountFlow, ask_lab_count, begin_lab_count, receive_lab_count,
+)
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -90,7 +93,8 @@ async def open_queue_screen(message: Message, conn, subjects, session_id: int, n
     text = '👤 <b>Режим студента</b>\n\n' + format_queue(subjects, session, entries, message.from_user.id, show_id=is_adm)
     if note:
         text = f"{note}\n\n{text}"
-    markup = get_queue_view_reply_menu(is_admin=is_adm)
+    in_queue = queues.get_user_position(conn, message.from_user.id, session_id) is not None
+    markup = get_queue_view_reply_menu(is_admin=is_adm, can_edit_labs=in_queue and session['status'] != 'archived')
     await message.answer(text, reply_markup=markup)
 
 
@@ -589,11 +593,7 @@ async def join_queue_end(message: Message, state: FSMContext, conn, subjects):
     session = get_session_or_fail(conn, session_id)
     if session["status"] != "open":
         raise BotError("Запис у цю чергу закрито.")
-    position, total = queues.join_queue(conn, message.from_user.id, session_id)
-    await open_queue_screen(
-        message, conn, subjects, session_id,
-        note=f"✅ <b>Ви записалися</b>\n\nВаше місце: <b>{position}</b> із {total}.",
-    )
+    await begin_lab_count(message, state, conn, session_id)
 
 
 @router.message(F.text.in_({"🔢 Обрати місце", "🔢 Обрати номер"}), not_admin_state_filter)
@@ -605,11 +605,8 @@ async def ask_specific_number(message: Message, state: FSMContext, conn, subject
     if session["status"] != "open":
         raise BotError("Запис у цю чергу закрито.")
     if queues.are_first_10_occupied(conn, session_id) and not queues.has_free_slots(conn, session_id):
-        position, total = queues.join_queue(conn, message.from_user.id, session_id)
-        await open_queue_screen(
-            message, conn, subjects, session_id,
-            note=f"ℹ️ <b>Перші 10 місць уже зайняті.</b>\nВас автоматично записано в кінець черги на місце <b>{position}</b> із {total}.",
-        )
+        await message.answer('ℹ️ Перші 10 місць уже зайняті. Записуємо в кінець після вибору кількості лабораторних.')
+        await begin_lab_count(message, state, conn, session_id)
         return
     await state.set_state(StudentFlow.pick_position)
     await state.update_data(session_id=session_id)
@@ -643,17 +640,18 @@ async def handle_join_number(message: Message, state: FSMContext, conn, subjects
         await message.answer("⚠️ <b>Потрібно знову обрати чергу.</b>", reply_markup=get_lost_context_menu())
         return
     pos = int(message.text.strip())
+    if not 1 <= pos <= 100:
+        await message.answer('Оберіть вільне місце від 1 до 10 або наявне вільне місце в черзі.')
+        return
     try:
-        position, total = queues.join_queue(conn, message.from_user.id, session_id, pos)
+        await begin_lab_count(message, state, conn, session_id, position=pos)
     except BotError as err:
         await message.answer(f"{err}\nСпробуйте інший номер або натисніть «🔙 Назад до черги»:")
         return
-    await state.clear()
-    await state.update_data(session_id=session_id)
-    await open_queue_screen(
-        message, conn, subjects, session_id,
-        note=f"✅ <b>Ви записалися</b>\n\nВаше місце: <b>{position}</b> із {total}.",
-    )
+
+
+router.message(F.text == LAB_COUNT_BUTTON, not_admin_state_filter)(ask_lab_count)
+router.message(LabCountFlow.entering, F.text)(receive_lab_count)
 
 
 # ---------- Обмін місцями між студентами ----------

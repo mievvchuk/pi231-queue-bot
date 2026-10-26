@@ -17,6 +17,7 @@ from aiogram.types import (
 
 from queue_bot.services import admins, queues
 from queue_bot.services.errors import BotError
+from queue_bot.services.lab_estimates import format_lab_details
 from queue_bot.services.subjects import find_subject, find_teacher
 
 log = logging.getLogger(__name__)
@@ -60,12 +61,14 @@ def get_schedule_reply_menu() -> ReplyKeyboardMarkup:
     ])
 
 
-def get_queue_view_reply_menu(is_admin: bool = False) -> ReplyKeyboardMarkup:
+def get_queue_view_reply_menu(is_admin: bool = False, can_edit_labs: bool = False) -> ReplyKeyboardMarkup:
     """Основні кнопки екрану перегляду черги (для старости/адміна додається швидкий перехід до керування чергою)."""
     rows = [
         ["📍 Моє місце", "⚙️ Дії"],
         ["🔄 Оновити", "🔙 До черг"],
     ]
+    if can_edit_labs:
+        rows.insert(1, ['🧪 Кількість лабораторних'])
     if is_admin:
         rows.append(["⚡ Режим адміна"])
     rows.append(['🏠 Головне меню'])
@@ -93,6 +96,7 @@ def get_queue_actions_reply_menu(
 
         return make_reply_keyboard([
             ["✅ Здав", "❌ Не здав"],
+            ['🧪 Кількість лабораторних'],
             ["🔁 Обмінятися місцями"],
             [btn_higher, btn_lower],
             ["🚪 Покинути чергу", "🔙 Назад до черги"],
@@ -645,7 +649,10 @@ def format_entry(row, my_telegram_id: int | None = None, marked: bool = False, s
     if show_id and tg_id and tg_id > 0:
         id_part = f" <code>[ID: {tg_id}]</code>"
     pos = row["position"] if "position" in row.keys() else "?"
-    return f"{prefix}{pos}. {name}{swap_badge}{suffix}{id_part}"
+    count = row['lab_count'] if 'lab_count' in row.keys() and tg_id else None
+    details = format_lab_details(count)
+    lab_part = f' · {details}' if details else ''
+    return f"{prefix}{pos}. {name}{lab_part}{swap_badge}{suffix}{id_part}"
 
 
 async def show(callback: CallbackQuery, text: str, markup: InlineKeyboardMarkup | None = None):

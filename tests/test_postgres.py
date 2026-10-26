@@ -77,3 +77,27 @@ def test_postgres_select_survives_schema_change_and_reconnect(pg_conn):
     # The adapter reconnects automatically; the policy must survive reconnection.
     assert pg_conn.execute(query, (1,)).fetchone()['full_name'] == 'Петренко Іван'
     assert pg_conn.raw.prepare_threshold is None
+
+
+def test_postgres_lab_count_migration_transfer_and_reconnect(pg_conn):
+    # Fixture creates the old users table and starts the real additive adapter.
+    sid = queues.create_session(pg_conn, 100, 1, 1)
+    queues.join_queue(pg_conn, 1, sid, lab_count=2)
+    entry = queues.get_entries(pg_conn, sid)[0]
+    assert entry['lab_count'] == 2
+    new = queues.finish_session(pg_conn, 100, sid, create_new=True, carry={entry['id']: 2})
+    pg_conn.close()
+    assert [r['lab_count'] for r in queues.get_entries(pg_conn, new)] == [None, 2]
+    queues.set_own_lab_count(pg_conn, 1, new, 3)
+    assert queues.get_entries(pg_conn, new)[1]['lab_count'] == 3
+
+
+def test_postgres_existing_entry_upgrades_to_unknown_count(pg_conn):
+    pg_conn.raw.execute('ALTER TABLE queue_entries DROP COLUMN lab_count')
+    sid = pg_conn.raw.execute('INSERT INTO queue_sessions (subject_id, teacher_id) VALUES (1, 1) RETURNING id').fetchone()[0]
+    pg_conn.raw.execute('INSERT INTO queue_entries (session_id, user_id, position) VALUES (%s, 1, 1)', (sid,))
+    pg_conn._init_schema()
+    row = queues.get_entries(pg_conn, sid)[0]
+    assert row['lab_count'] is None and row['telegram_id'] == 1 and row['position'] == 1
+    pg_conn._init_schema()  # Repeated deploys are idempotent.
+    assert len(queues.get_entries(pg_conn, sid)) == 1
