@@ -88,7 +88,15 @@ def expand_teacher(name: str | None) -> str | None:
 
 
 async def recognize_replacements_from_image(image_bytes: bytes, group_name: str = "ПІ-231", conn=None) -> dict:
-    """Розпізнає таблицю замін з фотографії через Groq або OpenAI API."""
+    """Compatibility entry point for a single photo."""
+    return await recognize_replacements_from_images([image_bytes], group_name=group_name, conn=conn)
+
+
+async def recognize_replacements_from_images(images: list[bytes], group_name: str = "ПІ-231", conn=None) -> dict:
+    """Recognize one table split across one or two photos in one API request."""
+    if (not isinstance(images, (list, tuple)) or not 1 <= len(images) <= 2
+            or any(not isinstance(part, bytes) or not part for part in images)):
+        raise BotError('Надішліть одне або два непорожні фото таблиці замін.')
     api_key = config.RECOGNITION_API_KEY
     if not api_key or config.RECOGNITION_PROVIDER == "disabled":
         raise BotError(
@@ -105,9 +113,10 @@ async def recognize_replacements_from_image(image_bytes: bytes, group_name: str 
         now_dt = datetime.now(ZoneInfo(config.TIMEZONE)).date()
         next_work_date = (now_dt + timedelta(days=1)).strftime("%Y-%m-%d")
 
-    b64_image = base64.b64encode(image_bytes).decode("utf-8")
     prompt = (
         f"Проаналізуй фотографію таблиці замін занять для групи '{group_name}'.\n"
+        "Може бути 1 або 2 фото ЧАСТИН ОДНІЄЇ таблиці. Розглянь усі зображення разом незалежно від порядку. Дата і примітки можуть бути на одному фото, а рядки групи — на іншому.\n"
+        "Використай спільну дату й загальні примітки для всіх частин. Не дублюй рядки чи примітки, якщо частини перекриваються. Якщо на фото різні дати/таблиці або суперечливі примітки, повідом це через unparsedNotes і не об'єднуй їх навмання.\n"
         "Знайди рядок, де в стовпчику 'Група' вказано саме цю групу (або схоже написання: ПІ-231, ПI-231, PI-231).\n\n"
         "ДУЖЕ ВАЖЛИВО щодо номерів пар:\n"
         "У стовпчику '№' зазначено номери уроків:\n"
@@ -163,10 +172,10 @@ async def recognize_replacements_from_image(image_bytes: bytes, group_name: str 
                 "role": "user",
                 "content": [
                     {"type": "text", "text": prompt},
-                    {
+                    *[{
                         "type": "image_url",
-                        "image_url": {"url": f"data:image/jpeg;base64,{b64_image}"},
-                    },
+                        "image_url": {"url": 'data:image/jpeg;base64,' + base64.b64encode(part).decode('ascii')},
+                    } for part in images],
                 ],
             }
         ],

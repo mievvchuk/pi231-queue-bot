@@ -22,12 +22,14 @@ from queue_bot.handlers.common import (
 )
 from queue_bot.services import admins, recognition, replacements, schedule, working_days
 from queue_bot.services.errors import BotError
+from queue_bot.handlers.photo_albums import PhotoAlbums
 
 log = logging.getLogger(__name__)
 router = Router()
 
 # Тимчасове збереження розпізнаних замін для підтвердження
 _PENDING_RECOGNITIONS: dict[str, list[dict]] = {}
+_PHOTO_ALBUMS = PhotoAlbums()
 
 
 class EditReplacementState(StatesGroup):
@@ -318,17 +320,25 @@ async def handle_photo_replacement(message: Message, conn):
     if not admins.is_admin(conn, message.from_user.id):
         return
 
-    photo = message.photo[-1]
+    try:
+        messages = await _PHOTO_ALBUMS.collect(message)
+    except BotError as err:
+        await message.answer(f"⚠️ {html.escape(str(err))}")
+        return
+    if messages is None:
+        return
     bot = message.bot
-    status_msg = await message.answer("⏳ Отримано фото. Аналізую таблицю замін...")
+    status_msg = await message.answer(f"⏳ Отримано фото: {len(messages)}. Аналізую таблицю замін...")
 
     try:
-        file = await bot.get_file(photo.file_id)
-        img_stream = io.BytesIO()
-        await bot.download_file(file.file_path, destination=img_stream)
-        img_bytes = img_stream.getvalue()
+        images = []
+        for part in messages:
+            file = await bot.get_file(part.photo[-1].file_id)
+            img_stream = io.BytesIO()
+            await bot.download_file(file.file_path, destination=img_stream)
+            images.append(img_stream.getvalue())
 
-        result = await recognition.recognize_replacements_from_image(img_bytes, group_name=config.STUDENT_GROUP, conn=conn)
+        result = await recognition.recognize_replacements_from_images(images, group_name=config.STUDENT_GROUP, conn=conn)
         reps = result["replacements"]
         token = str(uuid.uuid4())[:8]
         _PENDING_RECOGNITIONS[token] = reps
