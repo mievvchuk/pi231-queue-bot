@@ -94,9 +94,8 @@ async def test_partial_numbered_completion_keeps_place_and_updates_limit(conn, a
     assert row['position'] == 1 and json.loads(row['selected_labs']) == [2]
     assert row['planned_minutes'] == 10 and json.loads(row['passed_labs']) == [1]
     await send(app, '✅ Здав')
-    await click(app, 'labdone', 'all')
-    await click(app, 'labdone', 'ok')
     assert queues.get_user_position(conn, 1, app[2]) is None
+    assert queues.get_history(conn, app[2])[0]['labs_passed'] == 2
 
 
 @pytest.mark.asyncio
@@ -158,12 +157,41 @@ async def test_late_restriction_prevents_numbered_signup(conn, app, change):
 
 
 @pytest.mark.asyncio
-async def test_legacy_count_is_not_converted_to_guessed_lab_numbers(conn, app):
-    queues.join_queue(conn, 1, app[2], lab_count=3, planned_minutes=20)
+@pytest.mark.parametrize('count', [None, 1, 3])
+async def test_unknown_labs_finish_without_questions_and_next_signup_asks(conn, app, count):
+    queues.join_queue(conn, 1, app[2], lab_count=count, planned_minutes=20)
     await send(app, '✅ Здав')
-    row = queues.get_entries(conn, app[2])[0]
+    assert queues.get_user_position(conn, 1, app[2]) is None
+    row = queues.get_history(conn, app[2])[0]
     assert row['selected_labs'] is None and row['labs_passed'] == 0
-    assert 'оберіть' in app[1].call_args[0][0].text.lower()
+    assert row['status'] == 'completed'
+    assert await context(app) == {'session_id': app[2]}
+    assert await app[0].storage.get_state(key()) is None
+    await send(app, '📝 Стати в кінець')
+    assert queues.get_user_position(conn, 1, app[2]) is None
+    assert (await context(app))['picker_allowed']
+    await send(app, '2', '10')
+    assert json.loads(queues.get_entries(conn, app[2])[0]['selected_labs']) == [2]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('callback', [False, True])
+async def test_single_known_lab_finishes_immediately_with_correct_history(conn, app, callback):
+    queues.join_queue(conn, 1, app[2], lab_numbers=[2], planned_minutes=10)
+    if callback:
+        message = Message(message_id=1, date=datetime.now(), chat=Chat(id=1, type='private'),
+                          from_user=User(id=5, is_bot=True, first_name='Бот'), text='Черга')
+        event = CallbackQuery(id='single', from_user=User(id=1, is_bot=False, first_name='Іван'),
+                              chat_instance='private', message=message, data=f'sd:{app[2]}')
+        await app[0].feed_update(app[1], Update(update_id=2, callback_query=event))
+    else:
+        await send(app, '✅ Здав')
+    assert queues.get_user_position(conn, 1, app[2]) is None
+    history = queues.get_history(conn, app[2])[0]
+    assert json.loads(history['passed_labs']) == [2] and history['labs_passed'] == 1
+    assert json.loads(history['selected_labs']) == []
+    assert await context(app) == {'session_id': app[2]}
+    assert await app[0].storage.get_state(key()) is None
 
 
 @pytest.mark.asyncio

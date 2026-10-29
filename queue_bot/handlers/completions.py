@@ -22,22 +22,22 @@ async def begin_completion(message, state, conn, session_id, *, telegram_id=None
     entry = next((r for r in queues.get_entries(conn, session_id) if r['telegram_id'] == uid), None)
     if entry is None:
         raise BotError('Ви не записані в цю чергу.')
-    if not lab_catalog.labs_for_session(session):
+    labs_available = bool(lab_catalog.labs_for_session(session))
+    pending = lab_catalog.read_numbers(entry['selected_labs']) if labs_available else None
+    if not pending:
         old_position = entry['position']
         queues.finish_own_entry(conn, uid, session_id, passed=True)
         await state.clear()
         await state.update_data(session_id=session_id)
         await notify_next_students(message.bot, conn, subjects, session_id, removed_position=old_position)
-        await open_queue_screen(message, conn, subjects, session_id, note='✅ Консультацію / запис завершено.', telegram_id=uid)
+        note = '✅ Здачу позначено. Вас знято з черги.' if labs_available else '✅ Консультацію / запис завершено.'
+        await open_queue_screen(message, conn, subjects, session_id, note=note, telegram_id=uid)
         return
-    pending = lab_catalog.read_numbers(entry['selected_labs'])
-    if not pending:
-        from queue_bot.handlers.lab_counts import begin_lab_count
-        await message.answer('Спочатку оберіть конкретні лабораторні у вашому записі. Їхні номери раніше не були вказані.')
-        await begin_lab_count(message, state, conn, session_id, action='edit', telegram_id=uid, subjects=subjects)
+    await state.update_data(session_id=session_id, passed_entry_id=entry['id'], passed_revision=entry['entry_revision'])
+    if len(pending) == 1:
+        await finish_selection(message, state, conn, subjects, pending, telegram_id=uid)
         return
     await state.set_state(CompletionFlow.count)
-    await state.update_data(session_id=session_id, passed_entry_id=entry['id'], passed_revision=entry['entry_revision'])
     await start_picker(message, state, session, prefix='labdone', allowed=pending, selected=[])
 
 
