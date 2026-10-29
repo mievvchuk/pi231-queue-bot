@@ -454,23 +454,27 @@ def finish_own_entry(conn: sqlite3.Connection, telegram_id: int, session_id: int
 def swap_entries(conn, entry_id_1: int, entry_id_2: int) -> tuple[int, int]:
     """Міняє двох студентів місцями в черзі. Повертає (нове_місце_1, нове_місце_2)."""
     with transaction(conn):
-        entry_1 = _require_active_entry(conn, entry_id_1)
-        entry_2 = _require_active_entry(conn, entry_id_2)
+        return _swap_entries_in_transaction(conn, entry_id_1, entry_id_2)
 
-        if entry_1["session_id"] != entry_2["session_id"]:
-            raise BotError("Студенти знаходяться в різних чергах.")
-        if entry_1["id"] == entry_2["id"]:
-            raise BotError("Неможливо обмінятися з самим собою.")
 
-        pos_1, pos_2 = entry_1["position"], entry_2["position"]
+def _swap_entries_in_transaction(conn, entry_id_1, entry_id_2):
+    entry_1 = _require_active_entry(conn, entry_id_1)
+    entry_2 = _require_active_entry(conn, entry_id_2)
 
-        # Тимчасово знімаємо позицію для уникнення порушення унікального індексу
-        conn.execute("UPDATE queue_entries SET position = NULL WHERE id IN (?, ?)", (entry_1["id"], entry_2["id"]))
-        conn.execute("UPDATE queue_entries SET position = ? WHERE id = ?", (pos_2, entry_1["id"]))
-        conn.execute("UPDATE queue_entries SET position = ? WHERE id = ?", (pos_1, entry_2["id"]))
-        conn.execute("UPDATE queue_entries SET ready_to_swap = FALSE, swap_wish = NULL WHERE id IN (?, ?)", (entry_1["id"], entry_2["id"]))
+    if entry_1["session_id"] != entry_2["session_id"]:
+        raise BotError("Студенти знаходяться в різних чергах.")
+    if entry_1["id"] == entry_2["id"]:
+        raise BotError("Неможливо обмінятися з самим собою.")
 
-        return pos_2, pos_1
+    pos_1, pos_2 = entry_1["position"], entry_2["position"]
+
+    # Тимчасово знімаємо позицію для уникнення порушення унікального індексу
+    conn.execute("UPDATE queue_entries SET position = NULL WHERE id IN (?, ?)", (entry_1["id"], entry_2["id"]))
+    conn.execute("UPDATE queue_entries SET position = ? WHERE id = ?", (pos_2, entry_1["id"]))
+    conn.execute("UPDATE queue_entries SET position = ? WHERE id = ?", (pos_1, entry_2["id"]))
+    conn.execute("UPDATE queue_entries SET ready_to_swap = FALSE, swap_wish = NULL WHERE id IN (?, ?)", (entry_1["id"], entry_2["id"]))
+
+    return pos_2, pos_1
 
 
 def set_swap_wish(conn: sqlite3.Connection, telegram_id: int, session_id: int, wish: str | None) -> str | None:

@@ -372,8 +372,10 @@ async def test_swap_request_from_notification_callback(conn, filled):
     kb = sent_args[1]["reply_markup"]
     btn_yes = kb.inline_keyboard[0][0]
     btn_no = kb.inline_keyboard[0][1]
-    assert btn_yes.callback_data == f"sw_yes:{e1['id']}:{e2['id']}"
-    assert btn_no.callback_data == f"sw_no:{e1['id']}:{e2['id']}"
+    request = conn.execute("SELECT * FROM swap_requests").fetchone()
+    assert btn_yes.callback_data == f"sw_yes:{request['token']}"
+    assert btn_no.callback_data == f"sw_no:{request['token']}"
+    assert "10 хв" in sent_args[0][1]
 
 
 def test_format_queues_overview_and_filtering(conn, filled):

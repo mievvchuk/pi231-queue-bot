@@ -7,6 +7,7 @@ import pytest
 
 from queue_bot.storage import database as db
 from queue_bot.services import admins, queues, restrictions, users
+from queue_bot.services import swap_requests
 
 
 @pytest.fixture
@@ -62,6 +63,30 @@ def test_postgres_consultation_renewal(pg_conn):
     renewed = queues.finish_session(pg_conn, 100, consultation, create_new=True)
     assert queues.get_session(pg_conn, renewed)['queue_type'] == 'consultation'
     assert queues.get_session(pg_conn, lesson)['status'] == 'open'
+
+
+def test_postgres_swap_deadline_restart_and_single_answer(pg_conn):
+    sid = queues.create_session(pg_conn, 100, 1, 1)
+    users.register_user(pg_conn, 2, 'Студент Два')
+    queues.join_queue(pg_conn, 1, sid)
+    queues.join_queue(pg_conn, 2, sid)
+    a, b = queues.get_entries(pg_conn, sid)
+    now = datetime.now(timezone.utc)
+    old = swap_requests.create(pg_conn, 1, a['id'], b['id'], now=now)
+    pg_conn.close()
+    pg_conn.raw = pg_conn._connect_raw()
+    pg_conn._init_schema()
+    later = now + timedelta(minutes=10)
+    fresh = swap_requests.create(pg_conn, 1, a['id'], b['id'], now=later)
+    from queue_bot.services.errors import BotError
+    with pytest.raises(BotError):
+        swap_requests.respond(pg_conn, 2, old['token'], accept=True, now=later)
+    swap_requests.respond(pg_conn, 2, fresh['token'], accept=True, now=later)
+    assert queues.get_entry(pg_conn, a['id'])['position'] == 2
+    swap_requests.respond(pg_conn, 2, fresh['token'], accept=True, now=later + timedelta(hours=1))
+    assert queues.get_entry(pg_conn, a['id'])['position'] == 1
+    # Leaving must not be prevented by invitation foreign keys.
+    queues.leave_queue(pg_conn, 1, sid)
 
 
 def test_postgres_select_survives_schema_change_and_reconnect(pg_conn):

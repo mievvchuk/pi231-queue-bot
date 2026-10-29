@@ -181,6 +181,28 @@ MIGRATIONS = [
     ALTER TABLE queue_entries ADD COLUMN passed_labs TEXT NOT NULL DEFAULT '[]';
     ALTER TABLE queue_entries ADD COLUMN entry_revision INTEGER NOT NULL DEFAULT 0;
     """,
+    """
+CREATE TABLE IF NOT EXISTS swap_requests (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    token TEXT NOT NULL UNIQUE,
+    session_id INTEGER NOT NULL REFERENCES queue_sessions(id),
+    sender_entry_id INTEGER NOT NULL REFERENCES queue_entries(id) ON DELETE CASCADE,
+    target_entry_id INTEGER NOT NULL REFERENCES queue_entries(id) ON DELETE CASCADE,
+    sender_user_id INTEGER NOT NULL REFERENCES users(id),
+    target_user_id INTEGER NOT NULL REFERENCES users(id),
+    sender_revision INTEGER NOT NULL,
+    target_revision INTEGER NOT NULL,
+    sender_position INTEGER NOT NULL,
+    target_position INTEGER NOT NULL,
+    pair_left INTEGER NOT NULL,
+    pair_right INTEGER NOT NULL,
+    expires_at TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending'
+        CHECK (status IN ('pending', 'accepted', 'declined', 'expired', 'cancelled'))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_pending_swap_pair ON swap_requests(session_id, pair_left, pair_right)
+    WHERE status = 'pending';
+    """,
 ]
 
 PG_SCHEMA = """
@@ -308,6 +330,27 @@ CREATE TABLE IF NOT EXISTS bug_reports (
     admin_reply TEXT DEFAULT NULL,
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+CREATE TABLE IF NOT EXISTS swap_requests (
+    id SERIAL PRIMARY KEY,
+    token TEXT NOT NULL UNIQUE,
+    session_id INTEGER NOT NULL REFERENCES queue_sessions(id),
+    sender_entry_id INTEGER NOT NULL REFERENCES queue_entries(id) ON DELETE CASCADE,
+    target_entry_id INTEGER NOT NULL REFERENCES queue_entries(id) ON DELETE CASCADE,
+    sender_user_id INTEGER NOT NULL REFERENCES users(id),
+    target_user_id INTEGER NOT NULL REFERENCES users(id),
+    sender_revision INTEGER NOT NULL,
+    target_revision INTEGER NOT NULL,
+    sender_position INTEGER NOT NULL,
+    target_position INTEGER NOT NULL,
+    pair_left INTEGER NOT NULL,
+    pair_right INTEGER NOT NULL,
+    expires_at TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending'
+        CHECK (status IN ('pending', 'accepted', 'declined', 'expired', 'cancelled'))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_pending_swap_pair ON swap_requests(session_id, pair_left, pair_right)
+    WHERE status = 'pending';
+
 """
 
 
