@@ -94,7 +94,7 @@ async def open_queue_screen(message: Message, conn, subjects, session_id: int, n
     entries = queues.get_entries(conn, session_id)
     uid = telegram_id if telegram_id is not None else message.from_user.id
     is_adm = admins.is_admin(conn, uid)
-    text = '👤 <b>Режим студента</b>\n\n' + format_queue(subjects, session, entries, uid, show_id=is_adm)
+    text = '👤 <b>Режим студента</b>\n\n' + format_queue(subjects, session, entries, uid)
     if note:
         text = f"{note}\n\n{text}"
     in_queue = queues.get_user_position(conn, uid, session_id) is not None
