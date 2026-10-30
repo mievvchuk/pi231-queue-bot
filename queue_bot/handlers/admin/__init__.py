@@ -11,7 +11,7 @@ from .users import admin_list_users_start, admin_paginate_users, admin_open_user
 from .settings import admin_category_settings
 from .settings import admin_back_to_main_panel, admins_menu, list_admins_message, ask_admin_id, receive_admin_id, choose_admin_to_remove, confirm_remove_admin_text, cancel_remove_admin, start_broadcast_flow, preview_broadcast_message, perform_broadcast, start_maintenance_prompt, process_maintenance_time_entry, disable_maintenance
 from .queues import admin_pick_active_queues, admin_paginate_active_queues, admin_pick_add_student, admin_paginate_add_student_queues, admin_pick_order_queue, admin_paginate_order_queues, admin_pick_close_queue, admin_paginate_close_queues, admin_selected_queue_view, admin_selected_queue_add_student, admin_selected_queue_order, admin_selected_queue_close, admin_click_add_students, receive_student_names, toggle_signup_in_manager, start_managing_students, admin_paginate_students, select_student_from_list, back_to_students_list, back_to_queue_manager_from_any, student_move_up, student_move_down, student_ask_number, student_receive_number, student_ask_rename, student_receive_rename, student_toggle_block, student_mark_passed_by_admin, student_remove_by_admin, ask_finish_queue, confirm_finish_archive, confirm_finish_new, history_list, admin_paginate_history, history_details_view
-from .reports import admin_category_reports, admin_global_statistics_view, admin_chart_donut_status, admin_chart_subjects_columns, admin_chart_top_students, admin_export_global_csv, admin_pick_report_subject, admin_paginate_report_subjects, admin_generate_subject_report
+from .reports import admin_category_reports, admin_global_statistics_view, admin_chart_donut_status, admin_chart_subjects_columns, admin_chart_top_students, admin_export_global_pdf, admin_pick_report_subject, admin_paginate_report_subjects, admin_generate_subject_report
 
 router = Router()
 router.callback_query.filter(_is_admin_filter)
@@ -87,7 +87,7 @@ router.message(F.text == '📈 Загальна статистика', StateFilt
 router.message(F.text == '🍩 Діаграма: Типи та статуси', StateFilter('*'))(admin_chart_donut_status)
 router.message(F.text == '📊 Діаграма: Предмети', StateFilter('*'))(admin_chart_subjects_columns)
 router.message(F.text == '🏆 Діаграма: Топ студентів', StateFilter('*'))(admin_chart_top_students)
-router.message(F.text == '📥 Експорт зведеної таблиці (CSV)', StateFilter('*'))(admin_export_global_csv)
+router.message(F.text.in_({'📥 Завантажити звіт (PDF)', '📥 Експорт зведеної таблиці (CSV)'}), StateFilter('*'))(admin_export_global_pdf)
 router.message(F.text.in_({'📚 Звіти за предметами', '📊 Звіти за предметами', '📊 Інший предмет'}), StateFilter('*'))(admin_pick_report_subject)
 router.message(AdminPanelState.select_subject_for_report, F.text.in_({'⬅️', '➡️'}))(admin_paginate_report_subjects)
 router.message(AdminPanelState.select_subject_for_report, F.text.startswith('📊'))(admin_generate_subject_report)

@@ -1,4 +1,5 @@
 """Administrative Mini App adapters. Services remain the source of truth."""
+import asyncio
 import base64
 import binascii
 import csv
@@ -13,7 +14,7 @@ from datetime import date, datetime
 from aiohttp import web
 
 from queue_bot import config
-from queue_bot.services import admins, bugs, maintenance, polls, queues, recognition, replacements, restrictions, schedule, subjects, users, working_days
+from queue_bot.services import admins, bugs, maintenance, polls, queues, recognition, replacements, reports, restrictions, schedule, subjects, users, working_days
 from queue_bot.services.errors import BotError
 from queue_bot.storage.database import transaction
 
@@ -132,13 +133,16 @@ async def manage(request):
                 sessions.append({'id': row['id'], 'subject': subject, 'teacher': teacher, 'status': row['status'],
                                  'date': str(row['created_at']), 'type': row['queue_type']})
             entries = []
+            sid = None
             if 'sid' in request.query:
                 try:
                     sid = api.integer(int(request.query['sid']))
                 except ValueError:
                     raise BotError('Некоректна черга.')
+                if not queues.get_session(conn, sid):
+                    raise BotError('Сесію не знайдено.')
                 entries = [{**dict(row), 'status': 'active'} for row in queues.get_entries(conn, sid) if row['user_id'] is not None] + queues.get_history(conn, sid)
-            return response({'sessions': sessions, 'entries': entries})
+            return response({'sessions': sessions, 'entries': entries, 'session_id': sid})
         if section == 'group':
             return await api.admin_users(request)
         if section == 'replacements':
@@ -159,6 +163,19 @@ async def manage(request):
                     raise BotError('Некоректний предмет.')
                 if not subjects.find_subject(catalog, sid):
                     raise BotError('Предмет не знайдено.')
+            if request.query.get('format') == 'pdf':
+                if sid is not None:
+                    snapshot = queues.get_subject_report(conn, sid)
+                    subject = subjects.find_subject(catalog, sid)
+                    raw = await asyncio.to_thread(reports.subject_report_pdf, snapshot, subject)
+                else:
+                    snapshot = queues.get_global_statistics(conn, catalog)
+                    raw = await asyncio.to_thread(reports.global_report_pdf, snapshot, catalog)
+                api.revalidate(request)
+                filename = f'pi231-subject-{sid}.pdf' if sid is not None else 'pi231-report.pdf'
+                return web.Response(body=raw, content_type='application/pdf',
+                                    headers={'Content-Disposition': f'attachment; filename="{filename}"',
+                                             'Cache-Control': 'no-store'})
             if request.query.get('format') == 'csv':
                 if sid is not None:
                     report = queues.get_subject_report(conn, sid)

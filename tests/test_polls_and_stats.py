@@ -194,7 +194,7 @@ def test_new_grouped_keyboards(conn):
     reports_texts = [btn.text for row in reports_kb.keyboard for btn in row]
     assert "📈 Загальна статистика" in reports_texts
     assert "📚 Звіти за предметами" in reports_texts
-    assert "📥 Експорт зведеної таблиці (CSV)" in reports_texts
+    assert "📥 Завантажити звіт (PDF)" in reports_texts
 
 
 @pytest.mark.asyncio

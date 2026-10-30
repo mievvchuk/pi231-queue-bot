@@ -130,7 +130,7 @@
       "admin_chart_donut_status",
       "admin_chart_subjects_columns",
       "admin_chart_top_students",
-      "admin_export_global_csv",
+      "admin_export_global_pdf",
       "admin_pick_report_subject",
       "admin_paginate_report_subjects",
       "admin_generate_subject_report",

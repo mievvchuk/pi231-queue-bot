@@ -5,3 +5,5 @@ pytest-asyncio>=0.23
 psycopg[binary]>=3.2
 tzdata>=2024.1
 pillow>=10.0
+reportlab>=4.4,<5
+pypdf>=6,<7

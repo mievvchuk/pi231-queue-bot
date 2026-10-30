@@ -1,4 +1,8 @@
 """Admin reports handlers."""
+import asyncio
+
+from queue_bot.services import reports
+
 from .common import (
     AdminPanelState,
     BufferedInputFile,
@@ -26,8 +30,8 @@ async def admin_category_reports(message: Message, state: FSMContext):
         "• <b>🍩 Діаграма: Типи та статуси</b> — кільцеві діаграми (Donut Charts) категорій черг та результатів здач.\n"
         "• <b>📊 Діаграма: Предмети</b> — вертикальна стовпчикова діаграма (Column Chart) порівняння дисциплін.\n"
         "• <b>🏆 Діаграма: Топ студентів</b> — горизонтальна рейтингова діаграма (Leaderboard Bar Chart) лідерів здач.\n"
-        "• <b>📚 Звіти за предметами</b> — комбінована діаграма та CSV-таблиця по конкретній дисципліні.\n"
-        "• <b>📥 Експорт зведеної таблиці (CSV)</b> — єдиний файл Excel/CSV з матрицею всіх студентів та предметів.\n\n"
+        "• <b>📚 Звіти за предметами</b> — комбінована діаграма та PDF-звіт по конкретній дисципліні.\n"
+        "• <b>📥 Завантажити звіт (PDF)</b> — оформлений PDF з підсумками всіх студентів та предметів.\n\n"
         "Оберіть потрібний тип звіту або діаграми нижче 👇",
         reply_markup=get_admin_reports_menu(),
     )
@@ -134,14 +138,15 @@ async def admin_chart_top_students(message: Message, conn, subjects):
 
 
 
-async def admin_export_global_csv(message: Message, conn, subjects):
-    csv_bytes = queues.export_global_statistics_csv(conn, subjects)
-    file = BufferedInputFile(csv_bytes, filename="pi231_full_statistics.csv")
+async def admin_export_global_pdf(message: Message, conn, subjects):
+    stats = queues.get_global_statistics(conn, subjects)
+    pdf_bytes = await asyncio.to_thread(reports.global_report_pdf, stats, subjects)
+    file = BufferedInputFile(pdf_bytes, filename="pi231-report.pdf")
     await message.answer_document(
         file,
         caption=(
             "📊 <b>Зведена таблиця успішності групи ПІ-231</b>\n"
-            "Містить дані по кожному студенту та всіх предметах семестру (формат CSV для Excel / Google Таблиць)."
+            "Містить дані по кожному студенту та всіх предметах семестру (формат PDF)."
         ),
         reply_markup=get_admin_reports_menu(),
     )
@@ -207,17 +212,9 @@ async def admin_generate_subject_report(message: Message, state: FSMContext, con
 
     text_msg = "\n".join(lines)
 
-    csv_rows = [
-        "Прізвище та ім'я;Здано робіт;Спроб (не здав);Місце в поточній черзі;Дати здач"
-    ]
-    for s in report["students"]:
-        dates_str = ", ".join(s["dates"]) if s["dates"] else "-"
-        cur_pos = str(s["current_position"]) if s["current_position"] else "-"
-        csv_rows.append(f"{s['name']};{s['passed_count']};{s['not_passed_count']};{cur_pos};{dates_str}")
-
-    csv_data = "\r\n".join(csv_rows).encode("utf-8-sig")
+    pdf_data = await asyncio.to_thread(reports.subject_report_pdf, report, matched_sub)
     safe_name = re.sub(r"[^\w\s-]", "", matched_sub["name"]).replace(" ", "_")
-    file = BufferedInputFile(csv_data, filename=f"report_{safe_name}.csv")
+    file = BufferedInputFile(pdf_data, filename=f"report_{safe_name}.pdf")
 
     menu_rows = [
         ["📊 Інший предмет"],
@@ -238,7 +235,7 @@ async def admin_generate_subject_report(message: Message, state: FSMContext, con
     await message.answer(text_msg)
     await message.answer_document(
         file,
-        caption=f"📄 Таблиця: {html.escape(matched_sub['name'])}",
+        caption=f"📄 PDF-звіт: {html.escape(matched_sub['name'])}",
         reply_markup=make_reply_keyboard(menu_rows),
     )
 

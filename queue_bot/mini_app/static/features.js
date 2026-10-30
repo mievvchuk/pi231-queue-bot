@@ -75,6 +75,10 @@ window.createPI231Features = function (H) {
       closed: "Закрито",
       resolved: "Вирішено",
       active: "Активне",
+      archived: "Завершено",
+      completed: "Здав",
+      removed: "Не здав / перенесено",
+      left: "Вийшов із черги",
     })[value] ||
     value ||
     "";
@@ -519,7 +523,39 @@ window.createPI231Features = function (H) {
     return content;
   }
   function historyPage(data) {
-    const path = adminPath("admin-history");
+    if (data.session_id != null) {
+      const session = rows(data.sessions).find(
+        (item) => String(item.id) === String(data.session_id),
+      );
+      return [
+        btn("До списку сесій", () => open("admin-history"), "button secondary"),
+        card(
+          el("h2", {}, session?.subject || "Обрана сесія"),
+          small(
+            [session?.teacher, session?.date, statusText(session?.status)]
+              .filter(Boolean)
+              .join(" · "),
+          ),
+          el("h3", {}, "Учасники сесії"),
+          rows(data.entries).length
+            ? list(data.entries, (entry) =>
+                card(
+                  el("h3", {}, entry.name || entry.full_name || "Студент"),
+                  small(
+                    [
+                      entry.position ? "Місце №" + entry.position : null,
+                      statusText(entry.status),
+                      entry.completed_at,
+                    ]
+                      .filter(Boolean)
+                      .join(" · "),
+                  ),
+                ),
+              )
+            : el("p", { class: "empty" }, "У цій сесії ще немає учасників."),
+        ),
+      ];
+    }
     return [
       list(rows(data.sessions), (item) =>
         card(
@@ -548,24 +584,6 @@ window.createPI231Features = function (H) {
             : null,
         ),
       ),
-      rows(data.entries).length
-        ? card(
-            el("h2", {}, "Учасники обраної сесії"),
-            list(data.entries, (entry) =>
-              el(
-                "p",
-                {},
-                [
-                  entry.position,
-                  entry.name || entry.full_name,
-                  statusText(entry.status),
-                ]
-                  .filter((v) => v !== undefined)
-                  .join(" · "),
-              ),
-            ),
-          )
-        : null,
     ];
   }
   async function finishSession(session) {
@@ -1498,18 +1516,18 @@ window.createPI231Features = function (H) {
     if (H.download)
       content.push(
         btn(
-          subjects.value ? "CSV обраного предмета" : "CSV усієї групи",
+          subjects.value ? "PDF обраного предмета" : "PDF усієї групи",
           () =>
             externalAction(() =>
               H.download(
                 adminPath("admin-reports") +
-                  "?format=csv" +
+                  "?format=pdf" +
                   (subjects.value
                     ? "&subject_id=" + encodeURIComponent(subjects.value)
                     : ""),
                 subjects.value
-                  ? "pi231-subject-" + subjects.value + ".csv"
-                  : "pi231-report.csv",
+                  ? "pi231-subject-" + subjects.value + ".pdf"
+                  : "pi231-report.pdf",
               ),
             ),
           "button secondary",
@@ -1872,7 +1890,11 @@ window.createPI231Features = function (H) {
     if (state.error) {
       main.append(
         el("p", { class: "notice error", role: "alert" }, state.error),
-        btn("Спробувати знову", () => open(key), "button primary"),
+        btn(
+          "Спробувати знову",
+          () => open(key, false, state.query),
+          "button primary",
+        ),
       );
       return main;
     }

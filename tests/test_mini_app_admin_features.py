@@ -1,4 +1,5 @@
 import base64
+from io import BytesIO
 from datetime import datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -6,6 +7,7 @@ from unittest.mock import AsyncMock
 import pytest
 import pytest_asyncio
 from aiohttp.test_utils import TestClient, TestServer
+from pypdf import PdfReader
 
 from queue_bot import config
 from queue_bot.mini_app import admin_api, api
@@ -97,6 +99,34 @@ async def test_history_finish_and_reports_are_json_serializable(admin_client, co
     subject_text = await subject_csv.text()
     assert subject_text != global_csv and 'Місце в поточній черзі' in subject_text
     assert 'Студент Тестовий' in subject_text
+
+
+@pytest.mark.asyncio
+async def test_pdf_exports_are_readable_and_admin_only(admin_client, conn):
+    sid = queues.create_session(conn, 100, 1, 1)
+    queues.join_queue(conn, 1, sid, lab_numbers=[1], planned_minutes=10)
+    for suffix in ('', '&subject_id=1'):
+        path = '/api/miniapp/admin/manage/reports?format=pdf' + suffix
+        assert (await admin_client.get(path, headers=headers(100))).status == 403
+        assert (await admin_client.get(path + '&mode=admin', headers=headers(1))).status == 403
+        result = await admin_client.get(path + '&mode=admin', headers=headers(100))
+        assert result.status == 200 and result.content_type == 'application/pdf'
+        assert '.pdf' in result.headers['Content-Disposition']
+        assert result.headers['Cache-Control'] == 'no-store'
+        reader = PdfReader(BytesIO(await result.read()))
+        text = '\n'.join(page.extract_text() for page in reader.pages)
+        assert 'Студент Тестовий' in text
+        assert 'Програмування' in text
+
+
+@pytest.mark.asyncio
+async def test_history_detail_identifies_selected_session_and_rejects_unknown(admin_client, conn):
+    sid = queues.create_session(conn, 100, 1, 1)
+    result = await admin_client.get(f'/api/miniapp/admin/manage/history?sid={sid}&mode=admin', headers=headers(101))
+    assert result.status == 200
+    assert (await result.json())['session_id'] == sid
+    result = await admin_client.get('/api/miniapp/admin/manage/history?sid=999999&mode=admin', headers=headers(101))
+    assert result.status == 400
 
 
 @pytest.mark.asyncio
