@@ -30,10 +30,14 @@ jobs:
       TEST_DATABASE_URL: postgresql://queue_test:local_ci_only@localhost:5432/queue_test
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
           cache: pip
       - run: python -m pip install -r requirements.txt
       - run: python -m pytest -q --tb=short
+      - run: node --test tests/mini_app_frontend.test.cjs tests/mini_app_features.test.cjs
       - run: python -m compileall -q bot.py queue_bot

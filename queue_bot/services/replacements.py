@@ -107,6 +107,7 @@ def format_replacement(item: dict) -> str:
         f"✅ <b>Стало:</b> <b>{new_s}</b>\n"
         f"👨‍🏫 <b>Викладач:</b> {teacher}\n"
         f"🚪 <b>Аудиторія:</b> {room}"
+        + (f"\n📝 <b>Примітка з фото:</b> {html.escape(str(item['source_note']))}" if item.get('source_note') else '')
     )
 
 

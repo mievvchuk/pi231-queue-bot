@@ -41,14 +41,21 @@ async def data(app, uid=100):
 @pytest.mark.asyncio
 async def test_queue_mode_roundtrip_discards_draft_preserves_queue(conn, app):
     sid = queues.create_session(conn, 100, 1, 1)
+    queues.join_queue(conn, 1, sid)
     key = StorageKey(bot_id=5, chat_id=100, user_id=100)
     await app[0].storage.set_state(key, admin.AdminOrderState.entering_name)
     await app[0].storage.set_data(key, {'session_id': sid, 'pending_name': 'Чернетка'})
     await send(app, '👤 Режим студента')
     assert (await data(app)) == {'session_id': sid, 'ui_mode': 'student'}
+    assert '[ID:' not in app[1].call_args[0][0].text
     await send(app, '⚡ Режим адміна')
     assert (await data(app)) == {'session_id': sid, 'ui_mode': 'admin'}
+    assert '[ID: 1]' in app[1].call_args[0][0].text
     assert (await app[0].storage.get_state(key)).startswith('Admin')
+    await send(app, '👤 Режим студента')
+    assert '[ID:' not in app[1].call_args[0][0].text
+    await send(app, '⚡ Режим адміна')
+    assert '[ID: 1]' in app[1].call_args[0][0].text
     await send(app, '🔙 Назад')
     assert (await app[0].storage.get_state(key)).startswith('Admin')
 

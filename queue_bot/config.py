@@ -2,6 +2,7 @@
 import os
 from pathlib import Path
 import re
+from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -58,11 +59,13 @@ OWNER_ID = integer('OWNER_ID', 0)
 GROUP_CHAT_ID = os.getenv('GROUP_CHAT_ID', '').strip()
 SUBJECTS_PATH = data_path('SUBJECTS_PATH', 'subjects.json')
 SCHEDULE_PATH = data_path('SCHEDULE_PATH', 'schedule.json')
+LAB_CATALOG_PATH = data_path('LAB_CATALOG_PATH', 'lab_catalog.json')
 STUDENT_GROUP = os.getenv('STUDENT_GROUP', 'ПІ-231')
 NOTIFICATION_TIME = os.getenv('NOTIFICATION_TIME', '17:00')
 TIMEZONE = os.getenv('TZ', 'Europe/Kyiv')
 HTTP_HOST = os.getenv('HTTP_HOST', '0.0.0.0')
 PORT = integer('PORT', 8080, 1, 65535)
+MINI_APP_URL = os.getenv('MINI_APP_URL', '').strip()
 LOG_LEVEL = os.getenv('LOG_LEVEL', 'INFO').upper()
 POLLING_RETRY_SECONDS = integer('POLLING_RETRY_SECONDS', 5, 1, 3600)
 POLLS_WATCH_INTERVAL = integer('POLLS_WATCH_INTERVAL', 15, 1, 3600)
@@ -101,12 +104,23 @@ def get_initial_admin_ids():
 
 
 def validate_runtime():
+    from queue_bot.services.lab_catalog import load_catalog
+    load_catalog(LAB_CATALOG_PATH)
     if not DATABASE_URL:
         raise RuntimeError('Set DATABASE_URL in the hosting environment or .env')
     get_bot_token()
     if OWNER_ID <= 0:
         raise RuntimeError('Set OWNER_ID in the hosting environment or .env')
     get_initial_admin_ids()
+    if MINI_APP_URL:
+        try:
+            target = urlsplit(MINI_APP_URL)
+            if (target.scheme != 'https' or not target.hostname or target.username or target.password
+                    or target.fragment or target.query or target.path.rstrip('/') != '/app'):
+                raise ValueError
+            target.port
+        except ValueError:
+            raise RuntimeError('MINI_APP_URL must be an HTTPS URL ending in /app/ without credentials, query or fragment') from None
     try:
         ZoneInfo(TIMEZONE)
     except (ZoneInfoNotFoundError, ValueError):

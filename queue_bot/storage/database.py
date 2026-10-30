@@ -165,6 +165,44 @@ MIGRATIONS = [
     """
     ALTER TABLE users ADD COLUMN banned_until TEXT DEFAULT NULL;
     """,
+    """
+    ALTER TABLE queue_entries ADD COLUMN lab_count INTEGER DEFAULT NULL
+        CHECK (lab_count IS NULL OR lab_count BETWEEN 1 AND 20);
+    """,
+    """
+    ALTER TABLE queue_entries ADD COLUMN planned_minutes INTEGER DEFAULT NULL
+        CHECK (planned_minutes IS NULL OR planned_minutes >= 5);
+    """,
+    """
+    ALTER TABLE queue_entries ADD COLUMN labs_passed INTEGER NOT NULL DEFAULT 0 CHECK (labs_passed >= 0);
+    """,
+    """
+    ALTER TABLE queue_entries ADD COLUMN selected_labs TEXT DEFAULT NULL;
+    ALTER TABLE queue_entries ADD COLUMN passed_labs TEXT NOT NULL DEFAULT '[]';
+    ALTER TABLE queue_entries ADD COLUMN entry_revision INTEGER NOT NULL DEFAULT 0;
+    """,
+    """
+CREATE TABLE IF NOT EXISTS swap_requests (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    token TEXT NOT NULL UNIQUE,
+    session_id INTEGER NOT NULL REFERENCES queue_sessions(id),
+    sender_entry_id INTEGER NOT NULL REFERENCES queue_entries(id) ON DELETE CASCADE,
+    target_entry_id INTEGER NOT NULL REFERENCES queue_entries(id) ON DELETE CASCADE,
+    sender_user_id INTEGER NOT NULL REFERENCES users(id),
+    target_user_id INTEGER NOT NULL REFERENCES users(id),
+    sender_revision INTEGER NOT NULL,
+    target_revision INTEGER NOT NULL,
+    sender_position INTEGER NOT NULL,
+    target_position INTEGER NOT NULL,
+    pair_left INTEGER NOT NULL,
+    pair_right INTEGER NOT NULL,
+    expires_at TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending'
+        CHECK (status IN ('pending', 'accepted', 'declined', 'expired', 'cancelled'))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_pending_swap_pair ON swap_requests(session_id, pair_left, pair_right)
+    WHERE status = 'pending';
+    """,
 ]
 
 PG_SCHEMA = """
@@ -292,6 +330,27 @@ CREATE TABLE IF NOT EXISTS bug_reports (
     admin_reply TEXT DEFAULT NULL,
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+CREATE TABLE IF NOT EXISTS swap_requests (
+    id SERIAL PRIMARY KEY,
+    token TEXT NOT NULL UNIQUE,
+    session_id INTEGER NOT NULL REFERENCES queue_sessions(id),
+    sender_entry_id INTEGER NOT NULL REFERENCES queue_entries(id) ON DELETE CASCADE,
+    target_entry_id INTEGER NOT NULL REFERENCES queue_entries(id) ON DELETE CASCADE,
+    sender_user_id INTEGER NOT NULL REFERENCES users(id),
+    target_user_id INTEGER NOT NULL REFERENCES users(id),
+    sender_revision INTEGER NOT NULL,
+    target_revision INTEGER NOT NULL,
+    sender_position INTEGER NOT NULL,
+    target_position INTEGER NOT NULL,
+    pair_left INTEGER NOT NULL,
+    pair_right INTEGER NOT NULL,
+    expires_at TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending'
+        CHECK (status IN ('pending', 'accepted', 'declined', 'expired', 'cancelled'))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_pending_swap_pair ON swap_requests(session_id, pair_left, pair_right)
+    WHERE status = 'pending';
+
 """
 
 
@@ -364,6 +423,12 @@ class PGConnectionWrapper:
             cur.execute(PG_SCHEMA)
             cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_blocked BOOLEAN NOT NULL DEFAULT FALSE;")
             cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS banned_until TEXT DEFAULT NULL;")
+            cur.execute("ALTER TABLE queue_entries ADD COLUMN IF NOT EXISTS lab_count INTEGER DEFAULT NULL CHECK (lab_count IS NULL OR lab_count BETWEEN 1 AND 20);")
+            cur.execute("ALTER TABLE queue_entries ADD COLUMN IF NOT EXISTS planned_minutes INTEGER DEFAULT NULL CHECK (planned_minutes IS NULL OR planned_minutes >= 5);")
+            cur.execute("ALTER TABLE queue_entries ADD COLUMN IF NOT EXISTS labs_passed INTEGER NOT NULL DEFAULT 0 CHECK (labs_passed >= 0);")
+            cur.execute("ALTER TABLE queue_entries ADD COLUMN IF NOT EXISTS selected_labs TEXT DEFAULT NULL;")
+            cur.execute("ALTER TABLE queue_entries ADD COLUMN IF NOT EXISTS passed_labs TEXT NOT NULL DEFAULT '[]';")
+            cur.execute("ALTER TABLE queue_entries ADD COLUMN IF NOT EXISTS entry_revision INTEGER NOT NULL DEFAULT 0;")
             cur.execute("ALTER TABLE queue_sessions ADD COLUMN IF NOT EXISTS queue_type TEXT NOT NULL DEFAULT 'lesson';")
             cur.execute("ALTER TABLE queue_entries ADD COLUMN IF NOT EXISTS ready_to_swap BOOLEAN NOT NULL DEFAULT FALSE;")
             cur.execute("ALTER TABLE queue_entries ADD COLUMN IF NOT EXISTS swap_wish TEXT DEFAULT NULL;")

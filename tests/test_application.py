@@ -9,9 +9,16 @@ async def test_lifecycle_closes_resources_without_external_calls(monkeypatch):
     monkeypatch.setattr(config, 'validate_runtime', lambda: None)
     monkeypatch.setattr(config, 'get_bot_token', lambda: 'offline-token')
     runner = MagicMock(cleanup=AsyncMock())
+    from queue_bot.mini_app.api import CONTEXT
+    runner.app = {CONTEXT: {'ready': False}}
     conn = MagicMock()
     bot = MagicMock()
     bot.session.close = AsyncMock()
+    async def drain_http():
+        assert runner.app[CONTEXT]['ready'] is False
+        assert not conn.close.called
+        assert not bot.session.close.called
+    runner.cleanup.side_effect = drain_http
     dp = MagicMock(start_polling=AsyncMock())
     monkeypatch.setattr(application, 'run_web_server', AsyncMock(return_value=runner))
     monkeypatch.setattr(application, 'connect', lambda target: conn)

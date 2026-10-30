@@ -18,6 +18,58 @@ log = logging.getLogger(__name__)
 UK_TZ = ZoneInfo(config.TIMEZONE)
 
 
+def is_miniapp_poll(conn, poll_id: int) -> bool:
+    return conn.execute("SELECT 1 FROM bot_state WHERE key = ? AND value = '1'", (f'miniapp_poll:{poll_id}',)).fetchone() is not None
+
+
+def has_miniapp_vote(conn, poll_id: int, telegram_id: int) -> bool:
+    """Anonymous private snapshots cannot supersede a web-managed ballot."""
+    return conn.execute("SELECT 1 FROM bot_state WHERE key = ? AND value = '1'", (f'poll_web_vote:{poll_id}:{telegram_id}',)).fetchone() is not None
+
+
+def _poll_expired(poll) -> bool:
+    if not poll['closes_at']:
+        return False
+    closing = datetime.fromisoformat(str(poll['closes_at']))
+    if closing.tzinfo is None:
+        closing = closing.replace(tzinfo=UK_TZ)
+    return datetime.now(UK_TZ) >= closing
+
+
+async def _send_miniapp_invitation(bot, poll, chat_id):
+    from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
+    invitation = f"🗳 <b>{html.escape(poll['question'])}</b>\nГолосуйте в мініапці бота."
+    if chat_id > 0:
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text='🗳 Голосувати', web_app=WebAppInfo(url=f'{config.MINI_APP_URL}?poll={poll["id"]}'))]])
+        await bot.send_message(chat_id, invitation, reply_markup=keyboard)
+    else:
+        # Telegram only supports web_app buttons in private conversations.
+        me = await bot.get_me()
+        username = getattr(me, 'username', None)
+        if not isinstance(username, str) or not username:
+            raise BotError('Не вдалося отримати посилання на бота.')
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text='Відкрити бота', url=f'https://t.me/{username}')]])
+        await bot.send_message(chat_id, invitation + '\nВідкрийте бота та натисніть кнопку мініапки.', reply_markup=keyboard)
+
+
+async def _publish_miniapp_poll(bot, conn, poll):
+    # Persist voting channel before the first network await. No synthetic native
+    # poll instances: anonymous group totals must never mix channels.
+    conn.execute("INSERT INTO bot_state (key, value) VALUES (?, '1') ON CONFLICT (key) DO UPDATE SET value = excluded.value", (f'miniapp_poll:{poll["id"]}',))
+    targets = [get_group_chat_id(conn)] if poll['target'] == 'group' else get_active_user_ids(conn)
+    if not all(targets):
+        raise BotError('ID групового чату ще не налаштовано.')
+    success = errors = 0
+    for target in targets:
+        try:
+            await _send_miniapp_invitation(bot, poll, target)
+            success += 1
+        except Exception:
+            log.warning('Unable to deliver Mini App poll invitation', exc_info=True)
+            errors += 1
+    return success, errors
+
+
 def get_group_chat_id(conn) -> int | None:
     """Повертає збережений ID групового чату ПІ-231 з bot_state або змінної середовища."""
     try:
@@ -143,7 +195,7 @@ def record_poll_answer(
 
     poll_id = inst["poll_id"]
     poll = get_poll(conn, poll_id)
-    if not poll or poll["status"] != "active":
+    if not poll or poll["status"] != "active" or _poll_expired(poll) or is_miniapp_poll(conn, poll_id):
         return None
 
     with transaction(conn):
@@ -164,6 +216,8 @@ def record_poll_state_update(
     conn,
     tg_poll_id: str,
     option_voter_counts: list[int],
+    *,
+    final: bool = False,
 ) -> int | None:
     """Обробляє подію Poll (оновлення лічильників варіантів від Telegram)."""
     inst = conn.execute(
@@ -176,6 +230,16 @@ def record_poll_state_update(
     poll_id = inst["poll_id"]
     poll = get_poll(conn, poll_id)
     if not poll:
+        return None
+
+    if is_miniapp_poll(conn, poll_id):
+        return None
+    # Only the explicit stop_poll response may supply final native counts after
+    # a deadline. Ordinary queued Telegram updates never reopen a closed ballot.
+    if final:
+        if poll['status'] != 'closed':
+            return None
+    elif poll['status'] != 'active' or _poll_expired(poll):
         return None
 
     from queue_bot.services.restrictions import restriction_message
@@ -191,6 +255,11 @@ def record_poll_state_update(
         # проте інстанс належить конкретному chat_id, тому ми можемо точно оновити підрахунок голосів:
         if poll["target"] == "private" and bool(poll["is_anonymous"]):
             voter_id = inst["chat_id"]
+            # Poll updates carry counts, not vote timestamps. A stale snapshot
+            # (especially stop_poll) cannot distinguish an old native ballot
+            # from a newer web vote or retraction, so web takeover persists.
+            if has_miniapp_vote(conn, poll_id, voter_id):
+                return poll_id
             conn.execute(
                 "DELETE FROM poll_votes WHERE poll_id = ? AND voter_telegram_id = ?",
                 (poll_id, voter_id),
@@ -332,6 +401,9 @@ async def publish_poll(bot: Bot, conn, poll_id: int) -> tuple[int, int]:
     if not poll:
         raise BotError("Опитування не знайдено.")
 
+    if config.MINI_APP_URL:
+        return await _publish_miniapp_poll(bot, conn, poll)
+
     options = json.loads(poll["options_json"])
     is_anon = bool(poll["is_anonymous"])
     allows_mult = bool(poll["allows_multiple"])
@@ -396,8 +468,14 @@ async def publish_poll(bot: Bot, conn, poll_id: int) -> tuple[int, int]:
 async def send_poll_to_single_user(bot: Bot, conn, poll_id: int, telegram_id: int) -> bool:
     """Надсилає активне опитування конкретному студенту (якщо він ще не отримував або просить повторно)."""
     poll = get_poll(conn, poll_id)
-    if not poll or poll["status"] != "active":
+    if not poll or poll["status"] != "active" or _poll_expired(poll):
         raise BotError("Це опитування вже завершено.")
+    if is_miniapp_poll(conn, poll_id):
+        try:
+            await _send_miniapp_invitation(bot, poll, telegram_id)
+            return True
+        except Exception:
+            return False
     options = json.loads(poll["options_json"])
     try:
         msg = await bot.send_poll(
@@ -435,7 +513,7 @@ async def close_poll_and_summarize(bot: Bot, conn, poll_id: int) -> str:
             stopped_poll = await bot.stop_poll(chat_id=inst["chat_id"], message_id=inst["message_id"])
             if stopped_poll and stopped_poll.options:
                 counts = [o.voter_count for o in stopped_poll.options]
-                record_poll_state_update(conn, inst["tg_poll_id"], counts)
+                record_poll_state_update(conn, inst["tg_poll_id"], counts, final=True)
         await asyncio.sleep(0.03)
 
     summary_text = format_poll_results(conn, poll_id, is_final=True)

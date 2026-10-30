@@ -7,7 +7,8 @@
       "home",
       "back_from_admin_queue",
       "refresh_admin_queue",
-      "back_to_queue"
+      "back_to_queue",
+      "open_mini_app"
     ]
   },
   {
@@ -256,6 +257,8 @@
       "join_queue_end",
       "ask_specific_number",
       "handle_join_number",
+      "ask_lab_count",
+      "ask_planned_minutes",
       "start_swap_flow",
       "paginate_swap_targets",
       "swap_target_chosen",
@@ -275,7 +278,10 @@
       "cancel_student_suggest",
       "new_queue_subject_selected",
       "back_to_queue_subject",
-      "new_queue_teacher_selected"
+      "new_queue_teacher_selected",
+      "receive_lab_count",
+      "receive_planned_minutes",
+      "receive_passed_labs"
     ],
     "callback_query": [
       "swap_accept",
@@ -285,7 +291,9 @@
       "owner_reject_subject_request",
       "legacy_view_queue",
       "legacy_button_finish",
-      "legacy_ask_leave"
+      "legacy_ask_leave",
+      "lab_selection_callback",
+      "passed_selection_callback"
     ]
   },
   {

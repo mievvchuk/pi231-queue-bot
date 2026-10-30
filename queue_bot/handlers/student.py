@@ -38,8 +38,14 @@ from queue_bot.handlers.common import (
     session_names,
     show,
 )
-from queue_bot.services import admins, queues, users
+from queue_bot.services import admins, queues, users, swap_requests
 from queue_bot.services.errors import BotError
+from queue_bot.handlers.completions import CompletionFlow, begin_completion, receive_passed_labs, passed_selection_callback
+from queue_bot.services import lab_catalog
+from queue_bot.handlers.lab_counts import (
+    LAB_COUNT_BUTTON, TIME_BUTTON, LabCountFlow, ask_lab_count, ask_planned_minutes,
+    begin_lab_count, receive_lab_count, receive_planned_minutes, lab_selection_callback,
+)
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -83,14 +89,16 @@ async def ensure_session_id(message: Message, state: FSMContext) -> int | None:
     return session_id
 
 
-async def open_queue_screen(message: Message, conn, subjects, session_id: int, note: str = ""):
+async def open_queue_screen(message: Message, conn, subjects, session_id: int, note: str = "", *, telegram_id=None):
     session = get_session_or_fail(conn, session_id)
     entries = queues.get_entries(conn, session_id)
-    is_adm = admins.is_admin(conn, message.from_user.id)
-    text = '👤 <b>Режим студента</b>\n\n' + format_queue(subjects, session, entries, message.from_user.id, show_id=is_adm)
+    uid = telegram_id if telegram_id is not None else message.from_user.id
+    is_adm = admins.is_admin(conn, uid)
+    text = '👤 <b>Режим студента</b>\n\n' + format_queue(subjects, session, entries, uid)
     if note:
         text = f"{note}\n\n{text}"
-    markup = get_queue_view_reply_menu(is_admin=is_adm)
+    in_queue = queues.get_user_position(conn, uid, session_id) is not None
+    markup = get_queue_view_reply_menu(is_admin=is_adm, can_edit_labs=in_queue and session['status'] != 'archived' and bool(lab_catalog.labs_for_session(session)))
     await message.answer(text, reply_markup=markup)
 
 
@@ -430,7 +438,9 @@ async def show_queue_actions(message: Message, state: FSMContext, conn):
     swap_wish = queues.get_swap_wish(conn, message.from_user.id, session_id) if is_in_queue else None
     ready_to_swap = queues.is_ready_to_swap(conn, message.from_user.id, session_id) if is_in_queue else False
     markup = get_queue_actions_reply_menu(
-        is_in_queue, is_open=is_open, can_pick_number=can_pick, swap_wish=swap_wish, ready_to_swap=ready_to_swap
+        is_in_queue, is_open=is_open, can_pick_number=can_pick, swap_wish=swap_wish, ready_to_swap=ready_to_swap,
+        labs_available=bool(lab_catalog.labs_for_session(session)),
+        consultation=session['queue_type'] == 'consultation' or session['subject_id'] == 7,
     )
     await message.answer("⚙️ <b>Оберіть дію:</b>", reply_markup=markup)
 
@@ -529,18 +539,12 @@ async def back_to_current_queue(message: Message, state: FSMContext, conn, subje
     await open_queue_screen(message, conn, subjects, session_id)
 
 
-@router.message(F.text.in_({"✅ Здав", "здав", "здала"}), not_admin_state_filter)
+@router.message(F.text.in_({"✅ Здав", "здав", "здала", '✅ Завершити консультацію'}), not_admin_state_filter)
 async def mark_passed(message: Message, state: FSMContext, conn, subjects):
     session_id = await ensure_session_id(message, state)
     if not session_id:
         return
-    my_pos = queues.get_user_position(conn, message.from_user.id, session_id)
-    queues.finish_own_entry(conn, message.from_user.id, session_id, passed=True)
-    await notify_next_students(message.bot, conn, subjects, session_id, removed_position=my_pos)
-    await open_queue_screen(
-        message, conn, subjects, session_id,
-        note="✅ <b>Здачу зараховано</b>\n\nВас знято з черги.",
-    )
+    await begin_completion(message, state, conn, session_id, subjects=subjects)
 
 
 @router.message(F.text.in_({"❌ Не здав", "не здав", "не здала"}), not_admin_state_filter)
@@ -589,11 +593,7 @@ async def join_queue_end(message: Message, state: FSMContext, conn, subjects):
     session = get_session_or_fail(conn, session_id)
     if session["status"] != "open":
         raise BotError("Запис у цю чергу закрито.")
-    position, total = queues.join_queue(conn, message.from_user.id, session_id)
-    await open_queue_screen(
-        message, conn, subjects, session_id,
-        note=f"✅ <b>Ви записалися</b>\n\nВаше місце: <b>{position}</b> із {total}.",
-    )
+    await begin_lab_count(message, state, conn, session_id, subjects=subjects)
 
 
 @router.message(F.text.in_({"🔢 Обрати місце", "🔢 Обрати номер"}), not_admin_state_filter)
@@ -605,11 +605,8 @@ async def ask_specific_number(message: Message, state: FSMContext, conn, subject
     if session["status"] != "open":
         raise BotError("Запис у цю чергу закрито.")
     if queues.are_first_10_occupied(conn, session_id) and not queues.has_free_slots(conn, session_id):
-        position, total = queues.join_queue(conn, message.from_user.id, session_id)
-        await open_queue_screen(
-            message, conn, subjects, session_id,
-            note=f"ℹ️ <b>Перші 10 місць уже зайняті.</b>\nВас автоматично записано в кінець черги на місце <b>{position}</b> із {total}.",
-        )
+        await message.answer('ℹ️ Перші 10 місць уже зайняті. Записуємо в кінець черги.')
+        await begin_lab_count(message, state, conn, session_id, subjects=subjects)
         return
     await state.set_state(StudentFlow.pick_position)
     await state.update_data(session_id=session_id)
@@ -643,17 +640,18 @@ async def handle_join_number(message: Message, state: FSMContext, conn, subjects
         await message.answer("⚠️ <b>Потрібно знову обрати чергу.</b>", reply_markup=get_lost_context_menu())
         return
     pos = int(message.text.strip())
+    if not 1 <= pos <= 100:
+        await message.answer('Оберіть вільне місце від 1 до 10 або наявне вільне місце в черзі.')
+        return
     try:
-        position, total = queues.join_queue(conn, message.from_user.id, session_id, pos)
+        await begin_lab_count(message, state, conn, session_id, position=pos, subjects=subjects)
     except BotError as err:
         await message.answer(f"{err}\nСпробуйте інший номер або натисніть «🔙 Назад до черги»:")
         return
-    await state.clear()
-    await state.update_data(session_id=session_id)
-    await open_queue_screen(
-        message, conn, subjects, session_id,
-        note=f"✅ <b>Ви записалися</b>\n\nВаше місце: <b>{position}</b> із {total}.",
-    )
+
+
+router.message(F.text.in_({LAB_COUNT_BUTTON, '🧪 Кількість лабораторних'}), not_admin_state_filter)(ask_lab_count)
+router.message(F.text == TIME_BUTTON, not_admin_state_filter)(ask_planned_minutes)
 
 
 # ---------- Обмін місцями між студентами ----------
@@ -851,22 +849,25 @@ async def swap_confirm_action(message: Message, state: FSMContext, conn, subject
     sender_name = sender_user["full_name"] if sender_user else "Студент"
     subject, teacher = session_names(subjects, session)
 
+    request = swap_requests.create(conn, message.from_user.id, my_entry["id"], target["id"])
     invite_text = (
         f"🔁 <b>Пропозиція обміну місцями</b>\n\n"
         f"Студент <b>{html.escape(sender_name)}</b> (місце {my_entry['position']}) пропонує помінятися місцями:\n"
         f"📚 <b>{html.escape(subject)} — {html.escape(teacher)}</b>\n\n"
         f"• Ваше поточне місце: <b>{target['position']}</b>\n"
-        f"• Нове місце після обміну: <b>{my_entry['position']}</b>"
+        f"• Нове місце після обміну: <b>{my_entry['position']}</b>\n\n"
+        "⏳ На відповідь є 10 хв. Потім запит закриється."
     )
     invite_keyboard = make_keyboard([
         [
-            ("✅ Погодитися", f"sw_yes:{my_entry['id']}:{target['id']}"),
-            ("❌ Відхилити", f"sw_no:{my_entry['id']}:{target['id']}")
+            ("✅ Погодитися", f"sw_yes:{request['token']}"),
+            ("❌ Відхилити", f"sw_no:{request['token']}")
         ]
     ])
     try:
         await message.bot.send_message(target_user["telegram_id"], invite_text, reply_markup=invite_keyboard)
     except Exception:
+        swap_requests.cancel_delivery(conn, request["token"])
         raise BotError("Не вдалося надіслати запит студенту.")
 
     await state.clear()
@@ -879,26 +880,11 @@ async def swap_confirm_action(message: Message, state: FSMContext, conn, subject
 
 @router.callback_query(F.data.startswith("sw_yes:"))
 async def swap_accept(callback: CallbackQuery, conn, subjects):
-    _, sender_entry_id, target_entry_id = callback.data.split(":")
-    sender_entry_id, target_entry_id = int(sender_entry_id), int(target_entry_id)
-
-    target_entry = queues.get_entry(conn, target_entry_id)
-    if not target_entry or target_entry["status"] != "active":
-        raise BotError("Цей запис уже неактивний або чергу змінено.")
-
-    target_user = conn.execute("SELECT * FROM users WHERE id = ?", (target_entry["user_id"],)).fetchone()
-    if not target_user or target_user["telegram_id"] != callback.from_user.id:
-        raise BotError("Ця пропозиція призначена для іншого студента.")
-
-    sender_entry = queues.get_entry(conn, sender_entry_id)
-    if not sender_entry or sender_entry["status"] != "active":
-        raise BotError("Студент, який надсилав запит, уже змінив позицію або вийшов.")
-
-    session = get_session_or_fail(conn, target_entry["session_id"])
-    subject, teacher = session_names(subjects, session)
-    sender_user = conn.execute("SELECT * FROM users WHERE id = ?", (sender_entry["user_id"],)).fetchone()
-
-    new_sender_pos, new_target_pos = queues.swap_entries(conn, sender_entry_id, target_entry_id)
+    token = callback.data.removeprefix("sw_yes:")
+    request, positions = swap_requests.respond(conn, callback.from_user.id, token, accept=True)
+    sender_user = conn.execute("SELECT * FROM users WHERE id = ?", (request["sender_user_id"],)).fetchone()
+    target_user = conn.execute("SELECT * FROM users WHERE id = ?", (request["target_user_id"],)).fetchone()
+    new_sender_pos, new_target_pos = positions
 
     await show(
         callback,
@@ -920,16 +906,10 @@ async def swap_accept(callback: CallbackQuery, conn, subjects):
 
 @router.callback_query(F.data.startswith("sw_no:"))
 async def swap_decline(callback: CallbackQuery, conn, subjects):
-    _, sender_entry_id, target_entry_id = callback.data.split(":")
-    sender_entry_id, target_entry_id = int(sender_entry_id), int(target_entry_id)
-
-    target_entry = queues.get_entry(conn, target_entry_id)
-    target_user = conn.execute("SELECT * FROM users WHERE id = ?", (target_entry["user_id"],)).fetchone() if target_entry else None
-    if target_user and target_user["telegram_id"] != callback.from_user.id:
-        raise BotError("Ця пропозиція призначена для іншого студента.")
-
-    sender_entry = queues.get_entry(conn, sender_entry_id)
-    sender_user = conn.execute("SELECT * FROM users WHERE id = ?", (sender_entry["user_id"],)).fetchone() if sender_entry else None
+    token = callback.data.removeprefix("sw_no:")
+    request, _ = swap_requests.respond(conn, callback.from_user.id, token, accept=False)
+    target_user = conn.execute("SELECT * FROM users WHERE id = ?", (request["target_user_id"],)).fetchone()
+    sender_user = conn.execute("SELECT * FROM users WHERE id = ?", (request["sender_user_id"],)).fetchone()
 
     await show(callback, "❌ <b>Ви відхилили пропозицію обміну місцями.</b>")
 
@@ -969,23 +949,26 @@ async def swap_request_from_notification(callback: CallbackQuery, conn, subjects
     session = get_session_or_fail(conn, initiator_entry["session_id"])
     subject, teacher = session_names(subjects, session)
 
+    request = swap_requests.create(conn, callback.from_user.id, initiator_entry_id, receiver_entry_id)
     invite_text = (
         f"🔁 <b>Пропозиція обміну місцями</b>\n\n"
         f"Студент <b>{html.escape(initiator_user['full_name'])}</b> (місце {initiator_entry['position']}) пропонує помінятися місцями:\n"
         f"📚 <b>{html.escape(subject)} — {html.escape(teacher)}</b>\n\n"
         f"• Ваше поточне місце: <b>{receiver_entry['position']}</b>\n"
-        f"• Нове місце після обміну: <b>{initiator_entry['position']}</b>"
+        f"• Нове місце після обміну: <b>{initiator_entry['position']}</b>\n\n"
+        "⏳ На відповідь є 10 хв. Потім запит закриється."
     )
     invite_keyboard = make_keyboard([
         [
-            ("✅ Погодитися", f"sw_yes:{initiator_entry['id']}:{receiver_entry['id']}"),
-            ("❌ Відхилити", f"sw_no:{initiator_entry['id']}:{receiver_entry['id']}"),
+            ("✅ Погодитися", f"sw_yes:{request['token']}"),
+            ("❌ Відхилити", f"sw_no:{request['token']}"),
         ]
     ])
 
     try:
         await callback.bot.send_message(receiver_user["telegram_id"], invite_text, reply_markup=invite_keyboard)
     except Exception:
+        swap_requests.cancel_delivery(conn, request["token"])
         raise BotError("Не вдалося доставити пропозицію студенту.")
 
     await show(
@@ -1455,10 +1438,13 @@ async def legacy_view_queue(callback: CallbackQuery, conn, subjects, state: FSMC
 
 
 @router.callback_query(F.data.startswith(("sd:", "sn:")))
-async def legacy_button_finish(callback: CallbackQuery, conn, subjects):
+async def legacy_button_finish(callback: CallbackQuery, conn, subjects, state: FSMContext):
     prefix, session_id = callback.data.split(":")
     session_id = int(session_id)
     passed = prefix == "sd"
+    if passed:
+        await begin_completion(callback.message, state, conn, session_id, telegram_id=callback.from_user.id, subjects=subjects)
+        return
     queues.finish_own_entry(conn, callback.from_user.id, session_id, passed)
     note = "✅ <b>Здачу зараховано</b>\n\nВас знято з черги." if passed else "❌ <b>Позначено: не здав</b>"
     with suppress(Exception):
@@ -1471,3 +1457,11 @@ async def legacy_ask_leave(callback: CallbackQuery, conn):
     session_id = int(callback.data.split(":")[1])
     queues.leave_queue(conn, callback.from_user.id, session_id)
     await show(callback, "🚪 <b>Ви вийшли з черги.</b>")
+
+
+# Specific navigation/actions must win over the quantity text fallback.
+router.message(LabCountFlow.entering, F.text)(receive_lab_count)
+router.message(LabCountFlow.minutes, F.text)(receive_planned_minutes)
+router.message(CompletionFlow.count, F.text)(receive_passed_labs)
+router.callback_query(F.data.startswith('labpick:'))(lab_selection_callback)
+router.callback_query(F.data.startswith('labdone:'))(passed_selection_callback)

@@ -16,7 +16,9 @@ from aiogram.types import (
 )
 
 from queue_bot.services import admins, queues
+from queue_bot.services import lab_catalog
 from queue_bot.services.errors import BotError
+from queue_bot.services.lab_estimates import format_lab_details
 from queue_bot.services.subjects import find_subject, find_teacher
 
 log = logging.getLogger(__name__)
@@ -48,6 +50,9 @@ def get_reply_menu(conn, telegram_id: int) -> ReplyKeyboardMarkup:
     ]
     if admins.is_admin(conn, telegram_id):
         keyboard.append([KeyboardButton(text="⚡ Адмін-панель")])
+    from queue_bot import config
+    if config.MINI_APP_URL:
+        keyboard.append([KeyboardButton(text='📱 Мініапка')])
     return ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True)
 
 
@@ -60,12 +65,14 @@ def get_schedule_reply_menu() -> ReplyKeyboardMarkup:
     ])
 
 
-def get_queue_view_reply_menu(is_admin: bool = False) -> ReplyKeyboardMarkup:
+def get_queue_view_reply_menu(is_admin: bool = False, can_edit_labs: bool = False) -> ReplyKeyboardMarkup:
     """Основні кнопки екрану перегляду черги (для старости/адміна додається швидкий перехід до керування чергою)."""
     rows = [
         ["📍 Моє місце", "⚙️ Дії"],
         ["🔄 Оновити", "🔙 До черг"],
     ]
+    if can_edit_labs:
+        rows.insert(1, ['🧪 Обрати лабораторні', '⏱ Час здачі'])
     if is_admin:
         rows.append(["⚡ Режим адміна"])
     rows.append(['🏠 Головне меню'])
@@ -78,6 +85,8 @@ def get_queue_actions_reply_menu(
     can_pick_number: bool = True,
     swap_wish: str | None = None,
     ready_to_swap: bool = False,
+    labs_available: bool = True,
+    consultation: bool = False,
 ) -> ReplyKeyboardMarkup:
     """Меню «Дії» залежно від статусу запису студента."""
     if is_in_queue:
@@ -91,12 +100,15 @@ def get_queue_actions_reply_menu(
             btn_higher = "⬆️ Хочу вище"
             btn_lower = "⬇️ Хочу нижче"
 
-        return make_reply_keyboard([
-            ["✅ Здав", "❌ Не здав"],
+        rows = [
+            ['✅ Завершити консультацію'] if consultation else ["✅ Здав", "❌ Не здав"],
             ["🔁 Обмінятися місцями"],
             [btn_higher, btn_lower],
             ["🚪 Покинути чергу", "🔙 Назад до черги"],
-        ])
+        ]
+        if labs_available:
+            rows.insert(1, ['🧪 Обрати лабораторні', '⏱ Час здачі'])
+        return make_reply_keyboard(rows)
     if is_open:
         if can_pick_number:
             return make_reply_keyboard([
@@ -645,7 +657,24 @@ def format_entry(row, my_telegram_id: int | None = None, marked: bool = False, s
     if show_id and tg_id and tg_id > 0:
         id_part = f" <code>[ID: {tg_id}]</code>"
     pos = row["position"] if "position" in row.keys() else "?"
-    return f"{prefix}{pos}. {name}{swap_badge}{suffix}{id_part}"
+    count = row['lab_count'] if 'lab_count' in row.keys() and tg_id else None
+    minutes = row['planned_minutes'] if 'planned_minutes' in row.keys() and tg_id else None
+    details = format_lab_details(count, minutes)
+    if 'subject_id' in row.keys():
+        if not lab_catalog.labs_for_session(row):
+            details = ''
+        elif tg_id and 'selected_labs' in row.keys():
+            numbers = lab_catalog.read_numbers(row['selected_labs'])
+            if numbers:
+                details = 'ЛР ' + lab_catalog.format_numbers(numbers)
+                if minutes is not None:
+                    details += f' · ≈{minutes} хв'
+                try:
+                    details += f' · ліміт {lab_catalog.selection_limit(row, numbers)} хв'
+                except BotError:
+                    details += ' · оновіть перелік лабораторних'
+    lab_part = f' · {details}' if details else ''
+    return f"{prefix}{pos}. {name}{lab_part}{swap_badge}{suffix}{id_part}"
 
 
 async def show(callback: CallbackQuery, text: str, markup: InlineKeyboardMarkup | None = None):
