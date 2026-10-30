@@ -61,3 +61,12 @@ Fresh-context final review found no Critical permission/privacy issues. Importan
 
 ## Integration
 Use existing feature/lab-count-estimates branch and PR #3. Production DB, Render deployment, live Telegram recipients and paid recognition were not accessed. Old chat keyboards remain in place. No updates broadcast entries or new schema migrations were added.
+
+## Follow-up: session participants and PDF reports (2026-10-31)
+- Admin history opens a focused session detail with active and historical participants, readable statuses, explicit empty state and return to session list; unknown session IDs are rejected. Retry preserves the selected query.
+- Shared read-only ReportLab renderer provides global and subject PDF reports in Mini App and Telegram. Embedded licensed DejaVu Sans supports Ukrainian on Render; tables wrap, repeat headers and paginate with numbered footers. Global totals retain all students and per-subject data; labels explain that completed entries are not individual labs or grades.
+- PDF rendering runs outside the aiohttp event loop using data snapshots; admin access is checked again after rendering. Legacy Telegram CSV buttons route to PDF; legacy CSV API remains compatible.
+- Regression evidence: full run with disposable PostgreSQL 16 had 354 passed and one expected router-name snapshot mismatch after CSV handler rename. Updated only that snapshot and reran all 5 project-structure tests successfully. All 24 Node tests pass; PDF tests include Unicode extraction, 100-row pagination and Telegram document delivery. compileall, node --check and git diff --check passed.
+- Browser verified populated/empty admin session detail, return to list and actual PDF button download. Download automation event timed out, but the resulting 29,358-byte PDF existed in Downloads and was verified with pypdf and Poppler; both pages rendered correctly. A separate 40-row subject PDF was inspected visually.
+- No timetable data/code, production DB, migrations, Render settings or automatic broadcasts changed. QA used temporary data and fake Telegram; its server and PostgreSQL container were removed after checking.
+- Integration follow-up: PR #3 was already merged into develop. Its tree matches the tested starting point; publish this fix on bugfix/admin-session-pdf with a new PR to develop.

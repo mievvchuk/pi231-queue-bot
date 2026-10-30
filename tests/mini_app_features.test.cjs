@@ -406,7 +406,7 @@ test("schedule JSON import previews text safely and requires separate confirmati
   );
 });
 
-test("CSV download follows the selected subject and screenshot opens an authenticated helper", async () => {
+test("PDF download follows the selected subject and screenshot opens an authenticated helper", async () => {
   const downloads = [],
     images = [];
   const { features, S } = setup(
@@ -430,11 +430,13 @@ test("CSV download follows the selected subject and screenshot opens an authenti
   await features.open("admin-reports", false, "?subject_id=5");
   const report = features.page("admin-reports");
   const csv = descendants(report).find(
-    (node) => node.tag === "button" && node.textContent.includes("CSV"),
+    (node) => node.tag === "button" && node.textContent.includes("PDF"),
   );
   assert.match(csv.textContent, /предмета/);
   await csv.events.click();
   assert.match(downloads[0][0], /subject_id=5/);
+  assert.match(downloads[0][0], /format=pdf/);
+  assert.match(downloads[0][1], /\.pdf$/);
   await features.open("admin-bugs");
   const photo = descendants(features.page("admin-bugs")).find(
     (node) => node.tag === "button" && node.textContent.includes("скріншот"),
@@ -558,4 +560,32 @@ test("empty replacement lists never render a literal null action", async () => {
   S.mode = "admin";
   await features.open("admin-replacements");
   assert.ok(!features.page("admin-replacements").textContent.includes("null"));
+});
+
+test("admin session participants open a focused detail including an empty state", async () => {
+  const sessions = [
+    { id: 11, subject: "Машинне навчання", status: "open" },
+    { id: 12, subject: "Інший предмет", status: "archived" },
+  ];
+  const { features, S } = setup(async (path) => ({
+    sessions,
+    entries: [],
+    session_id: path.includes("sid=11") ? 11 : null,
+  }));
+  S.mode = "admin";
+  await features.open("admin-history");
+  const button = descendants(features.page("admin-history")).find(
+    (node) => node.tag === "button" && node.textContent === "Учасники сесії",
+  );
+  await button.events.click();
+  const page = features.page("admin-history");
+  assert.match(page.textContent, /Машинне навчання/);
+  assert.match(page.textContent, /У цій сесії ще немає учасників/);
+  assert.doesNotMatch(page.textContent, /Інший предмет/);
+  const back = descendants(page).find(
+    (node) => node.tag === "button" && node.textContent === "До списку сесій",
+  );
+  assert.ok(back);
+  await back.events.click();
+  assert.match(features.page("admin-history").textContent, /Інший предмет/);
 });
