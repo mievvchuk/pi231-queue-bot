@@ -5,10 +5,13 @@
     root = document.getElementById("app");
   const S = {
     tab: "queues",
+    feature: null,
     mode: "student",
     data: null,
     queue: null,
     schedule: null,
+    scheduleView: "day",
+    weekSchedule: null,
     scheduleDate: null,
     scheduleError: null,
     scheduleLoading: false,
@@ -29,6 +32,7 @@
     close: "M6 6l12 12 M18 6 6 18",
   };
   function icon(name) {
+    if (window.PI231Icon) return window.PI231Icon(name);
     const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
     for (const [k, v] of Object.entries({
       viewBox: "0 0 24 24",
@@ -69,6 +73,7 @@
   const mine = () => S.data.queues.filter((q) => q.my_position !== null),
     reference = (row) => ({ entry_id: row.id, revision: row.entry_revision });
   const isAdmin = () => S.mode === "admin" && S.data?.me.is_admin;
+  let features;
   let toastTimer;
   function toast(text, error = false) {
     document.getElementById("toast")?.remove();
@@ -110,9 +115,75 @@
     if (!response.ok) {
       const error = new Error(result.error || "Не вдалося виконати запит.");
       error.status = response.status;
+      error.code = result.code;
       throw error;
     }
     return result;
+  }
+  function updateBusy() {
+    const refresh = document.querySelector('button[aria-label="Оновити"]');
+    if (refresh) refresh.disabled = S.busy || S.loading;
+  }
+  async function openImage(path) {
+    const epoch = S.epoch,
+      mode = S.mode;
+    const response = await fetch("/api/miniapp" + path + "?mode=" + S.mode, {
+      headers: { Authorization: "tma " + initData },
+      credentials: "omit",
+      cache: "no-store",
+    });
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}));
+      throw Object.assign(
+        new Error(data.error || "Не вдалося відкрити зображення."),
+        { status: response.status },
+      );
+    }
+    const blob = await response.blob();
+    if (epoch !== S.epoch || mode !== S.mode) return;
+    const url = URL.createObjectURL(blob);
+    const panel = sheet("Скріншот звернення", "");
+    panel.append(
+      el("img", {
+        src: url,
+        alt: "Скріншот, доданий до звернення",
+        class: "report-image",
+        onload: () => URL.revokeObjectURL(url),
+        onerror: () => URL.revokeObjectURL(url),
+      }),
+    );
+  }
+  async function download(path, filename) {
+    const response = await fetch(
+      "/api/miniapp" +
+        path +
+        (path.includes("?") ? "&" : "?") +
+        "mode=" +
+        S.mode,
+      {
+        headers: { Authorization: "tma " + initData },
+        credentials: "omit",
+        cache: "no-store",
+      },
+    );
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}));
+      throw Object.assign(
+        new Error(data.error || "Не вдалося завантажити файл."),
+        { status: response.status },
+      );
+    }
+    const url = URL.createObjectURL(await response.blob());
+    const link = el("a", { href: url, download: filename });
+    document.body.append(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+  function openFeature(key) {
+    if (S.busy || !features) return;
+    if (key === "polls" || key === "help") S.tab = key;
+    return features.open(key);
   }
   function theme() {
     document.documentElement.dataset.theme =
@@ -203,8 +274,13 @@
     }
   }
   function navigate(tab) {
+    if (tab === "polls" || tab === "help") {
+      openFeature(tab);
+      return;
+    }
     if (S.busy || (S.loading && !S.scheduleLoading)) return;
     S.tab = tab;
+    S.feature = null;
     S.queue = null;
     S.fatal = null;
     window.scrollTo(0, 0);
@@ -221,6 +297,7 @@
             if (S.busy || S.loading) return;
             S.mode = isAdmin() ? "student" : "admin";
             S.queue = null;
+            S.feature = null;
             S.tab = isAdmin() ? "admin" : "queues";
             load();
           },
@@ -229,13 +306,18 @@
       );
     const refresh = btn(
       icon("refresh"),
-      () => (S.tab === "schedule" ? loadSchedule() : load()),
+      () =>
+        S.feature
+          ? features.open(S.feature)
+          : S.tab === "schedule"
+            ? refreshSchedule()
+            : load(),
       "icon-button",
     );
     refresh.setAttribute("aria-label", "Оновити");
     refresh.disabled = S.loading || S.busy;
     tools.append(refresh);
-    if (S.data) {
+    if (S.data?.me.name) {
       const avatar = btn(
         S.data.me.name
           .split(" ")
@@ -268,11 +350,14 @@
   }
   function bottomnav() {
     const tabs = [
-      ["queues", "Черги"],
+      isAdmin() ? ["admin", "Керування"] : ["queues", "Черги"],
       ["schedule", "Розклад"],
+      ["polls", "Опитування"],
       ["profile", "Профіль"],
+      ["help", "Допомога"],
     ];
-    if (isAdmin()) tabs.push(["admin", "Керування"]);
+    const activeTab =
+      S.feature === "polls" || S.feature === "help" ? S.feature : S.tab;
     return el(
       "nav",
       { class: "bottom-nav", "aria-label": "Основні розділи" },
@@ -280,9 +365,9 @@
         const node = btn(
           [icon(key), el("span", {}, label)],
           () => navigate(key),
-          "nav-item " + (S.tab === key ? "active" : ""),
+          "nav-item " + (activeTab === key ? "active" : ""),
         );
-        if (S.tab === key) node.setAttribute("aria-current", "page");
+        if (activeTab === key) node.setAttribute("aria-current", "page");
         return node;
       }),
     );
@@ -353,7 +438,9 @@
         el(
           "span",
           { class: "subject-icon tone-" + (q.id % 3) },
-          icon(consultation(q) ? "profile" : "queues"),
+          window.PI231SubjectIcon
+            ? window.PI231SubjectIcon(q.subject)
+            : icon(consultation(q) ? "profile" : "queues"),
         ),
         el(
           "div",
@@ -406,6 +493,11 @@
           "Привіт, " + S.data.me.name.split(" ").slice(0, 2).join(" "),
         ),
         el("p", {}, "Усе важливе для здачі лабораторних — поруч."),
+      ),
+      btn(
+        [icon("plus"), "Відкрити чергу"],
+        () => openFeature("create"),
+        "button secondary create-queue",
       ),
       sectionTitle("Мої записи", "Активних: " + own.length),
       own.length
@@ -467,6 +559,43 @@
         controls.append(
           btn("Лабораторні та час", () => labForm(q, own), "button secondary"),
         );
+      if (!consultation(q))
+        controls.append(
+          btn(
+            "Не здав — у кінець",
+            () =>
+              confirmSheet(
+                "Перейти в кінець черги?",
+                "Вибрані лабораторні збережуться.",
+                () => mutate("/queues/" + q.id + "/not-passed", reference(own)),
+              ),
+            "button secondary",
+          ),
+        );
+      controls.append(
+        el(
+          "div",
+          { class: "button-row" },
+          btn(
+            own.swap_wish === "higher" ? "Зняти «Хочу вище»" : "Хочу вище ↑",
+            () =>
+              mutate("/queues/" + q.id + "/wish", {
+                ...reference(own),
+                wish: own.swap_wish === "higher" ? null : "higher",
+              }),
+            "button secondary",
+          ),
+          btn(
+            own.swap_wish === "lower" ? "Зняти «Хочу нижче»" : "Хочу нижче ↓",
+            () =>
+              mutate("/queues/" + q.id + "/wish", {
+                ...reference(own),
+                wish: own.swap_wish === "lower" ? null : "lower",
+              }),
+            "button secondary",
+          ),
+        ),
+      );
       controls.append(
         btn(
           "Вийти з черги",
@@ -497,6 +626,15 @@
             mutate("/admin/queues/" + q.id, {
               action: q.status === "open" ? "close" : "open",
             }),
+          "button secondary",
+        ),
+      );
+    if (isAdmin())
+      controls.append(
+        btn("Додати студентів", () => addStudentsForm(q), "button secondary"),
+        btn(
+          "Історія та завершення черги",
+          () => features.open("admin-history", false, "?sid=" + q.id),
           "button secondary",
         ),
       );
@@ -536,6 +674,9 @@
             row.name,
             row.is_me ? el("span", { class: "you" }, "ти") : null,
           ),
+          row.swap_wish
+            ? badge(row.swap_wish === "higher" ? "Хоче вище ↑" : "Хоче нижче ↓")
+            : null,
           q.labs.length
             ? el("small", {}, labText(row) || "Лабораторні не вказані")
             : null,
@@ -788,6 +929,7 @@
   async function loadSchedule(value) {
     if (S.busy) return;
     const epoch = ++S.epoch;
+    S.scheduleView = "day";
     S.scheduleDate = value || S.scheduleDate || S.data.today;
     S.scheduleLoading = true;
     S.scheduleError = null;
@@ -814,6 +956,112 @@
         render();
       }
     }
+  }
+  function refreshSchedule() {
+    return S.scheduleView === "week"
+      ? loadWeek(S.scheduleDate)
+      : loadSchedule();
+  }
+  async function loadWeek(value) {
+    if (S.busy) return;
+    const epoch = ++S.epoch;
+    const monday = new Date(
+      (value || S.scheduleDate || S.data.today) + "T12:00:00Z",
+    );
+    monday.setUTCDate(monday.getUTCDate() - ((monday.getUTCDay() + 6) % 7));
+    S.scheduleView = "week";
+    S.scheduleDate = value || S.scheduleDate || S.data.today;
+    S.scheduleLoading = true;
+    S.loading = true;
+    S.scheduleError = null;
+    render();
+    try {
+      const days = await Promise.all(
+        Array.from({ length: 7 }, (_, index) => {
+          const date = new Date(monday);
+          date.setUTCDate(date.getUTCDate() + index);
+          return api("/schedule?date=" + date.toISOString().slice(0, 10));
+        }),
+      );
+      if (epoch === S.epoch) {
+        S.weekSchedule = days;
+        S.fatal = null;
+      }
+    } catch (error) {
+      if (epoch === S.epoch) {
+        if (error.status === 401 || error.status === 403)
+          S.fatal = error.message;
+        else S.scheduleError = error.message;
+      }
+    } finally {
+      if (epoch === S.epoch) {
+        S.scheduleLoading = false;
+        S.loading = false;
+        render();
+      }
+    }
+  }
+  function lessonCard(lesson) {
+    return el(
+      "article",
+      { class: "lesson" },
+      el(
+        "div",
+        { class: "lesson-number" },
+        lesson.number,
+        el("small", {}, "пара"),
+      ),
+      el(
+        "div",
+        { class: "lesson-body" },
+        lesson.is_replacement ? badge("Заміна", "warning") : null,
+        el("h3", {}, lesson.subject),
+        lesson.teachers_raw?.length
+          ? lesson.teachers_raw.map((t) =>
+              el(
+                "p",
+                { class: "muted" },
+                t.name + (t.room ? " · ауд. " + t.room : ""),
+              ),
+            )
+          : el(
+              "p",
+              { class: "muted" },
+              [lesson.teacher, lesson.room && "ауд. " + lesson.room]
+                .filter(Boolean)
+                .join(" · "),
+            ),
+        lesson.startTime && lesson.endTime
+          ? el("small", {}, lesson.startTime + "–" + lesson.endTime)
+          : null,
+      ),
+    );
+  }
+  function weekView() {
+    return el(
+      "div",
+      { class: "week-schedule" },
+      (S.weekSchedule || []).map((day) =>
+        el(
+          "section",
+          {},
+          sectionTitle(
+            day.day,
+            new Date(day.date + "T12:00:00Z").toLocaleDateString("uk-UA", {
+              day: "numeric",
+              month: "long",
+              timeZone: "Europe/Kyiv",
+            }),
+          ),
+          day.source_day
+            ? el("p", { class: "notice" }, "За розкладом: " + day.source_day)
+            : null,
+          day.lessons.length
+            ? el("div", { class: "timeline" }, day.lessons.map(lessonCard))
+            : el("p", { class: "notice" }, "Занять немає."),
+        ),
+      ),
+    );
   }
   function scheduleState() {
     if (S.scheduleLoading)
@@ -847,6 +1095,7 @@
   }
   function schedulePage() {
     const data =
+        S.scheduleView === "day" &&
         S.schedule?.date === S.scheduleDate &&
         !S.scheduleLoading &&
         !S.scheduleError
@@ -874,12 +1123,21 @@
         btn(
           "Сьогодні",
           () => loadSchedule(S.data.today),
-          S.scheduleDate === S.data.today ? "selected" : "",
+          S.scheduleView === "day" && S.scheduleDate === S.data.today
+            ? "selected"
+            : "",
         ),
         btn(
           "Завтра",
           () => loadSchedule(tomorrow()),
-          S.scheduleDate === tomorrow() ? "selected" : "",
+          S.scheduleView === "day" && S.scheduleDate === tomorrow()
+            ? "selected"
+            : "",
+        ),
+        btn(
+          "Тиждень",
+          () => loadWeek(),
+          S.scheduleView === "week" ? "selected" : "",
         ),
       ),
       data?.source_day
@@ -899,48 +1157,11 @@
         : null,
       S.scheduleLoading || S.scheduleError
         ? scheduleState()
-        : data?.lessons.length
-          ? el(
-              "div",
-              { class: "timeline" },
-              data.lessons.map((lesson) =>
-                el(
-                  "article",
-                  { class: "lesson" },
-                  el(
-                    "div",
-                    { class: "lesson-number" },
-                    lesson.number,
-                    el("small", {}, "пара"),
-                  ),
-                  el(
-                    "div",
-                    { class: "lesson-body" },
-                    lesson.is_replacement ? badge("Заміна", "warning") : null,
-                    el("h3", {}, lesson.subject),
-                    lesson.teachers_raw?.length
-                      ? lesson.teachers_raw.map((t) =>
-                          el(
-                            "p",
-                            { class: "muted" },
-                            t.name + (t.room ? " · ауд. " + t.room : ""),
-                          ),
-                        )
-                      : el(
-                          "p",
-                          { class: "muted" },
-                          [lesson.teacher, lesson.room && "ауд. " + lesson.room]
-                            .filter(Boolean)
-                            .join(" · "),
-                        ),
-                    lesson.startTime
-                      ? el("small", {}, lesson.startTime + "–" + lesson.endTime)
-                      : null,
-                  ),
-                ),
-              ),
-            )
-          : empty("Сьогодні можна видихнути", "На обрану дату занять немає."),
+        : S.scheduleView === "week"
+          ? weekView()
+          : data?.lessons.length
+            ? el("div", { class: "timeline" }, data.lessons.map(lessonCard))
+            : empty("Сьогодні можна видихнути", "На обрану дату занять немає."),
     );
   }
   function inbox() {
@@ -1031,6 +1252,21 @@
         "div",
         { class: "notice" },
         "Звичні кнопки залишилися в чаті. Твої дані однакові в боті та мініапці.",
+      ),
+      el(
+        "div",
+        { class: "action-stack" },
+        btn(
+          "Мої пропозиції предметів і викладачів",
+          () => openFeature("proposals"),
+          "button secondary",
+        ),
+        btn(
+          "Звернення та відповіді",
+          () => openFeature("bugs"),
+          "button secondary",
+        ),
+        btn("Допомога", () => openFeature("help"), "button secondary"),
       ),
       btn("Повернутися до бота", () => tg?.close(), "button secondary"),
     );
@@ -1133,59 +1369,138 @@
       ),
     );
   }
-  function adminPage() {
-    const blocked = S.users.filter((u) => u.is_blocked);
-    const cards = (rows) =>
-      rows.map((u) =>
+  function addStudentsForm(q) {
+    const panel = sheet(
+        "Додати студентів",
+        "Кожне прізвище та ім’я — з нового рядка. Буде додано в кінець черги.",
+      ),
+      names = el("textarea", {
+        rows: 5,
+        maxlength: 4000,
+        required: true,
+        "aria-label": "Список студентів",
+      }),
+      form = el(
+        "form",
+        {},
+        el("label", { class: "field" }, "Прізвище та ім’я", names),
         el(
-          "article",
-          { class: "request-card" },
-          el("strong", {}, u.full_name),
-          el(
-            "p",
-            { class: "muted" },
-            "ID: " +
-              u.telegram_id +
-              " · " +
-              (u.is_blocked
-                ? u.banned_until
-                  ? "Бан до " +
-                    new Date(u.banned_until).toLocaleString("uk-UA", {
-                      timeZone: "Europe/Kyiv",
-                    })
-                  : "Заблоковано безстроково"
-                : "Активний"),
-          ),
-          u.protected
-            ? badge("Адміністратор")
-            : u.is_blocked
-              ? btn(
-                  "Розбанувати",
-                  () => mutate("/admin/users/" + u.id, { action: "unban" }),
-                  "button secondary",
-                )
-              : btn(
-                  "Тимчасовий бан",
-                  () => banForm(u.id, u.full_name),
-                  "button secondary",
-                ),
+          "button",
+          { type: "submit", class: "button primary" },
+          "Додати студентів",
         ),
       );
-    const roster = el("div", {}, cards(S.users));
-    const search = el("input", {
-      type: "search",
-      placeholder: "Пошук за ПІБ",
-      "aria-label": "Пошук студентів",
-      oninput: (event) => {
-        const query = event.target.value.toLocaleLowerCase("uk-UA").trim();
-        roster.replaceChildren(
-          ...cards(
-            S.users.filter((u) =>
-              u.full_name.toLocaleLowerCase("uk-UA").includes(query),
-            ),
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      mutate("/admin/queues/" + q.id, {
+        action: "add_students",
+        names: names.value
+          .split(/\r?\n/)
+          .map((n) => n.trim())
+          .filter(Boolean),
+      });
+    });
+    panel.append(form);
+  }
+  function adminPage() {
+    const sections = [
+      [
+        "admin-history",
+        "Черги та історія",
+        "Завершення, архів та перенесення учасників",
+      ],
+      ["admin-group", "Студенти групи", "Пошук, ПІБ, обмеження та бан"],
+      [
+        "admin-subjects",
+        "Предмети й викладачі",
+        "Каталог предметів та викладачів",
+      ],
+      [
+        "admin-replacements",
+        "Розклад і заміни",
+        "Фото, розпізнавання, перевірка й архів",
+      ],
+      ["admin-saturdays", "Робочі суботи", "Дата, день розкладу та тип тижня"],
+      ["admin-polls", "Опитування", "Створення, голосування та результати"],
+      [
+        "admin-reports",
+        "Звіти та діаграми",
+        "Статистика групи, предметів і CSV",
+      ],
+    ];
+    if (S.data.me.is_owner)
+      sections.push([
+        "owner",
+        "Налаштування власника",
+        "Оголошення, техроботи, адміністратори та звернення",
+      ]);
+    return el(
+      "main",
+      {},
+      el(
+        "div",
+        { class: "modebar" },
+        "Режим адміністратора · ID доступні лише тут",
+      ),
+      el(
+        "div",
+        { class: "page-title" },
+        el("h1", {}, "Керування"),
+        small("Усі інструменти групи в одному місці."),
+      ),
+      el(
+        "div",
+        { class: "admin-grid" },
+        sections.map(([key, title, description]) =>
+          btn(
+            [el("strong", {}, title), small(description), icon("arrow")],
+            () => openFeature(key),
+            "card admin-category",
           ),
-        );
-      },
+        ),
+      ),
+      sectionTitle("Поточні черги", String(S.data.queues.length)),
+      btn("Створити чергу", () => openFeature("create"), "button secondary"),
+      el("div", { class: "subject-list" }, S.data.queues.map(subjectCard)),
+    );
+  }
+  function registrationPage() {
+    const name = el("input", {
+        required: true,
+        maxlength: 100,
+        autocomplete: "name",
+        placeholder: "Прізвище та ім’я",
+        "aria-label": "Прізвище та ім’я",
+      }),
+      error = el("p", { class: "notice error", role: "alert", hidden: true }),
+      submit = el(
+        "button",
+        { type: "submit", class: "button primary" },
+        "Зареєструватися",
+      ),
+      form = el(
+        "form",
+        { class: "action-stack" },
+        el("label", { class: "field" }, "Прізвище та ім’я", name),
+        error,
+        submit,
+      );
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      if (S.busy) return;
+      S.busy = true;
+      submit.disabled = true;
+      error.hidden = true;
+      try {
+        await api("/register", { full_name: name.value.trim() });
+        await load();
+      } catch (err) {
+        error.textContent = err.message;
+        error.hidden = false;
+      } finally {
+        S.busy = false;
+        submit.disabled = false;
+      }
     });
     return el(
       "main",
@@ -1193,28 +1508,15 @@
       el(
         "div",
         { class: "page-title" },
-        badge("Доступ адміністратора"),
-        el("h1", {}, "Керування"),
+        badge("Перший вхід"),
+        el("h1", {}, "Вітаємо в ПІ-231"),
         el(
           "p",
           { class: "muted" },
-          "Відкрий чергу, щоб змінити порядок чи керувати студентами.",
+          "Вкажи справжні прізвище та ім’я. Якщо тебе вже додали до черги, запис буде під’єднано автоматично.",
         ),
       ),
-      el("div", { class: "subject-list" }, S.data.queues.map(subjectCard)),
-      el(
-        "div",
-        { class: "section-heading" },
-        el("h2", {}, "Студенти групи"),
-        badge("Банів: " + blocked.length),
-      ),
-      el("label", { class: "field" }, search),
-      roster,
-      el(
-        "p",
-        { class: "footnote" },
-        "Фото замін, опитування й решта інструментів доступні у звичній адмінпанелі бота.",
-      ),
+      form,
     );
   }
   function render() {
@@ -1236,7 +1538,12 @@
           empty("Не вдалося завантажити", S.fatal),
           btn(
             "Спробувати знову",
-            () => (S.tab === "schedule" ? loadSchedule() : load()),
+            () =>
+              S.feature
+                ? features.open(S.feature)
+                : S.tab === "schedule"
+                  ? refreshSchedule()
+                  : load(),
             "button primary",
           ),
         ),
@@ -1254,16 +1561,22 @@
       );
       return;
     }
+    if (S.data.me.is_registered === false) {
+      root.append(registrationPage());
+      return;
+    }
     root.append(
-      S.queue
-        ? queuePage()
-        : S.tab === "schedule"
-          ? schedulePage()
-          : S.tab === "profile"
-            ? profilePage()
-            : S.tab === "admin" && isAdmin()
-              ? adminPage()
-              : queuesPage(),
+      S.feature
+        ? features.page(S.feature)
+        : S.queue
+          ? queuePage()
+          : S.tab === "schedule"
+            ? schedulePage()
+            : S.tab === "profile"
+              ? profilePage()
+              : S.tab === "admin" && isAdmin()
+                ? adminPage()
+                : queuesPage(),
       bottomnav(),
     );
     root.classList.toggle("is-loading", S.loading && !S.scheduleLoading);
@@ -1276,9 +1589,30 @@
         }),
       );
     if (tg?.BackButton) {
-      S.queue ? tg.BackButton.show() : tg.BackButton.hide();
+      S.queue || S.feature ? tg.BackButton.show() : tg.BackButton.hide();
     }
   }
+  features = window.createPI231Features?.({
+    S,
+    el,
+    btn,
+    small,
+    badge,
+    icon,
+    api,
+    toast,
+    sheet,
+    closeSheet,
+    mutate,
+    load,
+    navigate,
+    isAdmin,
+    render,
+    download,
+    openQueue,
+    openImage,
+    updateBusy,
+  });
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape" && !S.busy) closeSheet();
   });
@@ -1287,11 +1621,19 @@
   tg?.BackButton?.onClick(() => {
     if (!S.busy) {
       S.queue = null;
-      load();
+      S.feature = null;
+      navigate(isAdmin() ? "admin" : "queues");
     }
   });
   tg?.ready();
   tg?.expand();
   render();
-  if (initData) load();
+  if (initData)
+    load().then(async () => {
+      const pid = new URLSearchParams(location.search).get("poll");
+      if (pid && /^[1-9][0-9]*$/.test(pid) && S.data?.me.is_registered) {
+        await openFeature("polls");
+        features.openPoll(Number(pid));
+      }
+    });
 })();

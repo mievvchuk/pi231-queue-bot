@@ -62,7 +62,8 @@ async def test_health_and_shell_public_but_private_api_requires_signed_identity(
     assert (await client.get('/app/app.js')).status == 200
     assert (await client.get('/api/miniapp/bootstrap')).status == 401
     assert (await client.get('/api/miniapp/bootstrap?telegram_id=100')).status == 401
-    assert (await client.get('/api/miniapp/bootstrap', headers=headers(999))).status == 403
+    response = await client.get('/api/miniapp/bootstrap', headers=headers(999))
+    assert response.status == 200 and (await response.json())['me']['is_registered'] is False
     assert (await client.get('/api/miniapp/not-a-route', headers=headers())).status == 404
 
 

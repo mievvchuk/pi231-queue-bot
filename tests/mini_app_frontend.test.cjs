@@ -57,7 +57,7 @@ function setup() {
   // Export the existing closure only in this VM; production contains no test hooks.
   vm.runInContext(
     source.slice(0, source.indexOf('  document.addEventListener("keydown"')) +
-      "\nthis.appTest = {S, loadSchedule, navigate, adminPage};\n})();",
+      "\nthis.appTest = {S, loadSchedule, loadWeek, navigate, adminPage};\n})();",
     context,
   );
   const app = context.appTest;
@@ -168,4 +168,20 @@ test("leaving a pending schedule ignores its later failure", async () => {
   assert.equal(app.S.loading, false);
   assert.equal(app.S.scheduleLoading, false);
   assert.ok(!app.S.fatal);
+});
+
+test("week schedule uses seven real dates and does not invent empty days before loading", async () => {
+  const { app, context } = setup();
+  const requested = [];
+  context.fetch = async (url) => {
+    const date = new URL(url, "https://offline.test").searchParams.get("date");
+    requested.push(date);
+    return result(schedule(date));
+  };
+  await app.loadWeek("2026-10-30");
+  assert.equal(requested.length, 7);
+  assert.equal(requested[0], "2026-10-26");
+  assert.equal(requested[6], "2026-11-01");
+  assert.equal(app.S.scheduleView, "week");
+  assert.equal(app.S.weekSchedule.length, 7);
 });

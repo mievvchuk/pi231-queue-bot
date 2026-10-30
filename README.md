@@ -38,7 +38,7 @@ Copy-Item .env.example .env      # впишіть BOT_TOKEN, DATABASE_URL та O
 
 ```powershell
 .\.venv\Scripts\python -m pytest
-node --test tests/mini_app_frontend.test.cjs
+node --test tests/mini_app_frontend.test.cjs tests/mini_app_features.test.cjs
 ```
 
 Токен не потрібен: тестується бізнес-логіка на тимчасовій SQLite-базі.

@@ -109,17 +109,15 @@ async def notify_admins_new_bug(bot: Bot, conn, report_id: int) -> None:
     for adm_id in owner_ids:
         if not adm_id or adm_id <= 0:
             continue
-        with suppress(Exception):
-            if report["photo_file_id"]:
+        if report["photo_file_id"]:
+            with suppress(Exception):
                 await bot.send_photo(
                     chat_id=adm_id,
                     photo=report["photo_file_id"],
-                    caption=text,
+                    caption=f"🐞 Скріншот до звернення #{report_id}",
                     reply_markup=kb,
                 )
-            else:
-                await bot.send_message(
-                    chat_id=adm_id,
-                    text=text,
-                    reply_markup=kb,
-                )
+        # Keep the complete description outside Telegram's 1024-character
+        # photo-caption limit; a failed photo must not suppress the text report.
+        with suppress(Exception):
+            await bot.send_message(chat_id=adm_id, text=text, reply_markup=kb)

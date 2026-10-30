@@ -66,7 +66,7 @@ def test_postgres_consultation_renewal(pg_conn):
 
 
 @pytest.mark.asyncio
-async def test_postgres_mini_app_shares_bot_signup_completion_and_replacements(pg_conn):
+async def test_postgres_mini_app_shares_bot_signup_completion_and_replacements(pg_conn, monkeypatch):
     import hashlib
     import hmac
     import json
@@ -81,7 +81,11 @@ async def test_postgres_mini_app_shares_bot_signup_completion_and_replacements(p
     fields['hash'] = hmac.new(secret, '\n'.join(f'{k}={v}' for k, v in sorted(fields.items())).encode(), hashlib.sha256).hexdigest()
     auth = {'Authorization': 'tma ' + urlencode(fields)}
     sid = queues.create_session(pg_conn, 100, 1, 1)
-    app = create_web_app(conn=pg_conn, bot=AsyncMock(), bot_token=token)
+    from queue_bot import config
+    monkeypatch.setattr(config, 'MINI_APP_URL', 'https://offline.example/app/')
+    users.register_user(pg_conn, 100, 'Адмін Власник')
+    catalog = [{'id':1, 'name':'Програмування в Інтернет', 'teachers':[{'id':1, 'name':'Викладач'}]}]
+    app = create_web_app(conn=pg_conn, subjects=catalog, bot=AsyncMock(), bot_token=token)
     async with TestClient(TestServer(app)) as client:
         path = f'/api/miniapp/queues/{sid}'
         assert (await client.post(path+'/join', headers=auth, json={'labs':[1], 'minutes':10})).status == 200
@@ -101,6 +105,26 @@ async def test_postgres_mini_app_shares_bot_signup_completion_and_replacements(p
         assert lesson['subject'] == 'Філософія' and lesson['is_replacement']
         assert data['replacements'][0]['new_subject'] == 'Філософія'
         assert 'created_at' not in data['replacements'][0]
+        owner_fields = {'auth_date':str(int(time.time())), 'user':json.dumps({'id':100})}
+        owner_fields['hash'] = hmac.new(secret, '\n'.join(f'{k}={v}' for k,v in sorted(owner_fields.items())).encode(), hashlib.sha256).hexdigest()
+        owner_auth = {'Authorization':'tma '+urlencode(owner_fields)}
+        response = await client.post(f'/api/miniapp/admin/queues/{sid}?mode=admin', headers=owner_auth,
+            json={'action':'add_students','names':['Коваль Андрій','Мельник Олена']})
+        assert response.status == 200
+        history = await (await client.get(f'/api/miniapp/admin/manage/history?mode=admin&sid={sid}',headers=owner_auth)).json()
+        assert len([r for r in history['entries'] if r['status']=='active']) == 2
+        response = await client.get('/api/miniapp/admin/manage/reports?mode=admin',headers=owner_auth)
+        assert response.status == 200 and 'statistics' in await response.json()
+        created = await client.post('/api/miniapp/admin/manage/polls?mode=admin',headers=owner_auth,
+            json={'action':'create','question':'Тестове голосування','options':['Так','Ні'],'is_anonymous':True,'allows_multiple':False,'target':'private','minutes':10})
+        assert created.status == 200
+        pid = (await created.json())['poll_id']
+        assert (await client.post(f'/api/miniapp/polls/{pid}/vote',headers=auth,json={'options':[1]})).status == 200
+        poll = await (await client.get(f'/api/miniapp/polls/{pid}',headers=auth)).json()
+        assert poll['results']['total_voters'] == 1 and poll['results']['options'][1]['voters'] == []
+        assert (await client.post('/api/miniapp/bugs',headers=auth,json={'text':'Перевірка PostgreSQL'})).status == 200
+        response = await client.get('/api/miniapp/admin/manage/bugs?mode=admin',headers=owner_auth)
+        assert response.status == 200 and isinstance((await response.json())['items'][0]['created_at'],str)
 
 
 def test_postgres_swap_deadline_restart_and_single_answer(pg_conn):

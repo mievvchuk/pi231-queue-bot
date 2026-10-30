@@ -39,5 +39,5 @@ jobs:
           cache: pip
       - run: python -m pip install -r requirements.txt
       - run: python -m pytest -q --tb=short
-      - run: node --test tests/mini_app_frontend.test.cjs
+      - run: node --test tests/mini_app_frontend.test.cjs tests/mini_app_features.test.cjs
       - run: python -m compileall -q bot.py queue_bot

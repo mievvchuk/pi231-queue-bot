@@ -574,6 +574,27 @@ def add_student_by_admin(conn, actor_id: int, session_id: int, user_id: int, pos
 
 
 
+def add_students_by_admin(conn, actor_id: int, session_id: int, names: list[str]) -> int:
+    """Add a validated batch atomically, including newly created placeholders."""
+    from queue_bot.services import users
+    if not isinstance(names, list) or not 1 <= len(names) <= 100 or any(not isinstance(name, str) for name in names):
+        raise BotError('Вкажіть від 1 до 100 імен.')
+    clean = [users.validate_full_name(name) for name in names]
+    if len({name.casefold() for name in clean}) != len(clean):
+        raise BotError('Імена не повинні повторюватися.')
+    with transaction(conn):
+        require_admin(conn, actor_id)
+        _require_session(conn, session_id)
+        for name in clean:
+            user = users.get_or_create_user_by_name(conn, name)
+            require_available(conn, user['telegram_id'])
+            if conn.execute("SELECT 1 FROM queue_entries WHERE session_id = ? AND user_id = ? AND status = 'active'", (session_id, user['id'])).fetchone():
+                raise BotError(f'{name} вже в цій черзі.')
+            _place_user(conn, session_id, user['id'])
+            log_action(conn, actor_id, 'admin_add_student', f"user={user['id']} session={session_id}")
+    return len(clean)
+
+
 def find_active_session_by_subject_teacher(conn, subject_id: int, teacher_id: int, queue_type: str | None = None):
     """Повертає активну сесію черги (open/closed) для вказаного предмета, викладача і типу або None."""
     if queue_type is not None:

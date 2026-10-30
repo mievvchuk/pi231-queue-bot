@@ -1,6 +1,7 @@
 """Authenticated HTTP adapter; domain mutations contain no network awaits."""
 import html
 import logging
+import json
 from contextlib import suppress
 from datetime import date
 
@@ -57,12 +58,18 @@ async def body(request):
     try:
         if request.content_type != 'application/json':
             raise ValueError
-        data = await request.json()
+        limit = 15 * 1024 * 1024 if request.path.endswith('/admin/manage/replacements') else 2 * 1024 * 1024 if request.path.endswith('/bugs') else 128 * 1024
+        if request.content_length is not None and request.content_length > limit:
+            raise BotError('Запит завеликий. Зменште розмір вкладень.')
+        raw = await request.read()
+        if len(raw) > limit:
+            raise BotError('Запит завеликий. Зменште розмір вкладень.')
+        data = json.loads(raw.decode('utf-8'))
         if not isinstance(data, dict):
             raise ValueError
         request[REQ_BODY] = data
         return data
-    except (ValueError, TypeError):
+    except (ValueError, TypeError, UnicodeDecodeError):
         raise BotError('Невірний формат запиту. Оновіть екран.')
 
 
@@ -70,6 +77,26 @@ def require_admin(request):
     admins.require_admin(request[REQ_CONTEXT]['conn'], request[REQ_UID])
     if not request[REQ_ADMIN]:
         raise PermissionDenied('Перейдіть у режим адміністратора.')
+
+
+def revalidate(request, *, owner=False):
+    """Recheck after network/recognition awaits, before any subsequent write."""
+    ctx = request[REQ_CONTEXT]
+    if not ctx.get('ready'):
+        raise BotError('Бот перезапускається. Повторіть запит.')
+    auth = request.headers.get('Authorization', '')
+    uid = authenticate(auth[4:], ctx['token']) if auth.startswith('tma ') else None
+    if uid != request[REQ_UID]:
+        raise AuthenticationError('Повторно відкрийте мініапку з Telegram.')
+    restrictions.require_available(ctx['conn'], uid)
+    if not users.get_user(ctx['conn'], uid):
+        raise PermissionDenied('Реєстрація вже недоступна. Оновіть екран.')
+    if maintenance.is_maintenance_active(ctx['conn']) and not admins.is_admin(ctx['conn'], uid):
+        raise PermissionDenied('Бот на технічних роботах.')
+    if request[REQ_ADMIN]:
+        require_admin(request)
+    if owner:
+        admins.require_owner(ctx['conn'], uid)
 
 
 @web.middleware
@@ -96,7 +123,7 @@ async def guard(request, handler):
         conn = context['conn']
         restrictions.require_available(conn, uid)
         user = users.get_user(conn, uid)
-        if not user:
+        if not user and request.path not in ('/api/miniapp/register', '/api/miniapp/bootstrap'):
             return web.json_response({'error': 'Спочатку зареєструйтесь у боті: /start', 'code': 'registration_required'}, status=403)
         request[REQ_USER] = user
         is_admin = admins.is_admin(conn, uid)
@@ -129,7 +156,9 @@ async def guard(request, handler):
 async def bootstrap(request):
     ctx, uid = request[REQ_CONTEXT], request[REQ_UID]
     sessions = queues.list_sessions(ctx['conn'], ('open', 'closed'))
-    return web.json_response({'me': {'name': request[REQ_USER]['full_name'], 'is_admin': admins.is_admin(ctx['conn'], uid)},
+    if request[REQ_USER] is None:
+        return web.json_response({'me': {'name': None, 'is_registered': False, 'is_admin': False, 'is_owner': False}, 'queues': [], 'swaps': [], 'today': schedule.get_current_date().isoformat()})
+    return web.json_response({'me': {'name': request[REQ_USER]['full_name'], 'is_registered': True, 'is_admin': admins.is_admin(ctx['conn'], uid), 'is_owner': admins.is_owner(ctx['conn'], uid)},
         'queues': [queue_view(ctx['conn'], ctx['subjects'], row, uid) for row in sessions],
         'swaps': swap_views(ctx['conn'], uid), 'today': schedule.get_current_date().isoformat()})
 
@@ -163,6 +192,27 @@ async def student_action(request):
         place, _ = queues.join_queue(conn, uid, sid, position, lab_numbers=numbers, planned_minutes=minutes)
         return web.json_response({'message': f'Ви записалися. Ваше місце: {place}.'})
     session, entry = current_entry(request, data)
+    if action == 'not-passed':
+        if session['queue_type'] == 'consultation' or 'Курсова' in names(ctx['subjects'], session)[0]:
+            raise BotError('Для консультації скористайтеся завершенням запису.')
+        place = queues.finish_own_entry(conn, uid, sid, passed=False)
+        await notify_next(request, sid, entry['position'])
+        return web.json_response({'message': f'Вас переміщено в кінець. Місце: {place}.'})
+    if action == 'wish':
+        wish = data.get('wish')
+        if wish not in ('higher', 'lower', None):
+            raise BotError('Оберіть коректне побажання обміну.')
+        rows = queues.get_entries(conn, sid)
+        if wish == 'higher' and entry['position'] == 1:
+            raise BotError('Ви вже на першому місці.')
+        if wish == 'lower' and len(rows) > 1 and entry['position'] == len(rows):
+            raise BotError('Ви вже останні в черзі.')
+        new_wish = queues.set_swap_wish(conn, uid, sid, wish)
+        if new_wish:
+            from queue_bot.handlers.common import notify_swap_wishes
+            with suppress(Exception):
+                await notify_swap_wishes(ctx['bot'], conn, ctx['subjects'], sid, uid, new_wish)
+        return web.json_response({'message': 'Побажання обміну оновлено.'})
     if action == 'edit':
         numbers = lab_catalog.validate_numbers(session, data.get('labs'))
         minutes = integer(data.get('minutes'), minimum=5)
@@ -241,6 +291,18 @@ async def admin_queue(request):
     require_admin(request)
     data = await body(request)
     action = data.get('action')
+    if action == 'add_students':
+        names_list = data.get('names')
+        if not isinstance(names_list, list) or not 1 <= len(names_list) <= 100:
+            raise BotError('Вкажіть від 1 до 100 студентів.')
+        if any(not isinstance(name, str) for name in names_list):
+            raise BotError('Вкажіть коректні прізвище та ім’я.')
+        clean = [users.validate_full_name(name) for name in names_list]
+        if len(set(name.casefold() for name in clean)) != len(clean):
+            raise BotError('Імена у списку не повинні повторюватися.')
+        conn, uid = request[REQ_CONTEXT]['conn'], request[REQ_UID]
+        queues.add_students_by_admin(conn, uid, path_id(request), clean)
+        return web.json_response({'message': f'Додано студентів: {len(clean)}.'})
     if action not in ('open', 'close'):
         raise BotError('Невідома дія адміністратора.')
     queues.set_signup_open(request[REQ_CONTEXT]['conn'], request[REQ_UID], path_id(request), action == 'open')
@@ -259,6 +321,11 @@ async def admin_entry(request):
     action = data.get('action')
     if action == 'move':
         queues.move_entry(conn, uid, eid, integer(data.get('position')))
+    elif action == 'rename':
+        from .student_api import text
+        if entry['user_id'] is None:
+            raise BotError('Це вільне місце.')
+        users.admin_update_full_name(conn, uid, entry['user_id'], text(data.get('name'), 'Прізвище та ім’я', maximum=100))
     elif action in ('complete', 'remove'):
         (queues.mark_done if action == 'complete' else queues.remove_entry)(conn, uid, eid)
         await notify_next(request, entry['session_id'], entry['position'])
@@ -292,6 +359,9 @@ async def admin_user(request):
 
 def setup(app):
     prefix = '/api/miniapp'
+    from . import student_api, admin_api
+    student_api.setup(app)
+    admin_api.setup(app)
     app.router.add_get(prefix+'/bootstrap', bootstrap)
     app.router.add_get(prefix+'/schedule', timetable)
     app.router.add_get(prefix+'/queues/{sid}', detail)
