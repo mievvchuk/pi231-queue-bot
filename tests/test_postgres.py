@@ -66,7 +66,7 @@ def test_postgres_consultation_renewal(pg_conn):
 
 
 @pytest.mark.asyncio
-async def test_postgres_mini_app_shares_bot_signup_and_completion(pg_conn):
+async def test_postgres_mini_app_shares_bot_signup_completion_and_replacements(pg_conn):
     import hashlib
     import hmac
     import json
@@ -91,6 +91,16 @@ async def test_postgres_mini_app_shares_bot_signup_and_completion(pg_conn):
             json={'entry_id':row['id'], 'revision':row['entry_revision']})).status == 200
         assert queues.get_user_position(pg_conn, 1, sid) is None
         assert queues.get_history(pg_conn, sid)[0]['labs_passed'] == 1
+        from queue_bot.services import replacements
+        replacements.save_replacement(pg_conn, {'date':'2026-10-30', 'lesson_number':3,
+            'new_subject':'Філософія', 'teacher':'Багас Л.М.', 'room':'138'})
+        response = await client.get('/api/miniapp/schedule?date=2026-10-30', headers=auth)
+        assert response.status == 200
+        data = await response.json()
+        lesson = next(item for item in data['lessons'] if item['number'] == 3)
+        assert lesson['subject'] == 'Філософія' and lesson['is_replacement']
+        assert data['replacements'][0]['new_subject'] == 'Філософія'
+        assert 'created_at' not in data['replacements'][0]
 
 
 def test_postgres_swap_deadline_restart_and_single_answer(pg_conn):

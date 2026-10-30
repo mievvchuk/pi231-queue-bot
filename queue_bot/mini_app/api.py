@@ -227,10 +227,14 @@ async def timetable(request):
         raise BotError('Оберіть правильну дату.')
     lessons, replacements = schedule.get_actual_schedule(request[REQ_CONTEXT]['conn'], schedule.load_schedule_data(), dt, config.STUDENT_GROUP)
     working_day = working_days.get_working_saturday(request[REQ_CONTEXT]['conn'], dt.isoformat())
+    # Expose timetable fields only, not DB metadata (PG created_at is a datetime).
+    public_replacements = [{key: item.get(key) for key in
+        ('date', 'lesson_number', 'old_subject', 'new_subject', 'teacher', 'room')}
+        for item in replacements]
     return web.json_response({'date': dt.isoformat(), 'day': schedule.DAY_NAMES_UK[schedule.DAY_KEYS[dt.weekday()]],
         'week_type': (working_day.get('week_type') if working_day else None) or schedule.get_week_type(dt),
         'source_day': schedule.DAY_NAMES_UK[working_day['replaces_day']] if working_day else None,
-        'lessons': lessons, 'replacements': replacements})
+        'lessons': lessons, 'replacements': public_replacements})
 
 
 async def admin_queue(request):
