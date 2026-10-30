@@ -6,10 +6,12 @@
   const S = {
     tab: "queues",
     mode: "student",
-    filter: "all",
     data: null,
     queue: null,
     schedule: null,
+    scheduleDate: null,
+    scheduleError: null,
+    scheduleLoading: false,
     users: [],
     busy: false,
     loading: false,
@@ -120,6 +122,7 @@
   async function load() {
     const epoch = ++S.epoch;
     S.loading = true;
+    S.scheduleLoading = false;
     render();
     try {
       const data = await api("/bootstrap");
@@ -200,11 +203,10 @@
     }
   }
   function navigate(tab) {
-    if (S.busy || S.loading) return;
+    if (S.busy || (S.loading && !S.scheduleLoading)) return;
     S.tab = tab;
     S.queue = null;
     S.fatal = null;
-    render();
     window.scrollTo(0, 0);
     if (tab === "schedule") loadSchedule();
     else load();
@@ -233,14 +235,33 @@
     refresh.setAttribute("aria-label", "Оновити");
     refresh.disabled = S.loading || S.busy;
     tools.append(refresh);
+    if (S.data) {
+      const avatar = btn(
+        S.data.me.name
+          .split(" ")
+          .filter(Boolean)
+          .map((n) => n[0])
+          .slice(0, 2)
+          .join(""),
+        () => navigate("profile"),
+        "avatar header-avatar",
+      );
+      avatar.setAttribute("aria-label", "Відкрити профіль");
+      tools.append(avatar);
+    }
     return el(
       "header",
       { class: "topbar" },
       el(
         "div",
         { class: "brand" },
-        el("span", { class: "brand-logo" }, icon("queues")),
-        el("span", {}, "ПІ-231", el("small", {}, "твій простір")),
+        el("span", { class: "brand-logo" }, "ПІ"),
+        el(
+          "span",
+          {},
+          "ПІ-231",
+          el("small", {}, S.data ? "бот на зв’язку" : "твій простір"),
+        ),
       ),
       tools,
     );
@@ -275,110 +296,128 @@
       el("p", {}, text),
     );
   }
-  function queueCard(q) {
-    const node = btn([], () => openQueue(q.id), "queue-card");
-    node.append(
-      el(
-        "div",
-        { class: "card-top" },
-        badge(
-          q.type === "consultation" || q.subject.includes("Курсова")
-            ? "Консультація"
-            : "Лабораторні",
-        ),
-        el(
-          "span",
-          { class: "status " + (q.status === "open" ? "open" : "") },
-          q.status === "open" ? "Запис відкрито" : "Запис закрито",
-        ),
-      ),
-      el("h3", {}, q.subject),
-      el("p", { class: "teacher" }, q.teacher),
-      el(
-        "div",
-        { class: "card-bottom" },
-        el(
-          "span",
-          { class: "queue-count" },
-          icon("profile"),
-          q.count + " у черзі",
-        ),
-        q.my_position !== null
-          ? el("span", { class: "my-position" }, "Ти #" + q.my_position)
-          : icon("arrow"),
-      ),
+  function sectionTitle(title, meta) {
+    return el(
+      "div",
+      { class: "section-heading" },
+      el("h2", {}, title),
+      small(meta),
     );
-    return node;
+  }
+  function queueCard(q) {
+    return btn(
+      [
+        el(
+          "div",
+          { class: "position-tile" },
+          el("strong", {}, q.my_position),
+          el("span", {}, "у черзі"),
+        ),
+        el(
+          "div",
+          { class: "queue-copy" },
+          el(
+            "span",
+            { class: "status " + (q.status === "open" ? "open" : "") },
+            q.status === "open"
+              ? q.my_position === 1
+                ? "Твоя черга"
+                : "Запис відкрито"
+              : "Запис закрито",
+          ),
+          el("h3", {}, q.subject),
+          el(
+            "p",
+            { class: "teacher" },
+            consultation(q)
+              ? "Консультація"
+              : labText({
+                  labs: q.my_labs,
+                  planned_minutes: q.my_planned_minutes,
+                }) || q.teacher,
+          ),
+          small(q.count + " у черзі"),
+        ),
+        icon("arrow"),
+      ],
+      () => openQueue(q.id),
+      "queue-card record-card",
+    );
+  }
+  const consultation = (q) =>
+    q.type === "consultation" || q.subject.includes("Курсова");
+  function subjectCard(q) {
+    const joined = q.my_position !== null;
+    return btn(
+      [
+        el(
+          "span",
+          { class: "subject-icon tone-" + (q.id % 3) },
+          icon(consultation(q) ? "profile" : "queues"),
+        ),
+        el(
+          "div",
+          { class: "subject-copy" },
+          el("h3", {}, q.subject),
+          el("p", {}, q.teacher),
+          small(
+            (consultation(q) ? "Консультація · " : "") + q.count + " у черзі",
+          ),
+        ),
+        el(
+          "span",
+          { class: "join-label " + (joined ? "joined" : "") },
+          isAdmin()
+            ? "Керувати"
+            : joined
+              ? "Додано ✓"
+              : q.status === "open"
+                ? "+ Стати"
+                : "Закрито",
+        ),
+      ],
+      () => openQueue(q.id),
+      "subject-row",
+    );
   }
   function queuesPage() {
     const qs = S.data.queues,
-      own = mine(),
-      shown = S.filter === "mine" ? own : qs;
+      own = mine();
+    const date = new Date(S.data.today + "T12:00:00Z");
     return el(
       "main",
       {},
       el(
         "section",
-        { class: "hero" },
+        { class: "welcome" },
         el(
-          "div",
-          { class: "hero-eyebrow" },
-          el("span", { class: "live-dot" }),
-          "УСЕ ПІД КОНТРОЛЕМ",
+          "p",
+          { class: "eyebrow" },
+          date.toLocaleDateString("uk-UA", {
+            weekday: "long",
+            day: "numeric",
+            month: "long",
+            timeZone: "Europe/Kyiv",
+          }),
         ),
-        el("h1", {}, "Менше очікування.", el("br"), "Більше свого часу."),
-        el("p", {}, "Обирай предмет, займай місце та стеж за своєю чергою."),
         el(
-          "div",
-          { class: "hero-stats" },
-          el(
-            "div",
-            {},
-            el("b", {}, qs.length),
-            el("span", {}, "активних черг"),
+          "h1",
+          {},
+          "Привіт, " + S.data.me.name.split(" ").slice(0, 2).join(" "),
+        ),
+        el("p", {}, "Усе важливе для здачі лабораторних — поруч."),
+      ),
+      sectionTitle("Мої записи", "Активних: " + own.length),
+      own.length
+        ? el("div", { class: "queue-grid" }, own.map(queueCard))
+        : empty(
+            "Поки немає записів",
+            "Обери предмет нижче й займи своє місце.",
           ),
-          el(
-            "div",
-            {},
-            el("b", {}, own.length),
-            el("span", {}, "твоїх записів"),
-          ),
-          el("span", { class: "hero-mark", "aria-hidden": "true" }, "↗"),
-        ),
-      ),
-      el(
-        "div",
-        { class: "section-heading" },
-        el("h2", {}, "Твої предмети"),
-        small("ПІ-231"),
-      ),
-      el(
-        "div",
-        { class: "segments" },
-        btn(
-          "Усі черги",
-          () => {
-            S.filter = "all";
-            render();
-          },
-          S.filter === "all" ? "selected" : "",
-        ),
-        btn(
-          "Мої записи · " + own.length,
-          () => {
-            S.filter = "mine";
-            render();
-          },
-          S.filter === "mine" ? "selected" : "",
-        ),
-      ),
-      el("div", { class: "queue-grid" }, shown.map(queueCard)),
-      !shown.length
-        ? empty(
-            S.filter === "mine" ? "Поки немає записів" : "Черги ще не відкриті",
-            "Коли з’явиться потрібний предмет, ти зможеш записатися тут.",
-          )
-        : null,
+      sectionTitle("Доступні предмети", "Предметів: " + qs.length),
+      qs.length
+        ? el("div", { class: "subject-list" }, qs.map(subjectCard))
+        : empty("Черги ще не відкриті", "Потрібні предмети з’являться тут."),
       el(
         "p",
         { class: "footnote" },
@@ -514,7 +553,7 @@
       el(
         "div",
         { class: "detail-title" },
-        badge(q.type === "consultation" ? "Консультація" : "Черга предмета"),
+        badge(consultation(q) ? "Консультація" : "Черга предмета"),
         el("h1", {}, q.subject),
         el("p", { class: "muted" }, q.teacher),
       ),
@@ -749,29 +788,73 @@
   async function loadSchedule(value) {
     if (S.busy) return;
     const epoch = ++S.epoch;
+    S.scheduleDate = value || S.scheduleDate || S.data.today;
+    S.scheduleLoading = true;
+    S.scheduleError = null;
     S.loading = true;
     render();
-    const dt = value || S.schedule?.date || S.data.today;
     try {
-      const data = await api("/schedule?date=" + encodeURIComponent(dt));
+      const data = await api(
+        "/schedule?date=" + encodeURIComponent(S.scheduleDate),
+      );
       if (epoch === S.epoch) {
         S.schedule = data;
         S.fatal = null;
       }
     } catch (error) {
-      if (epoch === S.epoch) S.fatal = error.message;
+      if (epoch === S.epoch) {
+        if (error.status === 401 || error.status === 403)
+          S.fatal = error.message;
+        else S.scheduleError = error.message;
+      }
     } finally {
       if (epoch === S.epoch) {
+        S.scheduleLoading = false;
         S.loading = false;
         render();
       }
     }
   }
+  function scheduleState() {
+    if (S.scheduleLoading)
+      return el(
+        "div",
+        {
+          class: "schedule-loading",
+          role: "status",
+          "aria-label": "Завантаження розкладу",
+        },
+        [1, 2, 3].map(() =>
+          el(
+            "div",
+            { class: "lesson-skeleton" },
+            el("i"),
+            el("span", {}, el("b"), el("b"), el("b")),
+          ),
+        ),
+      );
+    return el(
+      "div",
+      { class: "schedule-state", role: "alert" },
+      empty("Не вдалося завантажити розклад", S.scheduleError),
+      btn("Спробувати знову", () => loadSchedule(), "button primary"),
+    );
+  }
+  function tomorrow() {
+    const next = new Date(S.data.today + "T12:00:00Z");
+    next.setUTCDate(next.getUTCDate() + 1);
+    return next.toISOString().slice(0, 10);
+  }
   function schedulePage() {
-    const data = S.schedule,
+    const data =
+        S.schedule?.date === S.scheduleDate &&
+        !S.scheduleLoading &&
+        !S.scheduleError
+          ? S.schedule
+          : null,
       input = el("input", {
         type: "date",
-        value: data?.date || "",
+        value: S.scheduleDate || S.data.today,
         onchange: (event) => loadSchedule(event.target.value),
         "aria-label": "Дата розкладу",
       });
@@ -788,12 +871,16 @@
       el(
         "div",
         { class: "segments" },
-        btn("Сьогодні", () => loadSchedule(S.data.today)),
-        btn("Завтра", () => {
-          const next = new Date(S.data.today + "T12:00:00Z");
-          next.setUTCDate(next.getUTCDate() + 1);
-          loadSchedule(next.toISOString().slice(0, 10));
-        }),
+        btn(
+          "Сьогодні",
+          () => loadSchedule(S.data.today),
+          S.scheduleDate === S.data.today ? "selected" : "",
+        ),
+        btn(
+          "Завтра",
+          () => loadSchedule(tomorrow()),
+          S.scheduleDate === tomorrow() ? "selected" : "",
+        ),
       ),
       data?.source_day
         ? el(
@@ -810,48 +897,50 @@
             badge(data.week_type === "denominator" ? "Знаменник" : "Чисельник"),
           )
         : null,
-      data?.lessons.length
-        ? el(
-            "div",
-            { class: "timeline" },
-            data.lessons.map((lesson) =>
-              el(
-                "article",
-                { class: "lesson" },
+      S.scheduleLoading || S.scheduleError
+        ? scheduleState()
+        : data?.lessons.length
+          ? el(
+              "div",
+              { class: "timeline" },
+              data.lessons.map((lesson) =>
                 el(
-                  "div",
-                  { class: "lesson-number" },
-                  lesson.number,
-                  el("small", {}, "пара"),
-                ),
-                el(
-                  "div",
-                  { class: "lesson-body" },
-                  lesson.is_replacement ? badge("Заміна", "warning") : null,
-                  el("h3", {}, lesson.subject),
-                  lesson.teachers_raw?.length
-                    ? lesson.teachers_raw.map((t) =>
-                        el(
+                  "article",
+                  { class: "lesson" },
+                  el(
+                    "div",
+                    { class: "lesson-number" },
+                    lesson.number,
+                    el("small", {}, "пара"),
+                  ),
+                  el(
+                    "div",
+                    { class: "lesson-body" },
+                    lesson.is_replacement ? badge("Заміна", "warning") : null,
+                    el("h3", {}, lesson.subject),
+                    lesson.teachers_raw?.length
+                      ? lesson.teachers_raw.map((t) =>
+                          el(
+                            "p",
+                            { class: "muted" },
+                            t.name + (t.room ? " · ауд. " + t.room : ""),
+                          ),
+                        )
+                      : el(
                           "p",
                           { class: "muted" },
-                          t.name + (t.room ? " · ауд. " + t.room : ""),
+                          [lesson.teacher, lesson.room && "ауд. " + lesson.room]
+                            .filter(Boolean)
+                            .join(" · "),
                         ),
-                      )
-                    : el(
-                        "p",
-                        { class: "muted" },
-                        [lesson.teacher, lesson.room && "ауд. " + lesson.room]
-                          .filter(Boolean)
-                          .join(" · "),
-                      ),
-                  lesson.startTime
-                    ? el("small", {}, lesson.startTime + "–" + lesson.endTime)
-                    : null,
+                    lesson.startTime
+                      ? el("small", {}, lesson.startTime + "–" + lesson.endTime)
+                      : null,
+                  ),
                 ),
               ),
-            ),
-          )
-        : empty("Сьогодні можна видихнути", "На обрану дату занять немає."),
+            )
+          : empty("Сьогодні можна видихнути", "На обрану дату занять немає."),
     );
   }
   function inbox() {
@@ -1112,7 +1201,7 @@
           "Відкрий чергу, щоб змінити порядок чи керувати студентами.",
         ),
       ),
-      el("div", { class: "queue-grid" }, S.data.queues.map(queueCard)),
+      el("div", { class: "subject-list" }, S.data.queues.map(subjectCard)),
       el(
         "div",
         { class: "section-heading" },
@@ -1177,7 +1266,7 @@
               : queuesPage(),
       bottomnav(),
     );
-    root.classList.toggle("is-loading", S.loading);
+    root.classList.toggle("is-loading", S.loading && !S.scheduleLoading);
     if (S.loading)
       root.append(
         el("div", {

@@ -38,10 +38,12 @@ Copy-Item .env.example .env      # впишіть BOT_TOKEN, DATABASE_URL та O
 
 ```powershell
 .\.venv\Scripts\python -m pytest
+node --test tests/mini_app_frontend.test.cjs
 ```
 
 Токен не потрібен: тестується бізнес-логіка на тимчасовій SQLite-базі.
 PostgreSQL-тести виконуються за наявності `TEST_DATABASE_URL`; CI піднімає окремий PostgreSQL 16.
+Перевірки станів інтерфейсу використовують вбудований test runner Node.js 22+ без npm-залежностей; Node потрібен лише для цих тестів, не для запуску бота.
 
 Перенесення того самого `DATABASE_URL` з коду в середовище не стирає дані. Перед релізом
 задайте його в налаштуваннях хостингу. Нова міграція лише додає nullable-поле `banned_until`;

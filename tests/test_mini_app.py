@@ -278,3 +278,27 @@ def test_unsafe_mini_app_urls_fail_runtime_validation(monkeypatch, url):
     monkeypatch.setattr(config, 'MINI_APP_URL', url, raising=False)
     with pytest.raises(RuntimeError, match='MINI_APP_URL'):
         config.validate_runtime()
+
+
+@pytest.mark.asyncio
+async def test_home_cards_show_only_current_users_remaining_labs(client, conn):
+    sid = queues.create_session(conn, 100, 1, 1)
+    queues.join_queue(conn, 1, sid, lab_numbers=[1, 2], planned_minutes=20)
+    queues.join_queue(conn, 2, sid, lab_numbers=[3], planned_minutes=15)
+    payload = await (await client.get('/api/miniapp/bootstrap', headers=headers())).json()
+    card = next(q for q in payload['queues'] if q['id'] == sid)
+    assert card['my_labs'] == [1, 2] and card['my_planned_minutes'] == 20
+    row = queues._own_active_entry(conn, 1, sid)
+    response = await client.post(f'/api/miniapp/queues/{sid}/complete', headers=headers(),
+                                 json={'entry_id': row['id'], 'revision': row['entry_revision'], 'labs': [1]})
+    assert response.status == 200
+    payload = await (await client.get('/api/miniapp/bootstrap', headers=headers())).json()
+    card = next(q for q in payload['queues'] if q['id'] == sid)
+    assert card['my_labs'] == [2] and card['my_position'] == 1
+    peer = await (await client.get('/api/miniapp/bootstrap', headers=headers(2))).json()
+    card = next(q for q in peer['queues'] if q['id'] == sid)
+    assert card['my_labs'] == [3] and card['my_planned_minutes'] == 15
+    assert 'telegram_id' not in card and 'user_id' not in card
+    outsider = await (await client.get('/api/miniapp/bootstrap', headers=headers(100))).json()
+    card = next(q for q in outsider['queues'] if q['id'] == sid)
+    assert card['my_labs'] is None and card['my_planned_minutes'] is None

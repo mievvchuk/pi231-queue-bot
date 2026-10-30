@@ -28,6 +28,9 @@ def queue_view(conn, subjects, session, uid, *, detail=False, admin=False):
     result = dict(id=session['id'], subject=subject, teacher=teacher, status=session['status'],
                   type=session['queue_type'], title=session['lesson_title'], count=sum(r['user_id'] is not None for r in rows),
                   my_position=queues.get_user_position(conn, uid, session['id']))
+    own = next((r for r in rows if r['telegram_id'] == uid), None)
+    result['my_labs'] = lab_catalog.read_numbers(own['selected_labs']) if own else None
+    result['my_planned_minutes'] = own['planned_minutes'] if own else None
     if detail:
         result['entries'] = [entry_view(row, uid, admin) for row in rows]
         result['labs'] = list(lab_catalog.labs_for_session(session))
