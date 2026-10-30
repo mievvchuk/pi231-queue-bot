@@ -5,6 +5,7 @@
 
 Gitflow, порядок релізу, бан і перемикання режимів: [CONTRIBUTING.md](CONTRIBUTING.md).
 Усі параметри середовища й підготовка до перезапуску: [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
+Додатковий Telegram Mini App та його підключення на Render: [docs/MINI_APP.md](docs/MINI_APP.md). Усі звичні кнопки бота зберігаються.
 
 ## Запуск (Windows PowerShell)
 
@@ -29,6 +30,7 @@ Copy-Item .env.example .env      # впишіть BOT_TOKEN, DATABASE_URL та O
 | `TEST_DATABASE_URL` | тільки окрема тестова PostgreSQL для інтеграційних тестів; не робоча база |
 | `SUBJECTS_PATH` | файл предметів; типовий шлях `data/subjects.json`, з підтримкою старого файла в корені |
 | `SCHEDULE_PATH` | файл розкладу; типовий шлях `data/schedule.json`, з підтримкою старого файла в корені |
+| `MINI_APP_URL` | публічна HTTPS-адреса цього сервісу з `/app/`; порожньо — кнопка Mini App не додається |
 
 Свій Telegram ID можна дізнатися, наприклад, у бота @userinfobot.
 

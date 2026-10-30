@@ -109,3 +109,15 @@ async def back_to_queue(message, state, conn, subjects):
         await switch_admin(message, state, conn, subjects)
     else:
         await switch_student(message, state, conn, subjects)
+
+
+@router.message(F.text == '📱 Мініапка', StateFilter('*'))
+async def open_mini_app(message, conn):
+    from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
+    from queue_bot import config
+    if not config.MINI_APP_URL:
+        raise BotError('Мініапка ще не підключена. Поки користуйтесь кнопками бота.')
+    # Reply web_app buttons have no signed initData; launch through an inline button.
+    await message.answer('📱 Черги, розклад і твої записи — в одному місці. Кнопки бота також залишаються доступними.',
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(text='Відкрити мініапку', web_app=WebAppInfo(url=config.MINI_APP_URL))]]))

@@ -7,7 +7,8 @@
       "home",
       "back_from_admin_queue",
       "refresh_admin_queue",
-      "back_to_queue"
+      "back_to_queue",
+      "open_mini_app"
     ]
   },
   {

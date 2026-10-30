@@ -65,6 +65,34 @@ def test_postgres_consultation_renewal(pg_conn):
     assert queues.get_session(pg_conn, lesson)['status'] == 'open'
 
 
+@pytest.mark.asyncio
+async def test_postgres_mini_app_shares_bot_signup_and_completion(pg_conn):
+    import hashlib
+    import hmac
+    import json
+    import time
+    from urllib.parse import urlencode
+    from unittest.mock import AsyncMock
+    from aiohttp.test_utils import TestClient, TestServer
+    from queue_bot.web import create_web_app
+    token = '123456:offline-miniapp-pg'
+    fields = {'auth_date': str(int(time.time())), 'user': json.dumps({'id': 1})}
+    secret = hmac.new(b'WebAppData', token.encode(), hashlib.sha256).digest()
+    fields['hash'] = hmac.new(secret, '\n'.join(f'{k}={v}' for k, v in sorted(fields.items())).encode(), hashlib.sha256).hexdigest()
+    auth = {'Authorization': 'tma ' + urlencode(fields)}
+    sid = queues.create_session(pg_conn, 100, 1, 1)
+    app = create_web_app(conn=pg_conn, bot=AsyncMock(), bot_token=token)
+    async with TestClient(TestServer(app)) as client:
+        path = f'/api/miniapp/queues/{sid}'
+        assert (await client.post(path+'/join', headers=auth, json={'labs':[1], 'minutes':10})).status == 200
+        row = queues._own_active_entry(pg_conn, 1, sid)
+        assert json.loads(row['selected_labs']) == [1]
+        assert (await client.post(path+'/complete', headers=auth,
+            json={'entry_id':row['id'], 'revision':row['entry_revision']})).status == 200
+        assert queues.get_user_position(pg_conn, 1, sid) is None
+        assert queues.get_history(pg_conn, sid)[0]['labs_passed'] == 1
+
+
 def test_postgres_swap_deadline_restart_and_single_answer(pg_conn):
     sid = queues.create_session(pg_conn, 100, 1, 1)
     users.register_user(pg_conn, 2, 'Студент Два')

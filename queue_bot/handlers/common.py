@@ -50,6 +50,9 @@ def get_reply_menu(conn, telegram_id: int) -> ReplyKeyboardMarkup:
     ]
     if admins.is_admin(conn, telegram_id):
         keyboard.append([KeyboardButton(text="⚡ Адмін-панель")])
+    from queue_bot import config
+    if config.MINI_APP_URL:
+        keyboard.append([KeyboardButton(text='📱 Мініапка')])
     return ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True)
 
 
