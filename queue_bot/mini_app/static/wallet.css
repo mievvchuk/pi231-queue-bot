@@ -102,6 +102,9 @@ main { max-width: 760px; margin-inline: auto; }
 .more-row > svg:last-child { width: 16px; color: var(--muted); }
 .more-row strong, .more-row small { display: block; }
 .more-row small { margin-top: 4px; }
+.admin-categories > .more-row > svg:first-child { grid-column: 1; grid-row: 1; }
+.admin-categories > .more-row > span { grid-column: 2; grid-row: 1; min-width: 0; }
+.admin-categories > .more-row > svg:last-child { grid-column: 3; grid-row: 1; }
 .install-card { display: grid; gap: 14px; margin-top: 22px; padding: 20px; }
 .install-card .muted { font-size: 12px; }
 .queue-detail { padding-top: 16px; padding-bottom: 172px; }
