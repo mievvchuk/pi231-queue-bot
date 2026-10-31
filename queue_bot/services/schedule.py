@@ -12,6 +12,23 @@ log = logging.getLogger(__name__)
 
 UK_TZ = ZoneInfo(config.TIMEZONE)
 
+PAIR_TIMES = {
+    1: ('08:30', '09:50'),
+    2: ('10:00', '11:20'),
+    3: ('11:50', '13:10'),
+    4: ('13:20', '14:40'),
+    5: ('14:50', '16:10'),
+}
+
+
+def get_day_slots(lessons: list[dict]) -> list[dict]:
+    """Display slots are separate from actual lessons; gaps never invent classes."""
+    numbers = sorted(set(PAIR_TIMES) | {int(item['number']) for item in lessons})
+    return [{'number': number, 'startTime': PAIR_TIMES.get(number, ('', ''))[0],
+             'endTime': PAIR_TIMES.get(number, ('', ''))[1],
+             'lessons': [item for item in lessons if int(item['number']) == number]}
+            for number in numbers]
+
 DAY_KEYS = [
     "monday",
     "tuesday",
@@ -76,6 +93,7 @@ def get_base_schedule_for_day(schedule_data: dict, day_key: str, w_type: str) ->
             continue
 
         pair_num = int(item.get("pair") or item.get("number") or 0)
+        start_time, end_time = PAIR_TIMES.get(pair_num, (item.get('startTime', ''), item.get('endTime', '')))
         teachers_list = item.get("teachers")
 
         if isinstance(teachers_list, list) and teachers_list:
@@ -100,8 +118,8 @@ def get_base_schedule_for_day(schedule_data: dict, day_key: str, w_type: str) ->
             "teachers_raw": teachers_list if isinstance(teachers_list, list) else None,
             "room": room_display,
             "lessons": item.get("lessons", ""),
-            "startTime": item.get("startTime", ""),
-            "endTime": item.get("endTime", ""),
+            "startTime": start_time,
+            "endTime": end_time,
         })
 
     return filtered
@@ -158,8 +176,8 @@ def get_actual_schedule(conn, schedule_data: dict, dt: date, group_name: str = "
                 "teachers_raw": None,
                 "room": rep.get("room"),
                 "lessons": "",
-                "startTime": "",
-                "endTime": "",
+                "startTime": PAIR_TIMES.get(num, ('', ''))[0],
+                "endTime": PAIR_TIMES.get(num, ('', ''))[1],
                 "is_replacement": True,
             })
 

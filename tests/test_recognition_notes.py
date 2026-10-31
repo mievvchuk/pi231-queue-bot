@@ -57,7 +57,9 @@ async def test_header_without_group_rows_changes_only_fourth_pair_after_save(con
     replacements.save_replacement(conn, item)
     actual, _ = schedule.get_actual_schedule(conn, source, date(2026, 10, 30))
     assert [r['subject'] for r in actual] == ['Звичайна перша', 'Знаменник']
-    assert actual[1]['startTime'] == '14:00'
+    # Header remapping keeps the target pair and uses the group's fixed bell times.
+    assert actual[1]['startTime'] == '13:20'
+    assert actual[1]['endTime'] == '14:40'
     prompt = client.post.call_args.kwargs['json']['messages'][0]['content'][0]['text']
     assert 'scheduleOverrides' in prompt
 

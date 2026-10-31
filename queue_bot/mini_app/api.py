@@ -284,7 +284,7 @@ async def timetable(request):
     return web.json_response({'date': dt.isoformat(), 'day': schedule.DAY_NAMES_UK[schedule.DAY_KEYS[dt.weekday()]],
         'week_type': (working_day.get('week_type') if working_day else None) or schedule.get_week_type(dt),
         'source_day': schedule.DAY_NAMES_UK[working_day['replaces_day']] if working_day else None,
-        'lessons': lessons, 'replacements': public_replacements})
+        'lessons': lessons, 'slots': schedule.get_day_slots(lessons), 'replacements': public_replacements})
 
 
 async def admin_queue(request):
