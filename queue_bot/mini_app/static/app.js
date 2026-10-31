@@ -164,6 +164,56 @@
     render(selected);
     return { commit, cancel };
   }
+  function installPressOptics(root) {
+    const reduceMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)")
+      ?.matches;
+    root
+      .querySelectorAll?.(
+        ".queue-card, .subject-row, .lesson, .button, .card, .nav-item",
+      )
+      .forEach((node) => {
+        let pointerId = null;
+        let start = null;
+        const clear = () => {
+          pointerId = null;
+          start = null;
+          node.classList.remove("liquid-pressing", "liquid-pressed");
+          node.style.removeProperty("--press-x");
+          node.style.removeProperty("--press-y");
+          node.style.removeProperty("--press-shift-x");
+          node.style.removeProperty("--press-shift-y");
+          node.style.removeProperty("--press-rotate-x");
+          node.style.removeProperty("--press-rotate-y");
+        };
+        node.addEventListener("pointerdown", (event) => {
+          if (event.button !== undefined && event.button !== 0) return;
+          pointerId = event.pointerId;
+          const rect = node.getBoundingClientRect();
+          start = { x: event.clientX, y: event.clientY, rect };
+          node.setPointerCapture?.(pointerId);
+          node.classList.add("liquid-pressing");
+          if (node.classList.contains("lesson")) node.classList.add("liquid-pressed");
+        });
+        node.addEventListener("pointermove", (event) => {
+          if (event.pointerId !== pointerId || !start) return;
+          const dx = event.clientX - start.x;
+          const dy = event.clientY - start.y;
+          if (Math.abs(dy) > 12 && Math.abs(dy) > Math.abs(dx)) return clear();
+          const x = Math.max(0, Math.min(100, ((event.clientX - start.rect.left) / start.rect.width) * 100));
+          const y = Math.max(0, Math.min(100, ((event.clientY - start.rect.top) / start.rect.height) * 100));
+          node.style.setProperty("--press-x", x + "%");
+          node.style.setProperty("--press-y", y + "%");
+          if (!reduceMotion) {
+            node.style.setProperty("--press-shift-x", Math.max(-17, Math.min(17, dx * 0.24)) + "px");
+            node.style.setProperty("--press-shift-y", Math.max(-14, Math.min(14, dy * 0.2)) + "px");
+            node.style.setProperty("--press-rotate-x", Math.max(-8, Math.min(8, -dy * 0.16)) + "deg");
+            node.style.setProperty("--press-rotate-y", Math.max(-8, Math.min(8, dx * 0.16)) + "deg");
+          }
+        });
+        node.addEventListener("pointerup", clear);
+        node.addEventListener("pointercancel", clear);
+      });
+  }
   const small = (text) => el("span", { class: "muted" }, text),
     badge = (text, cls = "") => el("span", { class: "badge " + cls }, text);
   const mine = () => S.data.queues.filter((q) => q.my_position !== null),
@@ -1807,6 +1857,7 @@
           "aria-label": "Оновлюю дані",
         }),
       );
+    installPressOptics(root);
     if (tg?.BackButton) {
       S.queue || S.feature ? tg.BackButton.show() : tg.BackButton.hide();
     }

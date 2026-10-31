@@ -64,7 +64,7 @@ function setup() {
   // Export the existing closure only in this VM; production contains no test hooks.
   vm.runInContext(
     source.slice(0, source.indexOf('  document.addEventListener("keydown"')) +
-      "\nthis.appTest = {S, loadSchedule, loadWeek, navigate, adminPage, topbar, profilePage, loadAvatars, attachLiquidLens: typeof attachLiquidLens === 'function' ? attachLiquidLens : null};\n})();",
+      "\nthis.appTest = {S, loadSchedule, loadWeek, navigate, adminPage, topbar, profilePage, loadAvatars, attachLiquidLens: typeof attachLiquidLens === 'function' ? attachLiquidLens : null, installPressOptics: typeof installPressOptics === 'function' ? installPressOptics : null};\n})();",
     context,
   );
   const app = context.appTest;
@@ -332,4 +332,9 @@ test("Liquid Optics v2.8 keeps a pure-black dark canvas with accessible fallback
 test("Liquid Optics exposes one reusable lens controller for navigation and segments", () => {
   const { app } = setup();
   assert.equal(typeof app.attachLiquidLens, "function");
+});
+
+test("Liquid Optics exposes press handling separately from queue business actions", () => {
+  const { app } = setup();
+  assert.equal(typeof app.installPressOptics, "function");
 });
