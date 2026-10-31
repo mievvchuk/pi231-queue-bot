@@ -71,6 +71,7 @@
   }
   const btn = (text, fn, cls = "button") =>
     el("button", { type: "button", class: cls, onclick: fn }, text);
+  const liquidCleanups = [];
   function attachLiquidLens(container, { buttons, selectedIndex = 0, onSelect }) {
     if (!container || !buttons?.length) return null;
     const lens = el("span", { class: "liquid-lens", "aria-hidden": true });
@@ -126,6 +127,7 @@
       render(selected);
     };
     container.addEventListener("pointerdown", (event) => {
+      if (container.classList.contains("bottom-nav") && window.innerWidth >= 1024) return;
       if (event.button !== undefined && event.button !== 0) return;
       pointerId = event.pointerId;
       origin = { x: event.clientX, y: event.clientY };
@@ -162,7 +164,16 @@
       );
       buttons[selected].focus();
     });
-    window.addEventListener?.("resize", () => render(selected));
+    // Measure after insertion and whenever the control changes size. Disconnect
+    // observers when a rerender removes the old control.
+    if (window.ResizeObserver) {
+      const observer = new window.ResizeObserver(() => render(selected));
+      observer.observe(container);
+      liquidCleanups.push(() => observer.disconnect());
+    }
+    window.requestAnimationFrame?.(() => {
+      if (container.isConnected) render(selected);
+    });
     render(selected);
     return {
       activate: (index) => {
@@ -1797,6 +1808,7 @@
     );
   }
   function render() {
+    liquidCleanups.splice(0).forEach((cleanup) => cleanup());
     root.replaceChildren(topbar());
     if (!initData) {
       root.append(
