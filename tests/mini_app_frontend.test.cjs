@@ -64,7 +64,7 @@ function setup() {
   // Export the existing closure only in this VM; production contains no test hooks.
   vm.runInContext(
     source.slice(0, source.indexOf('  document.addEventListener("keydown"')) +
-      "\nthis.appTest = {S, loadSchedule, loadWeek, navigate, adminPage, topbar, profilePage, loadAvatars, attachLiquidLens: typeof attachLiquidLens === 'function' ? attachLiquidLens : null, installPressOptics: typeof installPressOptics === 'function' ? installPressOptics : null};\n})();",
+      "\nthis.appTest = {S, loadSchedule, loadWeek, navigate, adminPage, topbar, profilePage, loadAvatars, homePage, morePage, bottomnav, queuePage, attachLiquidLens: typeof attachLiquidLens === 'function' ? attachLiquidLens : null, installPressOptics: typeof installPressOptics === 'function' ? installPressOptics : null};\n})();",
     context,
   );
   const app = context.appTest;
@@ -122,7 +122,7 @@ test("transient schedule failure preserves date controls and navigation", async 
   await app.loadSchedule("2026-10-31");
   assert.equal(app.S.scheduleDate, "2026-10-31");
   assert.ok(!app.S.fatal);
-  for (const text of ["Сьогодні", "Завтра", "Профіль", "Спробувати знову"])
+  for (const text of ["Сьогодні", "Завтра", "Ще", "Спробувати знову"])
     assert.ok(root.textContent.includes(text));
   assert.ok(!root.textContent.includes("На обрану дату занять немає."));
 });
@@ -346,4 +346,30 @@ test("Liquid lens prevents a synthetic click from navigating twice after pointer
   );
   assert.match(source, /suppressClickUntil/);
   assert.match(source, /activate/);
+});
+
+const allNodes = node => node instanceof Element ? [node,...node.children.flatMap(allNodes)] : [];
+test('four-tab navigation keeps secondary features reachable through More', () => {
+  const {app}=setup();
+  const nav=app.bottomnav();
+  assert.deepEqual(allNodes(nav).filter(n=>n.tag==='button').map(n=>n.textContent.trim()),['Головна','Черги','Розклад','Ще']);
+  for(const text of ['Профіль','Опитування','Допомога','Звернення','Керування групою','PWA'])
+    assert.ok(app.morePage().textContent.includes(text));
+});
+test('home shows real upcoming class and personal positions without invented waits', () => {
+  const {app}=setup();
+  app.S.data.next_lesson={date:'2026-10-30',startTime:'11:50',endTime:'13:10',lessons:[{subject:'Машинне навчання',room:'231'}]};
+  app.S.data.queues=[{id:1,subject:'Машинне навчання',status:'open',my_position:8,my_labs:[4],my_planned_minutes:30},
+    {id:2,subject:'Людино-машинна взаємодія',status:'closed',my_position:15,my_labs:[3],my_planned_minutes:10}];
+  const page=app.homePage();
+  for(const text of ['НАЙБЛИЖЧА ПАРА','11:50–13:10','231','ТВІЙ ЗАПИС','8','Інші записи','#15','≈ 30 хв']) assert.ok(page.textContent.includes(text),text);
+  assert.ok(!page.textContent.includes('очікування'));
+});
+test('queue detail puts participants before tools and preserves completion and retry actions', () => {
+  const {app}=setup();
+  app.S.queue={id:1,subject:'Машинне навчання',teacher:'Викладач',status:'open',count:1,labs:[{number:4}],entries:[{id:1,name:'Тест Студент',position:8,is_me:true,labs:[4],planned_minutes:30}]};
+  const page=app.queuePage(), text=page.textContent;
+  assert.ok(text.indexOf('Учасники')<text.indexOf('Лабораторні та час'));
+  for(const value of ['Здав','Не здав — у кінець','Хочу вище','Хочу нижче','Вийти з черги','Обмін місцями']) assert.ok(text.includes(value));
+  assert.equal(allNodes(page).filter(n=>n.className==='queue-dock').length,1);
 });

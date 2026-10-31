@@ -10,11 +10,9 @@
     async install() {
       const tg = window.Telegram?.WebApp;
       if (tg?.initData) {
-        if (tg.addToHomeScreen) {
-          tg.addToHomeScreen();
-          return 'Підтвердь додавання ярлика Telegram, якщо пристрій підтримує цю дію.';
-        }
-        return 'Відкрий адресу застосунку в Safari або Chrome для встановлення.';
+        const url = new URL('/app/', location.origin).href;
+        tg.openLink?.(url, {try_instant_view: false});
+        return 'Для окремої PWA відкрий вебверсію в Safari або Chrome, увійди та додай її на головний екран. Це не ярлик Telegram.';
       }
       if (matchMedia('(display-mode: standalone)').matches || navigator.standalone)
         return 'Застосунок уже встановлено.';

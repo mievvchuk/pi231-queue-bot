@@ -1575,7 +1575,7 @@ window.createPI231Features = function (H) {
     );
   }
   function donut(title, values) {
-    const colors = ["#3F68B8", "#51AD93", "#D6A34D", "#9979C7"],
+    const colors = ["var(--accent-fill)", "#51AD93", "#D6A34D", "#9979C7"],
       total = values.reduce((sum, [, value]) => sum + count(value), 0);
     if (!total)
       return card(
@@ -1673,7 +1673,7 @@ window.createPI231Features = function (H) {
                   },
                   el("div", {
                     style:
-                      "width:44px;min-height:2px;border-radius:8px 8px 0 0;background:#3F68B8;height:" +
+                      "width:44px;min-height:2px;border-radius:8px 8px 0 0;background:var(--accent-fill);height:" +
                       percentage +
                       "%",
                   }),
@@ -1699,7 +1699,7 @@ window.createPI231Features = function (H) {
                   },
                   el("div", {
                     style:
-                      "height:100%;background:#3F68B8;width:" +
+                      "height:100%;background:var(--accent-fill);width:" +
                       percentage +
                       "%",
                   }),

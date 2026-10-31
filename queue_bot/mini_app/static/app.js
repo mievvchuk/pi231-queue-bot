@@ -4,7 +4,8 @@
     initData = tg?.initData || "",
     root = document.getElementById("app");
   const S = {
-    tab: "queues",
+    tab: "home",
+    queueFilter: 'all',
     feature: null,
     mode: "student",
     data: null,
@@ -29,6 +30,8 @@
       : { 'X-CSRF-Token': browserSession.csrf || '' };
   }
   const paths = {
+    home: 'M3 11 12 3l9 8 M5 10v11h5v-7h4v7h5V10',
+    more: 'M5 12h.01 M12 12h.01 M19 12h.01',
     queues: "M4 4h16v4H4z M4 12h16 M4 17h10 M4 21h7",
     schedule: "M4 5h16v16H4z M8 3v4 M16 3v4 M4 11h16 M8 15h2 M14 15h2 M8 18h2",
     profile: "M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8 M4 21v-2a8 6 0 0 1 16 0v2",
@@ -40,7 +43,7 @@
     close: "M6 6l12 12 M18 6 6 18",
   };
   function icon(name) {
-    if (window.PI231Icon) return window.PI231Icon(name);
+    if (window.PI231Icon && name !== 'home' && name !== 'more') return window.PI231Icon(name);
     const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
     for (const [k, v] of Object.entries({
       viewBox: "0 0 24 24",
@@ -570,7 +573,7 @@
             S.mode = isAdmin() ? "student" : "admin";
             S.queue = null;
             S.feature = null;
-            S.tab = isAdmin() ? "admin" : "queues";
+            S.tab = isAdmin() ? "admin" : "home";
             load();
           },
           "mode " + (isAdmin() ? "admin" : ""),
@@ -625,14 +628,12 @@
   }
   function bottomnav() {
     const tabs = [
-      isAdmin() ? ["admin", "Керування"] : ["queues", "Черги"],
+      ["home", "Головна"],
+      ["queues", "Черги"],
       ["schedule", "Розклад"],
-      ["polls", "Опитування"],
-      ["profile", "Профіль"],
-      ["help", "Допомога"],
+      ["more", "Ще"],
     ];
-    const activeTab =
-      S.feature === "polls" || S.feature === "help" ? S.feature : S.tab;
+    const activeTab = S.queue ? 'queues' : (S.feature || ['profile', 'admin', 'polls', 'help'].includes(S.tab)) ? 'more' : S.tab;
     const buttons = tabs.map(([key, label]) => {
       const node = btn(
         [icon(key), el("span", {}, label)],
@@ -750,45 +751,75 @@
       "subject-row",
     );
   }
+  function homePage() {
+    const own = mine(), primary = own[0], lesson = S.data.next_lesson;
+    const rooms = lesson?.lessons.flatMap(item => item.teachers_raw?.map(t => t.room).filter(Boolean) || [item.room].filter(Boolean)) || [];
+    const subjects = [...new Set(lesson?.lessons.map(item => item.subject) || [])];
+    const lessonDate = lesson ? new Date(lesson.date + 'T12:00:00Z').toLocaleDateString('uk-UA', {day:'numeric',month:'long',timeZone:'Europe/Kyiv'}) : '';
+    return el('main', {class:'home-page'},
+      el('section', {class:'welcome'},
+        el('p',{class:'eyebrow'},new Date(S.data.today+'T12:00:00Z').toLocaleDateString('uk-UA',{weekday:'long',day:'numeric',month:'long',timeZone:'Europe/Kyiv'})),
+        el('h1',{},'Привіт, '+ S.data.me.name.split(' ').slice(0,2).join(' ')),
+        el('p',{},'Твій навчальний день — під контролем.'),
+      ),
+      btn([
+        el('span',{class:'eyebrow hero-eyebrow'},icon('schedule'),lesson?.ongoing?'ЗАРАЗ ТРИВАЄ':'НАЙБЛИЖЧА ПАРА'),
+        el('strong',{}, lesson ? subjects.join(' / ') : 'Переглянути розклад'),
+        small(lesson ? [lesson.date !== S.data.today ? lessonDate : null, lesson.startTime+'–'+lesson.endTime, rooms.length ? 'ауд. '+[...new Set(rooms)].join(' / ') : null].filter(Boolean).join(' · ') : 'Пари, заміни та твій навчальний тиждень'),
+      ],()=>{S.scheduleDate=lesson?.date || S.data.today; navigate('schedule');},'card upcoming-card'),
+      primary ? btn([
+        el('div',{class:'hero-top'},el('span',{class:'eyebrow hero-eyebrow'},icon('queues'),'ТВІЙ ЗАПИС'),el('span',{class:'status '+primary.status},primary.status==='open'?'Запис відкрито':'Запис закрито')),
+        el('h2',{},primary.subject),
+        el('div',{class:'hero-position'},el('strong',{},primary.my_position),el('div',{},small('місце в черзі'),el('p',{},consultation(primary)?'Консультація':labText({labs:primary.my_labs,planned_minutes:primary.my_planned_minutes}) || primary.teacher))),
+        el('span',{class:'hero-open'},icon('arrow'),'Відкрити чергу'),
+      ],()=>openQueue(primary.id),'card home-queue-hero') : el('section',{class:'card home-empty'},el('h2',{},'Займи своє місце'),small('Обери предмет і запишись, коли готовий до здачі.'),btn('Знайти чергу',()=>navigate('queues'),'button primary')),
+      own.length>1 ? sectionTitle('Інші записи',String(own.length-1)) : null,
+      own.length>1 ? el('div',{class:'compact-records'},own.slice(1).map(q=>btn([
+        el('span',{class:'subject-icon'},window.PI231SubjectIcon?window.PI231SubjectIcon(q.subject):icon('queues')),
+        el('div',{class:'subject-copy'},el('strong',{},q.subject),small(consultation(q)?'Консультація':labText({labs:q.my_labs,planned_minutes:q.my_planned_minutes}) || q.teacher)),
+        el('strong',{class:'compact-position'},'#'+q.my_position),icon('arrow'),
+      ],()=>openQueue(q.id),'compact-record'))) : null,
+    );
+  }
+  function morePage() {
+    const links=[['profile','profile','Профіль і мої обміни','Акаунт, записи та запити на обмін'],['polls','polls','Опитування','Голосування та результати'],['help','help','Допомога','Як працюють черги'],['bugs','bugs','Звернення','Повідомити про проблему']];
+    if(S.data.me.is_admin) links.unshift(['admin','admin','Керування групою','Черги, студенти, заміни та звіти']);
+    return el('main',{},el('div',{class:'page-title'},el('h1',{},'Ще'),small('Усе інше — в одному місці.')),
+      el('div',{class:'more-list'},links.map(([key,glyph,title,description])=>btn([icon(glyph),el('span',{},el('strong',{},title),small(description)),icon('arrow')],()=>{
+        if(key==='admin'){ S.mode='admin'; navigate('admin'); }
+        else if(key==='profile') navigate('profile'); else openFeature(key);
+      },'more-row'))),
+      installCard(),
+    );
+  }
+  function installCard() {
+    return el('section',{class:'card install-card'},el('h2',{},'Окремий застосунок'),
+      small(initData ? 'Встанови PWA із Safari або Chrome: вона відкриватиметься окремим вікном.' : 'Встанови на телефон або ПК та відкривай без пошуку вкладки.'),
+      btn(initData?'Відкрити вебверсію / PWA':'Встановити застосунок',async()=>toast(await window.PI231PWA?.install() || 'Відкрий меню браузера для встановлення.'),'button secondary'),
+      el('p',{class:'muted'},'Telegram потрібен лише для підтвердження входу.'),
+    );
+  }
   function queuesPage() {
-    const qs = S.data.queues,
+    const qs = S.queueFilter === 'mine' ? mine() : S.data.queues,
       own = mine();
-    const date = new Date(S.data.today + "T12:00:00Z");
     return el(
       "main",
       {},
       el(
-        "section",
-        { class: "welcome" },
-        el(
-          "p",
-          { class: "eyebrow" },
-          date.toLocaleDateString("uk-UA", {
-            weekday: "long",
-            day: "numeric",
-            month: "long",
-            timeZone: "Europe/Kyiv",
-          }),
-        ),
-        el(
-          "h1",
-          {},
-          "Привіт, " + S.data.me.name.split(" ").slice(0, 2).join(" "),
-        ),
-        el("p", {}, "Усе важливе для здачі лабораторних — поруч."),
+        "div",
+        { class: "page-title" },
+        el('h1',{},'Черги'),
+        small('Обери предмет і своє місце.'),
+      ),
+      el('div',{class:'segments queue-filters'},
+        btn('Усі',()=>{S.queueFilter='all';render();},S.queueFilter==='all'?'selected':''),
+        btn('Мої · '+own.length,()=>{S.queueFilter='mine';render();},S.queueFilter==='mine'?'selected':''),
       ),
       btn(
         [icon("plus"), "Відкрити чергу"],
         () => openFeature("create"),
         "button secondary create-queue",
       ),
-      sectionTitle("Мої записи", "Активних: " + own.length),
-      own.length
-        ? el("div", { class: "queue-grid" }, own.map(queueCard))
-        : empty(
-            "Поки немає записів",
-            "Обери предмет нижче й займи своє місце.",
-          ),
       sectionTitle("Доступні предмети", "Предметів: " + qs.length),
       qs.length
         ? el("div", { class: "subject-list" }, qs.map(subjectCard))
@@ -824,9 +855,11 @@
         },
         "back-button",
       ),
-      controls = el("div", { class: "action-stack" });
+      controls = el("div", { class: "queue-tools" }),
+      otherActions = el('div',{class:'action-stack'}),
+      dock = el('div',{class:'queue-dock'});
     if (own) {
-      controls.append(
+      dock.append(
         btn(
           q.labs.length
             ? "Здав" + (own.labs?.length > 1 ? " лабораторні" : "")
@@ -843,7 +876,7 @@
           btn("Лабораторні та час", () => labForm(q, own), "button secondary"),
         );
       if (!consultation(q))
-        controls.append(
+        otherActions.append(
           btn(
             "Не здав — у кінець",
             () =>
@@ -855,7 +888,7 @@
             "button secondary",
           ),
         );
-      controls.append(
+      otherActions.append(
         el(
           "div",
           { class: "button-row" },
@@ -879,7 +912,11 @@
           ),
         ),
       );
-      controls.append(
+      controls.append(btn([icon('swap'),'Обмін місцями'],()=>{
+        const panel=sheet('Обмін місцями','Натисни на учасника у списку, щоб запропонувати обмін. На відповідь є 10 хвилин.');
+        panel.append(btn('Обрати учасника',()=>{closeSheet();document.querySelector('.entry-list')?.scrollIntoView({behavior:'smooth',block:'start'});},'button primary'));
+      },'button secondary'));
+      dock.append(
         btn(
           "Вийти з черги",
           () =>
@@ -892,7 +929,7 @@
         ),
       );
     } else if (q.status === "open")
-      controls.append(btn("Стати в чергу", () => labForm(q), "button primary"));
+      dock.append(btn("Стати в чергу", () => labForm(q), "button primary"));
     else
       controls.append(
         el(
@@ -946,8 +983,9 @@
         el(
           "span",
           { class: "position" },
-          String(row.position).padStart(2, "0"),
+          row.position,
         ),
+        el('span',{class:'entry-avatar','aria-hidden':true},row.vacant ? '+' : row.name.split(' ').filter(Boolean).map(n=>n[0]).slice(0,2).join('')),
         el(
           "div",
           { class: "entry-info" },
@@ -972,12 +1010,12 @@
     });
     return el(
       "main",
-      {},
+      {class:'queue-detail'+(isAdmin()?' admin-detail':'')},
       back,
       el(
         "div",
         { class: "detail-title" },
-        badge(consultation(q) ? "Консультація" : "Черга предмета"),
+        el('span',{class:'status '+q.status},q.status==='open'?'Запис відкрито':'Запис закрито'),
         el("h1", {}, q.subject),
         el("p", { class: "muted" }, q.teacher),
       ),
@@ -988,24 +1026,20 @@
             el(
               "div",
               {},
-              small("ТВОЄ МІСЦЕ"),
               el("strong", {}, "#" + own.position),
             ),
             el(
               "div",
               {},
-              el("b", {}, own.position === 1 ? "Твоя черга" : "Ти в черзі"),
+              el("b", {}, own.position === 1 ? "Твоя черга" : "Твоє місце"),
               el(
                 "p",
                 {},
-                own.position === 1
-                  ? "Готуй роботи до здачі."
-                  : "Стеж за оновленнями тут або в боті.",
+                consultation(q) ? 'Консультація' : labText(own) || 'Лабораторні не вказані',
               ),
             ),
           )
         : null,
-      controls,
       el(
         "div",
         { class: "section-heading" },
@@ -1019,6 +1053,9 @@
             "Запишися, коли будеш готовий до здачі.",
           )
         : null,
+      controls,
+      own ? el('details',{class:'other-queue-actions'},el('summary',{},'Інші дії з чергою'),otherActions) : null,
+      dock,
       own && !isAdmin() && q.count > 1
         ? el(
             "p",
@@ -1602,9 +1639,7 @@
         btn("Допомога", () => openFeature("help"), "button secondary"),
       ),
       btn(initData ? "Повернутися до бота" : "До черг", () => initData ? tg?.close() : navigate('queues'), "button secondary"),
-      btn("Додати на головний екран", async () => {
-        toast(await window.PI231PWA?.install() || 'Скористайтесь меню браузера → Встановити застосунок.');
-      }, "button secondary"),
+      installCard(),
       !initData ? btn("Вийти з акаунта", async () => {
         try {
           const response = await fetch('/auth/logout', { method: 'POST', credentials: 'same-origin', headers: authHeaders() });
@@ -1864,7 +1899,7 @@
   }
   function render() {
     liquidCleanups.splice(0).forEach((cleanup) => cleanup());
-    root.replaceChildren(topbar());
+    root.replaceChildren(...(S.queue ? [] : [topbar()]));
     if (!initData && !browserSession.authenticated) {
       root.append(
         loginPage(),
@@ -1917,7 +1952,8 @@
               ? profilePage()
               : S.tab === "admin" && isAdmin()
                 ? adminPage()
-                : queuesPage(),
+                : S.tab === 'more' ? morePage()
+                  : S.tab === 'home' ? homePage() : queuesPage(),
       bottomnav(),
     );
     root.classList.toggle("is-loading", S.loading && !S.scheduleLoading);
@@ -1964,7 +2000,7 @@
     if (!S.busy) {
       S.queue = null;
       S.feature = null;
-      navigate(isAdmin() ? "admin" : "queues");
+      navigate(isAdmin() ? "admin" : "home");
     }
   });
   tg?.ready();
