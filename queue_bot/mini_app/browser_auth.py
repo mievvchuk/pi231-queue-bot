@@ -176,11 +176,20 @@ async def verify_token(request, token, nonce):
         raise LoginFailure('signing_key')
     claims = jwt.decode(token, jwt.PyJWK.from_dict(key).key, algorithms=['RS256'],
                         audience=config.TELEGRAM_LOGIN_CLIENT_ID, issuer=ISSUER,
-                        options={'require': ['exp', 'iat', 'iss', 'aud', 'sub', 'nonce', 'id']}, leeway=30)
+                        options={'require': ['exp', 'iat', 'iss', 'aud', 'sub', 'nonce']}, leeway=30)
     if not isinstance(claims['nonce'], str) or not hmac.compare_digest(claims['nonce'], nonce):
         raise LoginFailure('nonce_mismatch')
-    uid = claims['id']  # OIDC sub is NOT the Telegram Bot API user ID.
-    if type(uid) is not int or not 0 < uid < 2**52:
+    # Current OIDC responses can expose the numeric Telegram identifier as sub
+    # without the legacy id mirror. Only use claims AFTER full JWT validation.
+    raw_uid = claims['id'] if 'id' in claims else claims['sub']
+    if type(raw_uid) is int:
+        uid = raw_uid
+    elif (isinstance(raw_uid, str) and raw_uid.isascii() and raw_uid.isdecimal()
+          and 1 <= len(raw_uid) <= 16 and not raw_uid.startswith('0')):
+        uid = int(raw_uid)
+    else:
+        raise LoginFailure('profile_missing')
+    if not 0 < uid < 2**52:
         raise LoginFailure('profile_missing')
     return uid
 

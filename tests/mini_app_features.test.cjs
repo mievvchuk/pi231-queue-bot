@@ -115,7 +115,7 @@ function setup(transport, helpers = {}) {
     isAdmin: () => S.mode === "admin" && S.data.me.is_admin,
     ...helpers,
   });
-  return { S, features, panels, notices, renders: () => renders };
+  return { S, features, panels, notices, context, renders: () => renders };
 }
 const deferred = () => {
   let resolve, reject;
@@ -617,4 +617,25 @@ test("working Saturdays keep past dates in a read-only archive", async () => {
     ).length,
     1,
   );
+});
+
+test('open Saturday screen archives past 13:30 using server time without resetting the form',async()=>{
+  let clock=Date.parse('2026-10-31T13:29:59+02:00');
+  const {features,S,context}=setup(async()=>({server_time:'2026-10-31T13:29:59+02:00',items:[
+    {date:'2026-10-31',source_day:'monday',archive_at:'2026-10-31T13:30:00+02:00'},
+    {date:'2026-11-07',source_day:'tuesday',archive_at:'2026-11-07T13:30:00+02:00'},
+  ],archived:[]}));
+  context.Date=class extends Date {static now(){return clock;}};
+  S.mode='admin';await features.open('admin-saturdays');
+  const page=features.page('admin-saturdays');
+  const formDate=descendants(page).find(n=>n.tag==='input'&&n.attrs.type==='date');
+  formDate.value='2026-11-21';
+  assert.equal(descendants(page).filter(n=>n.tag==='button'&&n.textContent==='Повідомити групу').length,2);
+  clock+=2000;features.tick();
+  const archive=descendants(page).find(n=>n.tag==='details');
+  assert.match(archive.textContent,/2026-10-31/);
+  assert.doesNotMatch(archive.textContent,/2026-11-07/);
+  assert.equal(descendants(archive).filter(n=>n.tag==='button').length,0);
+  assert.equal(descendants(page).filter(n=>n.tag==='button'&&n.textContent==='Повідомити групу').length,1);
+  assert.equal(formDate.value,'2026-11-21');
 });

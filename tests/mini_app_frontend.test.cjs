@@ -381,3 +381,21 @@ test('login errors distinguish credentials, browser context and nonce while igno
   assert.match(app.loginFailureMessage('nonce_missing'),/Код для підтримки: nonce_missing/);
   assert.equal(app.loginFailureMessage('PRIVATE_TOKEN<script>'),'Вхід не завершено. Спробуй ще раз.');
 });
+
+test('a custom upcoming date does not select Today or show a false lens',async()=>{
+  const {app,context,root}=setup();
+  context.fetch=async()=>result(schedule('2026-11-02'));
+  await app.loadSchedule('2026-11-02');
+  const segments=allNodes(root).find(n=>n.className==='segments');
+  assert.ok(segments);
+  assert.equal(allNodes(segments).filter(n=>n.tag==='button'&&n.className==='selected').length,0);
+  assert.equal(allNodes(segments).find(n=>n.className==='liquid-lens').hidden,true);
+});
+test('queue actions are directly visible with icons rather than a details dropdown',()=>{
+  const {app}=setup();
+  app.S.queue={id:1,subject:'Предмет',status:'open',count:1,labs:[{number:1}],entries:[{id:1,name:'Тест Студент',position:1,is_me:true,labs:[1]}]};
+  const page=app.queuePage();
+  assert.equal(allNodes(page).filter(n=>n.tag==='details').length,0);
+  const retry=allNodes(page).find(n=>n.tag==='button'&&n.textContent.includes('Не здав — у кінець'));
+  assert.ok(allNodes(retry).some(n=>n.tag==='svg'));
+});
