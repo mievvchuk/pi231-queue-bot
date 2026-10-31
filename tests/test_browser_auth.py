@@ -159,3 +159,85 @@ async def test_pwa_assets_are_public_and_real_api_stays_private(client):
     assert (await client.get('/auth/session')).headers['Cache-Control'] == 'no-store'
     assert (await client.get('/api/miniapp/bootstrap')).status == 401
     assert (await client.get('/api/miniapp/bootstrap', headers=headers())).status == 200
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('failure,reason', [
+    (auth.LoginFailure('client_config'), 'client_config'),
+    (auth.LoginFailure('code_expired'), 'code_expired'),
+    (TimeoutError('private-code-and-secret'), 'telegram_unavailable'),
+    (jwt.InvalidAudienceError('private-token'), 'client_mismatch'),
+    (jwt.MissingRequiredClaimError('nonce'), 'nonce_missing'),
+    (jwt.MissingRequiredClaimError('id'), 'profile_missing'),
+    (RuntimeError('private-code-and-secret'), 'server_error'),
+])
+async def test_callback_categorizes_failure_without_logging_secrets(client, login_config, monkeypatch, caplog, failure, reason):
+    params, binding, _ = await begin(client)
+    monkeypatch.setattr(auth, 'exchange', AsyncMock(side_effect=failure))
+    result = await client.get('/auth/telegram/callback', params={'state': params['state'][0], 'code': 'private-authorization-code'},
+                              headers={'Cookie': f'{auth.FLOW_COOKIE}={binding}'}, allow_redirects=False)
+    location = parse_qs(urlsplit(result.headers['Location']).query)
+    assert location == {'login': ['failed'], 'reason': [reason]}
+    assert auth.SESSION_COOKIE not in result.cookies
+    assert result.cookies[auth.FLOW_COOKIE]['max-age'] == '0'
+    assert result.headers['Cache-Control'] == 'no-store'
+    for secret in ('private-code-and-secret', 'private-token', 'private-authorization-code', params['state'][0], binding):
+        assert secret not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_missing_cookie_and_expired_flow_have_different_recovery_messages(client, login_config):
+    params, binding, _ = await begin(client)
+    query = {'state': params['state'][0], 'code': 'test-code'}
+    response = await client.get('/auth/telegram/callback', params=query, allow_redirects=False)
+    assert parse_qs(urlsplit(response.headers['Location']).query)['reason'] == ['browser_changed']
+    client.app[auth.STORE]['flows'][auth.digest(params['state'][0])]['expires'] = 1
+    response = await client.get('/auth/telegram/callback', params=query,
+                                headers={'Cookie': f'{auth.FLOW_COOKIE}={binding}'}, allow_redirects=False)
+    assert parse_qs(urlsplit(response.headers['Location']).query)['reason'] == ['login_expired']
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('status,body,reason', [
+    (401, {'error': 'invalid_client', 'error_description': 'PRIVATE_SECRET'}, 'client_config'),
+    (400, {'error': 'invalid_grant', 'error_description': 'PRIVATE_CODE'}, 'code_expired'),
+    (500, {'error': 'server_error'}, 'telegram_unavailable'),
+    (200, {'access_token': 'PRIVATE_TOKEN'}, 'token_response'),
+])
+async def test_exchange_classifies_real_http_response(client, login_config, monkeypatch, status, body, reason):
+    from aiohttp import web
+    from aiohttp.test_utils import TestServer
+    seen = []
+    async def token(request):
+        assert request.headers['Authorization'] == 'Basic ' + base64.b64encode(b'123456:offline-test-secret').decode()
+        seen.append(await request.post())
+        return web.json_response(body, status=status)
+    app = web.Application()
+    app.router.add_post('/token', token)
+    async with TestServer(app) as server:
+        monkeypatch.setattr(auth, 'ISSUER', str(server.make_url('')).rstrip('/'))
+        with pytest.raises(auth.LoginFailure) as error:
+            await auth.exchange('offline-code', 'offline-verifier', 'https://queue.example/auth/telegram/callback')
+    assert error.value.reason == reason
+    assert seen[0]['code'] == 'offline-code'
+    assert seen[0]['code_verifier'] == 'offline-verifier'
+
+
+@pytest.mark.asyncio
+async def test_exchange_accepts_successful_chunked_response(client, login_config, monkeypatch):
+    import asyncio
+    from aiohttp import web
+    from aiohttp.test_utils import TestServer
+    async def token(request):
+        response = web.StreamResponse(headers={'Content-Type': 'application/json'})
+        await response.prepare(request)
+        await response.write(b'{"id_')
+        await asyncio.sleep(0.02)
+        await response.write(b'token":"offline.jwt.token"}')
+        await response.write_eof()
+        return response
+    app = web.Application()
+    app.router.add_post('/token', token)
+    async with TestServer(app) as server:
+        monkeypatch.setattr(auth, 'ISSUER', str(server.make_url('')).rstrip('/'))
+        assert await auth.exchange('code', 'verifier', 'https://queue.example/auth/telegram/callback') == 'offline.jwt.token'

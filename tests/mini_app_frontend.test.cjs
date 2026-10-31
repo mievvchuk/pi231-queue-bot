@@ -64,7 +64,7 @@ function setup() {
   // Export the existing closure only in this VM; production contains no test hooks.
   vm.runInContext(
     source.slice(0, source.indexOf('  document.addEventListener("keydown"')) +
-      "\nthis.appTest = {S, loadSchedule, loadWeek, navigate, adminPage, topbar, profilePage, loadAvatars, homePage, morePage, bottomnav, queuePage, attachLiquidLens: typeof attachLiquidLens === 'function' ? attachLiquidLens : null, installPressOptics: typeof installPressOptics === 'function' ? installPressOptics : null};\n})();",
+      "\nthis.appTest = {S, loadSchedule, loadWeek, navigate, adminPage, topbar, profilePage, loadAvatars, homePage, morePage, bottomnav, queuePage, loginFailureMessage, attachLiquidLens: typeof attachLiquidLens === 'function' ? attachLiquidLens : null, installPressOptics: typeof installPressOptics === 'function' ? installPressOptics : null};\n})();",
     context,
   );
   const app = context.appTest;
@@ -372,4 +372,12 @@ test('queue detail puts participants before tools and preserves completion and r
   assert.ok(text.indexOf('Учасники')<text.indexOf('Лабораторні та час'));
   for(const value of ['Здав','Не здав — у кінець','Хочу вище','Хочу нижче','Вийти з черги','Обмін місцями']) assert.ok(text.includes(value));
   assert.equal(allNodes(page).filter(n=>n.className==='queue-dock').length,1);
+});
+
+test('login errors distinguish credentials, browser context and nonce while ignoring untrusted query text',()=>{
+  const {app}=setup();
+  assert.match(app.loginFailureMessage('client_config'),/Client ID і Client Secret/);
+  assert.match(app.loginFailureMessage('browser_changed'),/те саме вікно/);
+  assert.match(app.loginFailureMessage('nonce_missing'),/Код для підтримки: nonce_missing/);
+  assert.equal(app.loginFailureMessage('PRIVATE_TOKEN<script>'),'Вхід не завершено. Спробуй ще раз.');
 });

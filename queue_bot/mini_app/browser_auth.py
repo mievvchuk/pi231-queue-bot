@@ -2,6 +2,8 @@
 import base64
 import hashlib
 import hmac
+import json
+import logging
 import secrets
 import time
 from urllib.parse import urlencode, urlsplit
@@ -19,6 +21,20 @@ FLOW_COOKIE = '__Host-pi231-login'
 SESSION_TTL = 7 * 86400
 FLOW_TTL = 600
 ISSUER = 'https://oauth.telegram.org'
+log = logging.getLogger(__name__)
+
+
+class LoginFailure(ValueError):
+    """Internal allowlisted failure category, never a provider response body."""
+    def __init__(self, reason):
+        self.reason = reason
+        super().__init__(reason)
+
+
+def failed(reason, *, report=False):
+    if report:
+        log.warning('Telegram Login failed: reason=%s', reason)
+    return redirect_to('/app/?login=failed&reason=' + reason)
 
 
 def settings():
@@ -93,14 +109,40 @@ async def start(request):
 
 
 async def exchange(code, verifier, redirect):
+    credentials = base64.b64encode(
+        (config.TELEGRAM_LOGIN_CLIENT_ID + ':' + config.TELEGRAM_LOGIN_CLIENT_SECRET).encode()
+    ).decode('ascii')
     async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=12)) as client:
-        async with client.post(ISSUER + '/token', auth=aiohttp.BasicAuth(
-                config.TELEGRAM_LOGIN_CLIENT_ID, config.TELEGRAM_LOGIN_CLIENT_SECRET),
+        async with client.post(ISSUER + '/token', headers={'Authorization': 'Basic ' + credentials},
                 data=dict(grant_type='authorization_code', code=code, redirect_uri=redirect,
                           client_id=config.TELEGRAM_LOGIN_CLIENT_ID, code_verifier=verifier),
                 allow_redirects=False) as response:
-            response.raise_for_status()
-            return (await response.json())['id_token']
+            chunks, size = [], 0
+            async for chunk in response.content.iter_chunked(8192):
+                size += len(chunk)
+                if size > 65536:
+                    raise LoginFailure('token_response')
+                chunks.append(chunk)
+            raw = b''.join(chunks)
+            try:
+                payload = json.loads(raw)
+            except (ValueError, UnicodeDecodeError):
+                raise LoginFailure('telegram_unavailable' if response.status >= 500 else 'token_response') from None
+            if not isinstance(payload, dict):
+                raise LoginFailure('token_response')
+            if response.status != 200:
+                error = payload.get('error')
+                if error == 'invalid_client' or response.status in (401, 403):
+                    raise LoginFailure('client_config')
+                if error == 'invalid_grant':
+                    raise LoginFailure('code_expired')
+                if error in ('invalid_scope', 'unauthorized_client'):
+                    raise LoginFailure('client_config')
+                raise LoginFailure('telegram_unavailable' if response.status >= 500 else 'token_response')
+            token = payload.get('id_token')
+            if not isinstance(token, str) or not token:
+                raise LoginFailure('token_response')
+            return token
 
 
 async def public_keys(request):
@@ -117,10 +159,10 @@ async def public_keys(request):
 
 async def verify_token(request, token, nonce):
     if not isinstance(token, str) or len(token) > 16384:
-        raise ValueError('Invalid ID token')
+        raise LoginFailure('token_response')
     header = jwt.get_unverified_header(token)
     if header.get('alg') != 'RS256' or not header.get('kid'):
-        raise ValueError('Unsupported signing algorithm')
+        raise LoginFailure('signing_algorithm' if header.get('alg') != 'RS256' else 'signing_key')
     keys = await public_keys(request)
     key = next((row for row in keys if row.get('kid') == header['kid']), None)
     if key is None:
@@ -131,46 +173,53 @@ async def verify_token(request, token, nonce):
             keys = await public_keys(request)
             key = next((row for row in keys if row.get('kid') == header['kid']), None)
     if key is None:
-        raise ValueError('Unknown signing key')
+        raise LoginFailure('signing_key')
     claims = jwt.decode(token, jwt.PyJWK.from_dict(key).key, algorithms=['RS256'],
                         audience=config.TELEGRAM_LOGIN_CLIENT_ID, issuer=ISSUER,
                         options={'require': ['exp', 'iat', 'iss', 'aud', 'sub', 'nonce', 'id']}, leeway=30)
     if not isinstance(claims['nonce'], str) or not hmac.compare_digest(claims['nonce'], nonce):
-        raise ValueError('Invalid nonce')
+        raise LoginFailure('nonce_mismatch')
     uid = claims['id']  # OIDC sub is NOT the Telegram Bot API user ID.
     if type(uid) is not int or not 0 < uid < 2**52:
-        raise ValueError('Invalid Telegram ID')
+        raise LoginFailure('profile_missing')
     return uid
 
 
 async def callback(request):
-    response = redirect_to('/app/?login=failed')
     enabled, _, redirect = settings()
     state, code = request.query.get('state', ''), request.query.get('code', '')
     binding = request.cookies.get(FLOW_COOKIE, '')
     flows = request.app[STORE]['flows']
     prune(flows)
     flow = flows.get(digest(state)) if len(state) <= 128 else None
-    if not enabled or not flow or not binding or not hmac.compare_digest(flow['binding'], digest(binding)):
-        return response
+    if not enabled:
+        return failed('client_config')
+    if not flow:
+        return failed('login_expired')
+    if not binding or not hmac.compare_digest(flow['binding'], digest(binding)):
+        return failed('browser_changed')
     del flows[digest(state)]
-    cookie(response, FLOW_COOKIE, '', 0)
     if not code or len(code) > 4096 or request.query.get('error'):
+        response = failed('cancelled' if request.query.get('error') == 'access_denied' else 'provider_response')
+        cookie(response, FLOW_COOKIE, '', 0)
         return response
+    stage = 'exchange'
     try:
         token = await exchange(code, flow['verifier'], redirect)
+        stage = 'verification'
         uid = await verify_token(request, token, flow['nonce'])
+        stage = 'session'
         # Restrictions and current role are checked again by every API call.
         from queue_bot.mini_app.api import CONTEXT
         from queue_bot.services import restrictions
         context = request.app[CONTEXT]
         if not context.get('ready'):
-            return response
+            raise LoginFailure('server_restarting')
         restrictions.require_available(context['conn'], uid)
         sessions = request.app[STORE]['sessions']
         prune(sessions)
         if len(sessions) >= 4096:
-            return response
+            raise LoginFailure('server_busy')
         old = request.cookies.get(SESSION_COOKIE, '')
         sessions.pop(digest(old), None)
         session_id = secrets.token_urlsafe(32)
@@ -179,11 +228,29 @@ async def callback(request):
         response = redirect_to('/app/')
         cookie(response, SESSION_COOKIE, session_id, SESSION_TTL)
         cookie(response, FLOW_COOKIE, '', 0)
-    except (aiohttp.ClientError, TimeoutError, ValueError, KeyError, jwt.PyJWTError):
-        pass
-    except Exception:
-        # Neither authorization codes, tokens nor secrets belong in logs.
-        pass
+    except LoginFailure as error:
+        response = failed(error.reason, report=True)
+    except jwt.MissingRequiredClaimError as error:
+        reason = {'nonce': 'nonce_missing', 'id': 'profile_missing'}.get(error.claim, 'token_claims')
+        response = failed(reason, report=True)
+    except jwt.ExpiredSignatureError:
+        response = failed('token_expired', report=True)
+    except jwt.InvalidAudienceError:
+        response = failed('client_mismatch', report=True)
+    except jwt.InvalidSignatureError:
+        response = failed('token_signature', report=True)
+    except jwt.PyJWTError:
+        response = failed('token_claims', report=True)
+    except (aiohttp.ClientError, TimeoutError):
+        response = failed('telegram_unavailable', report=True)
+    except Exception as error:
+        from queue_bot.services.errors import BotError
+        reason = 'access_denied' if isinstance(error, BotError) else 'server_error'
+        # Log the stage and category only: exception messages can contain URLs,
+        # authorization codes, tokens, or upstream response bodies.
+        log.warning('Telegram Login failed: stage=%s category=%s', stage, type(error).__name__)
+        response = failed(reason)
+    cookie(response, FLOW_COOKIE, '', 0)
     return response
 
 
