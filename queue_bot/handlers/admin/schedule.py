@@ -155,6 +155,13 @@ async def render_working_saturday_panel(event: Message | CallbackQuery, conn, sa
             ],
         ]
 
+    from queue_bot.services.working_days import is_saturday_archived
+    if ws and is_saturday_archived(date_str):
+        text = (f"📦 <b>Архів робочих субот — {date_formatted}</b>\n\n"
+                f"За розкладом: <b>{DAY_NAMES_UK.get(ws['replaces_day'], ws['replaces_day'])}</b>.\n"
+                "Цю суботу завершено о 13:30. Запис збережено для історії.")
+        kb = [[InlineKeyboardButton(text="👀 Переглянути розклад", callback_data=f"ws_view:{date_str}")],
+              [InlineKeyboardButton(text="📅 Обрати іншу суботу", callback_data=f"ws_other:{date_str}")]]
     markup = InlineKeyboardMarkup(inline_keyboard=kb)
     if isinstance(event, CallbackQuery):
         await event.message.edit_text(text, reply_markup=markup)
@@ -166,6 +173,10 @@ async def render_working_saturday_panel(event: Message | CallbackQuery, conn, sa
 async def admin_set_working_saturday_day(callback: CallbackQuery, conn):
     parts = callback.data.split(":")
     date_str, day_key = parts[1], parts[2]
+    from queue_bot.services.working_days import is_saturday_archived
+    if is_saturday_archived(date_str):
+        await callback.answer("Ця субота вже в архіві. Запис доступний лише для перегляду.", show_alert=True)
+        return
     from queue_bot.services.working_days import set_working_saturday, DAY_NAMES_UK
     set_working_saturday(conn, date_str, day_key)
     admins.log_action(conn, callback.from_user.id, "set_working_saturday", f"date={date_str} day={day_key}")
@@ -231,6 +242,10 @@ async def admin_parity_working_saturday(callback: CallbackQuery, conn):
 async def admin_set_parity_working_saturday(callback: CallbackQuery, conn):
     parts = callback.data.split(":")
     date_str, par = parts[1], parts[2]
+    from queue_bot.services.working_days import is_saturday_archived
+    if is_saturday_archived(date_str):
+        await callback.answer("Ця субота вже в архіві. Запис доступний лише для перегляду.", show_alert=True)
+        return
     from queue_bot.services.working_days import get_working_saturday, set_working_saturday
     ws = get_working_saturday(conn, date_str)
     if ws:
@@ -245,6 +260,10 @@ async def admin_set_parity_working_saturday(callback: CallbackQuery, conn):
 
 async def admin_cancel_working_saturday(callback: CallbackQuery, conn):
     date_str = callback.data.split(":", 1)[1]
+    from queue_bot.services.working_days import is_saturday_archived
+    if is_saturday_archived(date_str):
+        await callback.answer("Ця субота вже в архіві. Запис доступний лише для перегляду.", show_alert=True)
+        return
     from queue_bot.services.working_days import remove_working_saturday
     remove_working_saturday(conn, date_str)
     admins.log_action(conn, callback.from_user.id, "remove_working_saturday", f"date={date_str}")
@@ -321,6 +340,11 @@ async def admin_broadcast_working_saturday_prompt(callback: CallbackQuery, conn)
         await callback.answer("Субота не налаштована як робоча.", show_alert=True)
         return
 
+    from queue_bot.services.working_days import is_saturday_archived
+    if is_saturday_archived(date_str):
+        await callback.answer("Ця субота вже в архіві.", show_alert=True)
+        return
+
     rep_day_uk = DAY_NAMES_UK.get(ws["replaces_day"], ws["replaces_day"].capitalize())
     w_type = ws.get("week_type") or schedule.get_week_type(sat_date)
     w_type_uk = "Знаменник" if w_type == "denominator" else "Чисельник"
@@ -368,6 +392,11 @@ async def admin_broadcast_working_saturday_send(callback: CallbackQuery, conn):
     ws = get_working_saturday(conn, date_str)
     if not ws:
         await callback.answer("Субота не налаштована як робоча.", show_alert=True)
+        return
+
+    from queue_bot.services.working_days import is_saturday_archived
+    if is_saturday_archived(date_str):
+        await callback.answer("Ця субота вже в архіві.", show_alert=True)
         return
 
     rep_day_uk = DAY_NAMES_UK.get(ws["replaces_day"], ws["replaces_day"].capitalize())

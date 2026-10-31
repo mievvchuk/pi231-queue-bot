@@ -917,6 +917,9 @@ window.createPI231Features = function (H) {
     ]);
     return [
       card(
+        small(
+          "Після 13:30 у день суботи запис автоматично переходить до архіву.",
+        ),
         form(
           [
             field("Робоча субота", date),
@@ -943,7 +946,11 @@ window.createPI231Features = function (H) {
           small(
             (dayNames[item.source_day] || item.source_day) +
               " · " +
-              (item.week_type === "denominator" ? "Знаменник" : "Чисельник"),
+              (item.week_type === "denominator"
+                ? "Знаменник"
+                : item.week_type === "numerator"
+                  ? "Чисельник"
+                  : "Автоматично"),
           ),
           el(
             "div",
@@ -971,6 +978,28 @@ window.createPI231Features = function (H) {
           ),
         ),
       ),
+      rows(data.archived).length
+        ? el(
+            "details",
+            { class: "saturday-archive card" },
+            el("summary", {}, "Архів робочих субот · " + data.archived.length),
+            list(data.archived, (item) =>
+              card(
+                el("h3", {}, item.date),
+                badge("Завершено"),
+                small(
+                  (dayNames[item.source_day] || item.source_day) +
+                    " · " +
+                    (item.week_type === "denominator"
+                      ? "Знаменник"
+                      : item.week_type === "numerator"
+                        ? "Чисельник"
+                        : "Автоматично"),
+                ),
+              ),
+            ),
+          )
+        : null,
     ];
   }
   async function readImage(file) {

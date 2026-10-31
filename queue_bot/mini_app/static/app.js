@@ -19,6 +19,9 @@
     busy: false,
     loading: false,
     epoch: 0,
+    avatars: { bot: null, me: null },
+    avatarLoading: false,
+    avatarCheckedAt: 0,
   };
   const paths = {
     queues: "M4 4h16v4H4z M4 12h16 M4 17h10 M4 21h7",
@@ -180,6 +183,67 @@
     link.remove();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
+  function avatarImage(kind) {
+    return el("img", {
+      src: S.avatars[kind],
+      alt: "",
+      class: "avatar-photo",
+      decoding: "async",
+      onerror: (event) => {
+        event.currentTarget.remove();
+        S.avatars[kind] = null;
+      },
+    });
+  }
+  function avatarFace(kind, letters) {
+    return el(
+      "span",
+      { class: "avatar-face", "data-avatar-kind": kind },
+      el("span", { class: "avatar-initials" }, letters),
+      S.avatars[kind] ? avatarImage(kind) : null,
+    );
+  }
+  async function loadAvatars() {
+    if (
+      !S.data?.me.is_registered ||
+      S.avatarLoading ||
+      typeof URL === "undefined" ||
+      typeof URL.createObjectURL !== "function" ||
+      Date.now() - S.avatarCheckedAt < 300000
+    )
+      return;
+    S.avatarLoading = true;
+    S.avatarCheckedAt = Date.now();
+    try {
+      await Promise.allSettled(
+        ["bot", "me"].map(async (kind) => {
+          const response = await fetch(
+            "/api/miniapp/avatar/" + kind + "?mode=" + S.mode,
+            {
+              headers: { Authorization: "tma " + initData },
+              credentials: "omit",
+              cache: "no-store",
+            },
+          );
+          if (response.status !== 200) return;
+          const blob = await response.blob();
+          if (!blob.type.startsWith("image/") || S.fatal) return;
+          const previous = S.avatars[kind];
+          S.avatars[kind] = URL.createObjectURL(blob);
+          // Patch only avatar faces; never rerender an in-progress student/admin form.
+          document
+            .querySelectorAll('[data-avatar-kind="' + kind + '"]')
+            .forEach((face) => {
+              face.querySelector("img")?.remove();
+              face.append(avatarImage(kind));
+            });
+          if (previous) URL.revokeObjectURL(previous);
+        }),
+      );
+    } finally {
+      S.avatarLoading = false;
+    }
+  }
   function openFeature(key) {
     if (S.busy || !features) return;
     if (key === "polls" || key === "help") S.tab = key;
@@ -225,6 +289,7 @@
       if (epoch === S.epoch) {
         S.loading = false;
         render();
+        if (!S.fatal) void loadAvatars();
       }
     }
   }
@@ -319,12 +384,15 @@
     tools.append(refresh);
     if (S.data?.me.name) {
       const avatar = btn(
-        S.data.me.name
-          .split(" ")
-          .filter(Boolean)
-          .map((n) => n[0])
-          .slice(0, 2)
-          .join(""),
+        avatarFace(
+          "me",
+          S.data.me.name
+            .split(" ")
+            .filter(Boolean)
+            .map((n) => n[0])
+            .slice(0, 2)
+            .join(""),
+        ),
         () => navigate("profile"),
         "avatar header-avatar",
       );
@@ -337,7 +405,7 @@
       el(
         "div",
         { class: "brand" },
-        el("span", { class: "brand-logo" }, "ПІ"),
+        el("span", { class: "brand-logo" }, avatarFace("bot", "ПІ")),
         el(
           "span",
           {},
@@ -1075,7 +1143,13 @@
             }),
           ),
           day.source_day
-            ? el("p", { class: "notice" }, "За розкладом: " + day.source_day)
+            ? el(
+                "p",
+                { class: "notice" },
+                "За розкладом: " +
+                  day.source_day +
+                  (day.working_day_archived ? " · Завершено" : ""),
+              )
             : null,
           !day.lessons.length
             ? el("p", { class: "notice" }, "Занять немає.")
@@ -1166,7 +1240,9 @@
         ? el(
             "p",
             { class: "notice" },
-            "Навчальний день за розкладом: " + data.source_day,
+            "Навчальний день за розкладом: " +
+              data.source_day +
+              (data.working_day_archived ? " · Завершено" : ""),
           )
         : null,
       data
@@ -1252,11 +1328,14 @@
         el(
           "div",
           { class: "avatar" },
-          name
-            .split(" ")
-            .map((n) => n[0])
-            .join("")
-            .slice(0, 2),
+          avatarFace(
+            "me",
+            name
+              .split(" ")
+              .map((n) => n[0])
+              .join("")
+              .slice(0, 2),
+          ),
         ),
         el("h1", {}, name),
         small(isAdmin() ? "Режим адміністратора · ПІ-231" : "Студент · ПІ-231"),
