@@ -338,3 +338,12 @@ test("Liquid Optics exposes press handling separately from queue business action
   const { app } = setup();
   assert.equal(typeof app.installPressOptics, "function");
 });
+
+test("Liquid lens prevents a synthetic click from navigating twice after pointer release", () => {
+  const source = fs.readFileSync(
+    path.join(__dirname, "../queue_bot/mini_app/static/app.js"),
+    "utf8",
+  );
+  assert.match(source, /suppressClickUntil/);
+  assert.match(source, /activate/);
+});

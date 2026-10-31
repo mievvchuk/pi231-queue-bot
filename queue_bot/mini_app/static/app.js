@@ -79,6 +79,7 @@
     let origin = null;
     let hovered = selected;
     let dragged = false;
+    let suppressClickUntil = 0;
     container.append(lens);
     container.classList.add("liquid-control");
 
@@ -147,6 +148,7 @@
       if (event.pointerId !== pointerId) return;
       const next = nearest(event.clientX);
       cancel();
+      suppressClickUntil = Date.now() + 300;
       commit(next);
       tg?.HapticFeedback?.selectionChanged?.();
     });
@@ -162,7 +164,13 @@
     });
     window.addEventListener?.("resize", () => render(selected));
     render(selected);
-    return { commit, cancel };
+    return {
+      activate: (index) => {
+        if (Date.now() >= suppressClickUntil) commit(index);
+      },
+      commit,
+      cancel,
+    };
   }
   function installPressOptics(root) {
     const reduceMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)")
@@ -572,7 +580,7 @@
     const buttons = tabs.map(([key, label]) => {
       const node = btn(
         [icon(key), el("span", {}, label)],
-        () => control?.commit(tabs.findIndex(([tab]) => tab === key)),
+        () => control?.activate(tabs.findIndex(([tab]) => tab === key)),
         "nav-item " + (activeTab === key ? "active" : ""),
       );
       if (activeTab === key) node.setAttribute("aria-current", "page");
@@ -1375,7 +1383,7 @@
     const segmentButtons = segmentChoices.map((choice, index) =>
       btn(
         choice.label,
-        () => segmentControl?.commit(index),
+        () => segmentControl?.activate(index),
         choice.selected ? "selected" : "",
       ),
     );
