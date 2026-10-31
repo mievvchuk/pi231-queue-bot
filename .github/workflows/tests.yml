@@ -3,7 +3,11 @@ name: Tests
 on:
   pull_request:
   push:
-    branches: [master, develop, 'feature/**', 'bugfix/**', 'release/**', 'hotfix/**']
+    branches: [master, develop]
+
+concurrency:
+  group: tests-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
