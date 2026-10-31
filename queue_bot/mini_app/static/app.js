@@ -1001,40 +1001,61 @@
       }
     }
   }
-  function lessonCard(lesson) {
+  function lessonCard(slot) {
+    const lessons = slot.lessons || [slot];
     return el(
       "article",
-      { class: "lesson" },
+      { class: "lesson" + (lessons.length ? "" : " lesson-empty") },
       el(
         "div",
         { class: "lesson-number" },
-        lesson.number,
+        slot.number,
         el("small", {}, "пара"),
       ),
       el(
         "div",
         { class: "lesson-body" },
-        lesson.is_replacement ? badge("Заміна", "warning") : null,
-        el("h3", {}, lesson.subject),
-        lesson.teachers_raw?.length
-          ? lesson.teachers_raw.map((t) =>
+        slot.startTime && slot.endTime
+          ? el(
+              "small",
+              { class: "lesson-time" },
+              slot.startTime + "–" + slot.endTime,
+            )
+          : null,
+        lessons.length
+          ? lessons.map((lesson) =>
               el(
-                "p",
-                { class: "muted" },
-                t.name + (t.room ? " · ауд. " + t.room : ""),
+                "div",
+                { class: "lesson-content" },
+                lesson.is_replacement ? badge("Заміна", "warning") : null,
+                el("h3", {}, lesson.subject),
+                lesson.teachers_raw?.length
+                  ? lesson.teachers_raw.map((t) =>
+                      el(
+                        "p",
+                        { class: "muted" },
+                        t.name + (t.room ? " · ауд. " + t.room : ""),
+                      ),
+                    )
+                  : el(
+                      "p",
+                      { class: "muted" },
+                      [lesson.teacher, lesson.room && "ауд. " + lesson.room]
+                        .filter(Boolean)
+                        .join(" · "),
+                    ),
               ),
             )
-          : el(
-              "p",
-              { class: "muted" },
-              [lesson.teacher, lesson.room && "ауд. " + lesson.room]
-                .filter(Boolean)
-                .join(" · "),
-            ),
-        lesson.startTime && lesson.endTime
-          ? el("small", {}, lesson.startTime + "–" + lesson.endTime)
-          : null,
+          : el("p", { class: "muted empty-lesson-label" }, "Заняття немає"),
       ),
+    );
+  }
+  function dayTimeline(day) {
+    // Slots come from the server's bell schedule; actual lessons stay separate.
+    return el(
+      "div",
+      { class: "timeline" },
+      (day.slots || day.lessons).map(lessonCard),
     );
   }
   function weekView() {
@@ -1056,9 +1077,10 @@
           day.source_day
             ? el("p", { class: "notice" }, "За розкладом: " + day.source_day)
             : null,
-          day.lessons.length
-            ? el("div", { class: "timeline" }, day.lessons.map(lessonCard))
-            : el("p", { class: "notice" }, "Занять немає."),
+          !day.lessons.length
+            ? el("p", { class: "notice" }, "Занять немає.")
+            : null,
+          dayTimeline(day),
         ),
       ),
     );
@@ -1072,7 +1094,7 @@
           role: "status",
           "aria-label": "Завантаження розкладу",
         },
-        [1, 2, 3].map(() =>
+        [1, 2, 3, 4, 5].map(() =>
           el(
             "div",
             { class: "lesson-skeleton" },
@@ -1159,8 +1181,13 @@
         ? scheduleState()
         : S.scheduleView === "week"
           ? weekView()
-          : data?.lessons.length
-            ? el("div", { class: "timeline" }, data.lessons.map(lessonCard))
+          : data
+            ? [
+                !data.lessons.length
+                  ? el("p", { class: "notice" }, "На обрану дату занять немає.")
+                  : null,
+                dayTimeline(data),
+              ]
             : empty("Сьогодні можна видихнути", "На обрану дату занять немає."),
     );
   }

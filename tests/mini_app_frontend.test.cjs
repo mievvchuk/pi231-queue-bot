@@ -80,6 +80,18 @@ const schedule = (date) => ({
   day: "П’ятниця",
   week_type: "denominator",
   lessons: [],
+  slots: [
+    ["08:30", "09:50"],
+    ["10:00", "11:20"],
+    ["11:50", "13:10"],
+    ["13:20", "14:40"],
+    ["14:50", "16:10"],
+  ].map(([startTime, endTime], i) => ({
+    number: i + 1,
+    startTime,
+    endTime,
+    lessons: [],
+  })),
 });
 const deferred = () => {
   let resolve;
@@ -170,8 +182,8 @@ test("leaving a pending schedule ignores its later failure", async () => {
   assert.ok(!app.S.fatal);
 });
 
-test("week schedule uses seven real dates and does not invent empty days before loading", async () => {
-  const { app, context } = setup();
+test("week schedule uses seven real dates and five timed slots per loaded day", async () => {
+  const { app, context, root } = setup();
   const requested = [];
   context.fetch = async (url) => {
     const date = new URL(url, "https://offline.test").searchParams.get("date");
@@ -184,4 +196,56 @@ test("week schedule uses seven real dates and does not invent empty days before 
   assert.equal(requested[6], "2026-11-01");
   assert.equal(app.S.scheduleView, "week");
   assert.equal(app.S.weekSchedule.length, 7);
+  const nodes = (node) =>
+    node instanceof Element ? [node, ...node.children.flatMap(nodes)] : [];
+  assert.equal(
+    nodes(root).filter(
+      (node) => node.tag === "article" && node.className.includes("lesson"),
+    ).length,
+    35,
+  );
+  assert.equal(root.textContent.split("14:50–16:10").length - 1, 7);
+});
+
+test("day timetable renders five numbered timed slots without inventing lessons", async () => {
+  const { app, context, root } = setup();
+  context.fetch = async () =>
+    result({
+      ...schedule("2026-11-03"),
+      lessons: [{ number: 2, subject: "Машинне навчання" }],
+      slots: [
+        ["08:30", "09:50"],
+        ["10:00", "11:20"],
+        ["11:50", "13:10"],
+        ["13:20", "14:40"],
+        ["14:50", "16:10"],
+      ].map((times, i) => ({
+        number: i + 1,
+        startTime: times[0],
+        endTime: times[1],
+        lessons:
+          i === 1
+            ? [
+                {
+                  number: 2,
+                  subject: "Машинне навчання",
+                  teachers_raw: [{ name: "Викладач", room: "231" }],
+                },
+              ]
+            : [],
+      })),
+    });
+  await app.loadSchedule("2026-11-03");
+  const nodes = (node) =>
+    node instanceof Element ? [node, ...node.children.flatMap(nodes)] : [];
+  const slots = nodes(root).filter(
+    (n) => n.tag === "article" && n.className.includes("lesson"),
+  );
+  assert.equal(slots.length, 5);
+  assert.ok(slots[4].textContent.includes("5"));
+  assert.ok(slots[4].textContent.includes("14:50–16:10"));
+  assert.ok(slots[4].textContent.includes("Заняття немає"));
+  assert.ok(!slots[4].textContent.includes("Машинне навчання"));
+  assert.ok(slots[1].textContent.includes("Машинне навчання"));
+  assert.ok(slots[1].textContent.includes("Викладач · ауд. 231"));
 });

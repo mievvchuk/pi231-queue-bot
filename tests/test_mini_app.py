@@ -56,6 +56,21 @@ async def client(conn, make_user):
 
 
 @pytest.mark.asyncio
+async def test_timetable_returns_five_slots_separately_from_real_lessons(client, monkeypatch, tmp_path):
+    path = tmp_path / 'schedule.json'
+    path.write_text(json.dumps({'tuesday': [{'pair': 2, 'subject': 'Машинне навчання'}]}), encoding='utf-8')
+    monkeypatch.setattr(config, 'SCHEDULE_PATH', str(path))
+    for date in ('2026-11-03', '2026-11-08'):
+        result = await client.get('/api/miniapp/schedule?date=' + date, headers=headers())
+        assert result.status == 200
+        data = await result.json()
+        assert len(data['slots']) == 5
+        assert data['slots'][4] == {'number': 5, 'startTime': '14:50', 'endTime': '16:10', 'lessons': []}
+        assert len(data['lessons']) == (1 if date == '2026-11-03' else 0)
+        assert data['slots'][0]['lessons'] == []
+
+
+@pytest.mark.asyncio
 async def test_health_and_shell_public_but_private_api_requires_signed_identity(client):
     assert (await client.get('/')).status == 200
     assert (await client.get('/app/')).status == 200
