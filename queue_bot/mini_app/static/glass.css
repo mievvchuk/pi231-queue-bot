@@ -329,6 +329,7 @@ h3 {
   border-radius: 24px;
 }
 .bottom-nav {
+  position: fixed;
   bottom: max(10px, env(safe-area-inset-bottom, 0px));
   width: calc(100% - 24px);
   max-width: 700px;
@@ -389,6 +390,18 @@ h3 {
     scale(0.988);
   transition: none !important;
 }
+.bottom-nav.liquid-control {
+  position: fixed;
+}
+.bottom-nav .nav-item:active,
+.segments > button:active {
+  transform: none;
+}
+.liquid-lens {
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  will-change: transform;
+}
 .notice {
   border-radius: 18px;
 }
@@ -419,7 +432,7 @@ button:not(:disabled):active {
   transform: scale(0.975);
 }
 main {
-  animation: glass-appear 220ms cubic-bezier(0.2, 0.75, 0.2, 1);
+  animation: none;
 }
 @keyframes glass-appear {
   from {

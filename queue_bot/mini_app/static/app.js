@@ -81,16 +81,29 @@
     let hovered = selected;
     let dragged = false;
     let suppressClickUntil = 0;
+    let geometry = null;
+    let moveFrame = null;
+    let latestX = 0;
     container.append(lens);
     container.classList.add("liquid-control");
 
-    const rects = () => buttons.map((node) => node.getBoundingClientRect());
+    const measure = () => {
+      geometry = {
+        frame: container.getBoundingClientRect(),
+        buttons: buttons.map((node) => node.getBoundingClientRect()),
+      };
+    };
+    const rects = () => {
+      if (!geometry) measure();
+      return geometry.buttons;
+    };
     const setLens = (index, x) => {
-      const frame = container.getBoundingClientRect();
       const rect = rects()[index];
+      const frame = geometry.frame;
       if (!frame?.width || !rect?.width) return;
-      const center = x ?? rect.left + rect.width / 2;
       const width = rect.width;
+      const center = Math.max(frame.left + width / 2,
+        Math.min(frame.right - width / 2, x ?? rect.left + width / 2));
       lens.style.width = width + "px";
       lens.style.transform =
         "translate3d(" + (center - frame.left - width / 2) + "px, 0, 0)";
@@ -120,6 +133,8 @@
       onSelect(index);
     };
     const cancel = () => {
+      if (moveFrame !== null) window.cancelAnimationFrame?.(moveFrame);
+      moveFrame = null;
       pointerId = null;
       origin = null;
       dragged = false;
@@ -129,6 +144,7 @@
     container.addEventListener("pointerdown", (event) => {
       if (container.classList.contains("bottom-nav") && window.innerWidth >= 1024) return;
       if (event.button !== undefined && event.button !== 0) return;
+      measure();
       pointerId = event.pointerId;
       origin = { x: event.clientX, y: event.clientY };
       hovered = nearest(event.clientX);
@@ -144,7 +160,13 @@
       if (Math.abs(dy) > 12 && Math.abs(dy) > Math.abs(dx)) return cancel();
       dragged ||= Math.abs(dx) > 5;
       hovered = nearest(event.clientX);
-      setLens(hovered, event.clientX);
+      latestX = event.clientX;
+      if (moveFrame === null) {
+        moveFrame = window.requestAnimationFrame?.(() => {
+          moveFrame = null;
+          setLens(hovered, latestX);
+        }) ?? null;
+      }
     });
     container.addEventListener("pointerup", (event) => {
       if (event.pointerId !== pointerId) return;
@@ -155,6 +177,7 @@
       tg?.HapticFeedback?.selectionChanged?.();
     });
     container.addEventListener("pointercancel", cancel);
+    liquidCleanups.push(cancel);
     container.addEventListener("keydown", (event) => {
       if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
       event.preventDefault();
@@ -167,12 +190,12 @@
     // Measure after insertion and whenever the control changes size. Disconnect
     // observers when a rerender removes the old control.
     if (window.ResizeObserver) {
-      const observer = new window.ResizeObserver(() => render(selected));
+      const observer = new window.ResizeObserver(() => { measure(); render(selected); });
       observer.observe(container);
       liquidCleanups.push(() => observer.disconnect());
     }
     window.requestAnimationFrame?.(() => {
-      if (container.isConnected) render(selected);
+      if (container.isConnected) { measure(); render(selected); }
     });
     render(selected);
     return {
@@ -188,12 +211,16 @@
       ?.matches;
     root
       .querySelectorAll?.(
-        ".queue-card, .subject-row, .lesson, .button, .card, .nav-item",
+        ".queue-card, .subject-row, .lesson, .button, .card",
       )
       .forEach((node) => {
         let pointerId = null;
         let start = null;
+        let pressFrame = null;
+        let latestPoint = null;
         const clear = () => {
+          if (pressFrame !== null) window.cancelAnimationFrame?.(pressFrame);
+          pressFrame = null;
           pointerId = null;
           start = null;
           node.classList.remove("liquid-pressing", "liquid-pressed");
@@ -209,7 +236,6 @@
           pointerId = event.pointerId;
           const rect = node.getBoundingClientRect();
           start = { x: event.clientX, y: event.clientY, rect };
-          node.setPointerCapture?.(pointerId);
           node.classList.add("liquid-pressing");
           if (node.classList.contains("lesson")) node.classList.add("liquid-pressed");
         });
@@ -218,19 +244,28 @@
           const dx = event.clientX - start.x;
           const dy = event.clientY - start.y;
           if (Math.abs(dy) > 12 && Math.abs(dy) > Math.abs(dx)) return clear();
-          const x = Math.max(0, Math.min(100, ((event.clientX - start.rect.left) / start.rect.width) * 100));
-          const y = Math.max(0, Math.min(100, ((event.clientY - start.rect.top) / start.rect.height) * 100));
+          latestPoint = { x: event.clientX, y: event.clientY };
+          if (pressFrame !== null) return;
+          pressFrame = window.requestAnimationFrame?.(() => {
+          pressFrame = null;
+          if (!start) return;
+          const dx = latestPoint.x - start.x;
+          const dy = latestPoint.y - start.y;
+          const x = Math.max(0, Math.min(100, ((latestPoint.x - start.rect.left) / start.rect.width) * 100));
+          const y = Math.max(0, Math.min(100, ((latestPoint.y - start.rect.top) / start.rect.height) * 100));
           node.style.setProperty("--press-x", x + "%");
           node.style.setProperty("--press-y", y + "%");
           if (!reduceMotion) {
-            node.style.setProperty("--press-shift-x", Math.max(-17, Math.min(17, dx * 0.24)) + "px");
-            node.style.setProperty("--press-shift-y", Math.max(-14, Math.min(14, dy * 0.2)) + "px");
-            node.style.setProperty("--press-rotate-x", Math.max(-8, Math.min(8, -dy * 0.16)) + "deg");
-            node.style.setProperty("--press-rotate-y", Math.max(-8, Math.min(8, dx * 0.16)) + "deg");
+            node.style.setProperty("--press-shift-x", Math.max(-3, Math.min(3, dx * 0.06)) + "px");
+            node.style.setProperty("--press-shift-y", Math.max(-2, Math.min(2, dy * 0.04)) + "px");
+            node.style.setProperty("--press-rotate-x", Math.max(-1, Math.min(1, -dy * 0.02)) + "deg");
+            node.style.setProperty("--press-rotate-y", Math.max(-1, Math.min(1, dx * 0.02)) + "deg");
           }
+          }) ?? null;
         });
         node.addEventListener("pointerup", clear);
         node.addEventListener("pointercancel", clear);
+        liquidCleanups.push(clear);
       });
   }
   const small = (text) => el("span", { class: "muted" }, text),
