@@ -25,6 +25,33 @@
     avatarCheckedAt: 0,
   };
   const browserSession = { ready: !!initData, authenticated: false, csrf: null, enabled: false };
+  function loginFailureMessage(reason) {
+    const messages = {
+      client_config: 'Telegram відхилив налаштування входу. Потрібно перевірити Client ID і Client Secret із BotFather у Render.',
+      client_mismatch: 'Client ID сервісу не збігається з підтвердженням Telegram. Повідом адміністратора.',
+      login_expired: 'Спроба входу завершилась або сервіс перезапустився. Натисни «Увійти через Telegram» ще раз.',
+      browser_changed: 'Повернись у те саме вікно браузера або PWA, з якого починав вхід, і спробуй ще раз.',
+      code_expired: 'Одноразовий код входу вже недійсний. Почни новий вхід кнопкою нижче.',
+      cancelled: 'Підтвердження входу скасовано. Можеш спробувати ще раз.',
+      signing_algorithm: 'У BotFather для Telegram Login потрібно вибрати RS256. Повідом адміністратора.',
+      signing_key: 'Не вдалося отримати відповідний ключ перевірки Telegram. Спробуй пізніше.',
+      telegram_unavailable: 'Не вдалося зв’язатися з Telegram для завершення входу. Спробуй за хвилину.',
+      server_restarting: 'Сервіс перезапускається. Спробуй ввійти за хвилину.',
+      server_busy: 'Зараз забагато активних входів. Спробуй пізніше.',
+      access_denied: 'Доступ до застосунку обмежений. Звернись до адміністратора.',
+      profile_missing: 'Telegram не повернув потрібний ідентифікатор профілю. Повідом адміністратора.',
+      nonce_missing: 'У відповіді Telegram немає захисного підтвердження. Повідом адміністратора.',
+      nonce_mismatch: 'Захисне підтвердження входу не збігається. Почни новий вхід.',
+      token_expired: 'Підтвердження Telegram прострочилося. Почни новий вхід.',
+      token_signature: 'Не вдалося перевірити підпис Telegram. Повідом адміністратора.',
+      token_claims: 'Не вдалося перевірити дані підтвердження Telegram. Повідом адміністратора.',
+      token_response: 'Telegram повернув неочікувану відповідь. Повідом адміністратора.',
+      provider_response: 'Telegram не повернув код підтвердження. Спробуй почати вхід заново.',
+      server_error: 'Сервер не зміг завершити вхід. Повідом адміністратора.',
+    };
+    return Object.hasOwn(messages, reason) ? messages[reason] + ' Код для підтримки: ' + reason + '.'
+      : 'Вхід не завершено. Спробуй ще раз.';
+  }
   function authHeaders() {
     return initData ? { Authorization: 'tma ' + initData }
       : { 'X-CSRF-Token': browserSession.csrf || '' };
@@ -2014,7 +2041,7 @@
     if (!browserSession.ready) panel.append(el('p', {role: 'status'}, 'Перевіряю вхід…'));
     else if (browserSession.enabled) {
       if (new URLSearchParams(location.search).get('login') === 'failed')
-        panel.append(el('p', {class: 'notice', role: 'alert'}, 'Вхід не завершено. Спробуй ще раз.'));
+        panel.append(el('p', {class: 'notice', role: 'alert'}, loginFailureMessage(new URLSearchParams(location.search).get('reason'))));
       panel.append(el('a', {href: '/auth/telegram/start', class: 'button primary'}, 'Увійти через Telegram'),
         el('p', {class: 'muted'}, 'Підтвердь свій акаунт у Telegram. Твої записи під’єднаються автоматично.'));
     } else panel.append(el('p', {class: 'notice'}, 'Вхід у браузері поки не налаштовано. Відкрий мініапку через меню бота в Telegram.'));
