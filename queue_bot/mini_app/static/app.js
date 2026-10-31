@@ -71,6 +71,99 @@
   }
   const btn = (text, fn, cls = "button") =>
     el("button", { type: "button", class: cls, onclick: fn }, text);
+  function attachLiquidLens(container, { buttons, selectedIndex = 0, onSelect }) {
+    if (!container || !buttons?.length) return null;
+    const lens = el("span", { class: "liquid-lens", "aria-hidden": true });
+    let selected = selectedIndex;
+    let pointerId = null;
+    let origin = null;
+    let hovered = selected;
+    let dragged = false;
+    container.append(lens);
+    container.classList.add("liquid-control");
+
+    const rects = () => buttons.map((node) => node.getBoundingClientRect());
+    const setLens = (index, x) => {
+      const frame = container.getBoundingClientRect();
+      const rect = rects()[index];
+      if (!frame?.width || !rect?.width) return;
+      const center = x ?? rect.left + rect.width / 2;
+      const width = rect.width;
+      lens.style.width = width + "px";
+      lens.style.transform =
+        "translate3d(" + (center - frame.left - width / 2) + "px, 0, 0)";
+    };
+    const nearest = (x) => {
+      const rs = rects();
+      return rs.reduce(
+        (best, rect, index) =>
+          Math.abs(rect.left + rect.width / 2 - x) <
+          Math.abs(rs[best].left + rs[best].width / 2 - x)
+            ? index
+            : best,
+        0,
+      );
+    };
+    const render = (index, x) => {
+      buttons.forEach((node, i) => {
+        node.classList.toggle("selected", i === index);
+        if (i === index) node.setAttribute("aria-current", "page");
+        else node.removeAttribute("aria-current");
+      });
+      setLens(index, x);
+    };
+    const commit = (index) => {
+      selected = index;
+      render(index);
+      onSelect(index);
+    };
+    const cancel = () => {
+      pointerId = null;
+      origin = null;
+      dragged = false;
+      container.classList.remove("liquid-dragging");
+      render(selected);
+    };
+    container.addEventListener("pointerdown", (event) => {
+      if (event.button !== undefined && event.button !== 0) return;
+      pointerId = event.pointerId;
+      origin = { x: event.clientX, y: event.clientY };
+      hovered = nearest(event.clientX);
+      dragged = false;
+      container.classList.add("liquid-dragging");
+      container.setPointerCapture?.(pointerId);
+      setLens(hovered, event.clientX);
+    });
+    container.addEventListener("pointermove", (event) => {
+      if (event.pointerId !== pointerId || !origin) return;
+      const dx = event.clientX - origin.x;
+      const dy = event.clientY - origin.y;
+      if (Math.abs(dy) > 12 && Math.abs(dy) > Math.abs(dx)) return cancel();
+      dragged ||= Math.abs(dx) > 5;
+      hovered = nearest(event.clientX);
+      setLens(hovered, event.clientX);
+    });
+    container.addEventListener("pointerup", (event) => {
+      if (event.pointerId !== pointerId) return;
+      const next = nearest(event.clientX);
+      cancel();
+      commit(next);
+      tg?.HapticFeedback?.selectionChanged?.();
+    });
+    container.addEventListener("pointercancel", cancel);
+    container.addEventListener("keydown", (event) => {
+      if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+      event.preventDefault();
+      commit(
+        (selected + (event.key === "ArrowRight" ? 1 : buttons.length - 1)) %
+          buttons.length,
+      );
+      buttons[selected].focus();
+    });
+    window.addEventListener?.("resize", () => render(selected));
+    render(selected);
+    return { commit, cancel };
+  }
   const small = (text) => el("span", { class: "muted" }, text),
     badge = (text, cls = "") => el("span", { class: "badge " + cls }, text);
   const mine = () => S.data.queues.filter((q) => q.my_position !== null),
@@ -426,19 +519,27 @@
     ];
     const activeTab =
       S.feature === "polls" || S.feature === "help" ? S.feature : S.tab;
-    return el(
+    const buttons = tabs.map(([key, label]) => {
+      const node = btn(
+        [icon(key), el("span", {}, label)],
+        () => control?.commit(tabs.findIndex(([tab]) => tab === key)),
+        "nav-item " + (activeTab === key ? "active" : ""),
+      );
+      if (activeTab === key) node.setAttribute("aria-current", "page");
+      return node;
+    });
+    let control;
+    const nav = el(
       "nav",
       { class: "bottom-nav", "aria-label": "Основні розділи" },
-      tabs.map(([key, label]) => {
-        const node = btn(
-          [icon(key), el("span", {}, label)],
-          () => navigate(key),
-          "nav-item " + (activeTab === key ? "active" : ""),
-        );
-        if (activeTab === key) node.setAttribute("aria-current", "page");
-        return node;
-      }),
+      buttons,
     );
+    control = attachLiquidLens(nav, {
+      buttons,
+      selectedIndex: Math.max(0, tabs.findIndex(([key]) => key === activeTab)),
+      onSelect: (index) => navigate(tabs[index][0]),
+    });
+    return nav;
   }
   function empty(title, text) {
     return el(
@@ -1203,6 +1304,40 @@
         onchange: (event) => loadSchedule(event.target.value),
         "aria-label": "Дата розкладу",
       });
+    const segmentChoices = [
+      {
+        label: "Сьогодні",
+        selected: S.scheduleView === "day" && S.scheduleDate === S.data.today,
+        select: () => loadSchedule(S.data.today),
+      },
+      {
+        label: "Завтра",
+        selected: S.scheduleView === "day" && S.scheduleDate === tomorrow(),
+        select: () => loadSchedule(tomorrow()),
+      },
+      {
+        label: "Тиждень",
+        selected: S.scheduleView === "week",
+        select: () => loadWeek(),
+      },
+    ];
+    let segmentControl;
+    const segmentButtons = segmentChoices.map((choice, index) =>
+      btn(
+        choice.label,
+        () => segmentControl?.commit(index),
+        choice.selected ? "selected" : "",
+      ),
+    );
+    const segmentContainer = el("div", { class: "segments" }, segmentButtons);
+    segmentControl = attachLiquidLens(segmentContainer, {
+      buttons: segmentButtons,
+      selectedIndex: Math.max(
+        0,
+        segmentChoices.findIndex((choice) => choice.selected),
+      ),
+      onSelect: (index) => segmentChoices[index].select(),
+    });
     return el(
       "main",
       {},
@@ -1213,29 +1348,7 @@
         el("h1", {}, "Розклад"),
       ),
       el("label", { class: "date-control" }, icon("schedule"), input),
-      el(
-        "div",
-        { class: "segments" },
-        btn(
-          "Сьогодні",
-          () => loadSchedule(S.data.today),
-          S.scheduleView === "day" && S.scheduleDate === S.data.today
-            ? "selected"
-            : "",
-        ),
-        btn(
-          "Завтра",
-          () => loadSchedule(tomorrow()),
-          S.scheduleView === "day" && S.scheduleDate === tomorrow()
-            ? "selected"
-            : "",
-        ),
-        btn(
-          "Тиждень",
-          () => loadWeek(),
-          S.scheduleView === "week" ? "selected" : "",
-        ),
-      ),
+      segmentContainer,
       data?.source_day
         ? el(
             "p",

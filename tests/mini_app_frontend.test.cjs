@@ -10,7 +10,8 @@ class Element {
     this.tag = tag;
     this.children = [];
     this.attrs = {};
-    this.classList = { toggle() {} };
+    this.classList = { add() {}, remove() {}, toggle() {} };
+    this.style = { setProperty() {} };
   }
   append(...items) {
     this.children.push(...items);
@@ -22,6 +23,12 @@ class Element {
     this.attrs[key] = value;
   }
   addEventListener() {}
+  removeAttribute(key) {
+    delete this.attrs[key];
+  }
+  getBoundingClientRect() {
+    return { left: 0, width: 1 };
+  }
   get textContent() {
     return this.children
       .map((c) => (c instanceof Element ? c.textContent : String(c)))
@@ -57,7 +64,7 @@ function setup() {
   // Export the existing closure only in this VM; production contains no test hooks.
   vm.runInContext(
     source.slice(0, source.indexOf('  document.addEventListener("keydown"')) +
-      "\nthis.appTest = {S, loadSchedule, loadWeek, navigate, adminPage, topbar, profilePage, loadAvatars};\n})();",
+      "\nthis.appTest = {S, loadSchedule, loadWeek, navigate, adminPage, topbar, profilePage, loadAvatars, attachLiquidLens: typeof attachLiquidLens === 'function' ? attachLiquidLens : null};\n})();",
     context,
   );
   const app = context.appTest;
@@ -320,4 +327,9 @@ test("Liquid Optics v2.8 keeps a pure-black dark canvas with accessible fallback
   assert.match(css, /prefers-reduced-motion/);
   assert.match(css, /prefers-reduced-transparency/);
   assert.match(css, /@supports not \(backdrop-filter/);
+});
+
+test("Liquid Optics exposes one reusable lens controller for navigation and segments", () => {
+  const { app } = setup();
+  assert.equal(typeof app.attachLiquidLens, "function");
 });
