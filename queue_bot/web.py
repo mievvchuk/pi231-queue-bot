@@ -3,7 +3,7 @@ import logging
 from pathlib import Path
 from aiohttp import web
 from queue_bot import __version__, config
-from queue_bot.mini_app import api
+from queue_bot.mini_app import api, browser_auth
 
 
 async def healthcheck(request: web.Request) -> web.Response:
@@ -12,7 +12,7 @@ async def healthcheck(request: web.Request) -> web.Response:
 
 async def asset(request):
     name = request.match_info.get('asset') or 'index.html'
-    if name not in ('index.html', 'app.js', 'app.css', 'theme.css', 'glass.css', 'icons.js', 'features.js', 'onest-cyrillic.woff2', 'onest-latin.woff2', 'FONT-LICENSE.txt', 'BOOTSTRAP-ICONS-LICENSE.txt'):
+    if name not in ('index.html', 'app.js', 'app.css', 'theme.css', 'glass.css', 'icons.js', 'features.js', 'pwa.js', 'manifest.webmanifest', 'sw.js', 'icon-192.png', 'icon-512.png', 'onest-cyrillic.woff2', 'onest-latin.woff2', 'FONT-LICENSE.txt', 'BOOTSTRAP-ICONS-LICENSE.txt'):
         raise web.HTTPNotFound()
     response = web.FileResponse(Path(__file__).parent / 'mini_app' / 'static' / name)
     response.headers['Cache-Control'] = 'no-cache'
@@ -23,9 +23,10 @@ async def asset(request):
 
 
 def create_web_app(*, conn=None, subjects=None, bot=None, bot_token=None):
-    app = web.Application(middlewares=[api.guard], client_max_size=16*1024*1024)
+    app = web.Application(middlewares=[browser_auth.no_auth_cache, api.guard], client_max_size=16*1024*1024)
     app[api.CONTEXT] = {'ready': conn is not None, 'conn': conn, 'subjects': subjects or [], 'bot': bot, 'token': bot_token}
     api.setup(app)
+    browser_auth.setup(app)
     app.router.add_route('*', '/', healthcheck)
     app.router.add_get('/health', healthcheck)
     app.router.add_get('/app', redirect_to_app)
@@ -48,7 +49,9 @@ def prepare_shutdown(runner):
 
 async def run_web_server():
     app = create_web_app()
-    runner = web.AppRunner(app)
+    # OIDC callback URLs carry short-lived authorization codes. Keep them out
+    # of aiohttp's default access log (application errors log paths only).
+    runner = web.AppRunner(app, access_log=None)
     await runner.setup()
     await web.TCPSite(runner, config.HTTP_HOST, config.PORT).start()
     logging.info('Healthcheck web server started on port %s', config.PORT)

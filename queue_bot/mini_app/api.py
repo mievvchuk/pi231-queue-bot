@@ -10,6 +10,7 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 from queue_bot import config
 from queue_bot.mini_app.auth import authenticate, AuthenticationError
+from queue_bot.mini_app.browser_auth import browser_identity
 from queue_bot.mini_app.payloads import names, queue_view, swap_views
 from queue_bot.services import admins, lab_catalog, maintenance, queues, restrictions, schedule, swap_requests, users, working_days
 from queue_bot.services.errors import BotError, PermissionDenied
@@ -84,8 +85,7 @@ def revalidate(request, *, owner=False):
     ctx = request[REQ_CONTEXT]
     if not ctx.get('ready'):
         raise BotError('Бот перезапускається. Повторіть запит.')
-    auth = request.headers.get('Authorization', '')
-    uid = authenticate(auth[4:], ctx['token']) if auth.startswith('tma ') else None
+    uid = request_identity(request, ctx)
     if uid != request[REQ_UID]:
         raise AuthenticationError('Повторно відкрийте мініапку з Telegram.')
     restrictions.require_available(ctx['conn'], uid)
@@ -99,6 +99,15 @@ def revalidate(request, *, owner=False):
         admins.require_owner(ctx['conn'], uid)
 
 
+def request_identity(request, context):
+    auth = request.headers.get('Authorization', '')
+    if auth:
+        if not auth.startswith('tma '):
+            raise AuthenticationError('Повторіть вхід через Telegram.')
+        return authenticate(auth[4:], context['token'])
+    return browser_identity(request)
+
+
 @web.middleware
 async def guard(request, handler):
     if not request.path.startswith('/api/miniapp/'):
@@ -108,15 +117,12 @@ async def guard(request, handler):
         if not context.get('ready'):
             return web.json_response({'error': 'Бот запускається. Спробуйте за кілька секунд.'}, status=503)
         request[REQ_CONTEXT] = context
-        auth = request.headers.get('Authorization', '')
-        if not auth.startswith('tma '):
-            raise AuthenticationError('Відкрийте мініапку з Telegram.')
-        uid = authenticate(auth[4:], context['token'])
+        uid = request_identity(request, context)
         if request.method == 'POST':
             # Read/cache the body before final access checks. Handlers then reuse it
             # without yielding between current permissions and synchronous writes.
             await body(request)
-            uid = authenticate(auth[4:], context['token'])
+            uid = request_identity(request, context)
             if not context.get('ready'):
                 return web.json_response({'error': 'Бот перезапускається. Спробуйте ще раз.'}, status=503)
         request[REQ_UID] = uid

@@ -66,6 +66,8 @@ TIMEZONE = os.getenv('TZ', 'Europe/Kyiv')
 HTTP_HOST = os.getenv('HTTP_HOST', '0.0.0.0')
 PORT = integer('PORT', 8080, 1, 65535)
 MINI_APP_URL = os.getenv('MINI_APP_URL', '').strip()
+TELEGRAM_LOGIN_CLIENT_ID = os.getenv('TELEGRAM_LOGIN_CLIENT_ID', '').strip()
+TELEGRAM_LOGIN_CLIENT_SECRET = os.getenv('TELEGRAM_LOGIN_CLIENT_SECRET', '').strip()
 LOG_LEVEL = os.getenv('LOG_LEVEL', 'INFO').upper()
 POLLING_RETRY_SECONDS = integer('POLLING_RETRY_SECONDS', 5, 1, 3600)
 POLLS_WATCH_INTERVAL = integer('POLLS_WATCH_INTERVAL', 15, 1, 3600)
@@ -121,6 +123,9 @@ def validate_runtime():
             target.port
         except ValueError:
             raise RuntimeError('MINI_APP_URL must be an HTTPS URL ending in /app/ without credentials, query or fragment') from None
+    if TELEGRAM_LOGIN_CLIENT_ID or TELEGRAM_LOGIN_CLIENT_SECRET:
+        if not (TELEGRAM_LOGIN_CLIENT_ID.isdigit() and TELEGRAM_LOGIN_CLIENT_SECRET and MINI_APP_URL):
+            raise RuntimeError('Telegram Login requires TELEGRAM_LOGIN_CLIENT_ID, TELEGRAM_LOGIN_CLIENT_SECRET and MINI_APP_URL')
     try:
         ZoneInfo(TIMEZONE)
     except (ZoneInfoNotFoundError, ValueError):
