@@ -309,3 +309,15 @@ test("an archived Saturday stays dated history and never carries into the next w
   await app.loadWeek("2026-11-03");
   assert.doesNotMatch(root.textContent, /За розкладом:|Завершено/);
 });
+
+test("Liquid Optics v2.8 keeps a pure-black dark canvas with accessible fallbacks", () => {
+  const css = fs.readFileSync(
+    path.join(__dirname, "../queue_bot/mini_app/static/glass.css"),
+    "utf8",
+  );
+  assert.match(css, /--bg:\s*#000(?:000)?\b/);
+  assert.match(css, /\.lesson\.liquid-pressed/);
+  assert.match(css, /prefers-reduced-motion/);
+  assert.match(css, /prefers-reduced-transparency/);
+  assert.match(css, /@supports not \(backdrop-filter/);
+});
