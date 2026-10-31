@@ -861,22 +861,6 @@ meter::-moz-meter-bar {
   display: grid;
   gap: 10px;
 }
-.admin-category {
-  text-align: left;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 20px;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  margin: 0;
-}
-.admin-category > .muted {
-  grid-column: 1;
-}
-.admin-category > svg {
-  grid-column: 2;
-  grid-row: 1 / 3;
-}
 @media (min-width: 640px) {
   .admin-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));

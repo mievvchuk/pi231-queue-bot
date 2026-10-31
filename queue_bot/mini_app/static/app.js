@@ -1858,7 +1858,7 @@
           btn(
             [icon(({'admin-history':'queues','admin-group':'users','admin-subjects':'mortarboard','admin-replacements':'schedule','admin-saturdays':'schedule','admin-polls':'polls','admin-reports':'polls',owner:'owner'})[key]),el('span',{},el("strong", {}, title), small(description)), icon("arrow")],
             () => openFeature(key),
-            "more-row admin-category",
+            "more-row admin-nav-row",
           ),
         ),
       ),
