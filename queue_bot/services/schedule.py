@@ -66,6 +66,33 @@ def get_current_date() -> date:
     return datetime.now(UK_TZ).date()
 
 
+def get_upcoming_lesson(conn, schedule_data, *, now=None, group_name=None):
+    """Next real lesson group within seven days, including an ongoing pair."""
+    now = (now or datetime.now(UK_TZ)).astimezone(UK_TZ)
+    for offset in range(7):
+        target = now.date() + timedelta(days=offset)
+        if target.weekday() == 5:
+            from queue_bot.services import working_days
+            if (working_days.get_working_saturday(conn, target.isoformat()) and
+                    working_days.is_saturday_archived(target.isoformat(), now=now)):
+                continue
+        lessons, _ = get_actual_schedule(conn, schedule_data, target, group_name or config.STUDENT_GROUP)
+        for number in sorted({item['number'] for item in lessons}):
+            start, end = PAIR_TIMES.get(number, ('', ''))
+            if not start or not end:
+                continue
+            if target == now.date() and end <= now.strftime('%H:%M'):
+                continue
+            selected = [item for item in lessons if item['number'] == number and
+                        str(item.get('subject', '')).strip().casefold() not in
+                        ('', 'немає пари', 'нема пари', 'пари немає', 'скасовано', 'немає заняття')]
+            if selected:
+                return dict(date=target.isoformat(), number=number, startTime=start, endTime=end,
+                            ongoing=target == now.date() and start <= now.strftime('%H:%M') < end,
+                            lessons=selected)
+    return None
+
+
 def get_tomorrow_date() -> date:
     return get_current_date() + timedelta(days=1)
 

@@ -164,9 +164,16 @@ async def bootstrap(request):
     sessions = queues.list_sessions(ctx['conn'], ('open', 'closed'))
     if request[REQ_USER] is None:
         return web.json_response({'me': {'name': None, 'is_registered': False, 'is_admin': False, 'is_owner': False}, 'queues': [], 'swaps': [], 'today': schedule.get_current_date().isoformat()})
+    try:
+        next_lesson = schedule.get_upcoming_lesson(ctx['conn'], schedule.load_schedule_data())
+    except (ValueError, TypeError, KeyError, AttributeError):
+        # A malformed imported timetable must not make personal queues unusable.
+        log.warning('Upcoming lesson unavailable: invalid schedule format')
+        next_lesson = None
     return web.json_response({'me': {'name': request[REQ_USER]['full_name'], 'is_registered': True, 'is_admin': admins.is_admin(ctx['conn'], uid), 'is_owner': admins.is_owner(ctx['conn'], uid)},
         'queues': [queue_view(ctx['conn'], ctx['subjects'], row, uid) for row in sessions],
-        'swaps': swap_views(ctx['conn'], uid), 'today': schedule.get_current_date().isoformat()})
+        'swaps': swap_views(ctx['conn'], uid), 'today': schedule.get_current_date().isoformat(),
+        'next_lesson': next_lesson})
 
 
 async def detail(request):

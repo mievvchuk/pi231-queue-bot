@@ -12,7 +12,7 @@ async def healthcheck(request: web.Request) -> web.Response:
 
 async def asset(request):
     name = request.match_info.get('asset') or 'index.html'
-    if name not in ('index.html', 'app.js', 'app.css', 'theme.css', 'glass.css', 'icons.js', 'features.js', 'pwa.js', 'manifest.webmanifest', 'sw.js', 'icon-192.png', 'icon-512.png', 'onest-cyrillic.woff2', 'onest-latin.woff2', 'FONT-LICENSE.txt', 'BOOTSTRAP-ICONS-LICENSE.txt'):
+    if name not in ('index.html', 'app.js', 'app.css', 'theme.css', 'glass.css', 'wallet.css', 'icons.js', 'features.js', 'pwa.js', 'manifest.webmanifest', 'sw.js', 'icon-192.png', 'icon-512.png', 'onest-cyrillic.woff2', 'onest-latin.woff2', 'FONT-LICENSE.txt', 'BOOTSTRAP-ICONS-LICENSE.txt'):
         raise web.HTTPNotFound()
     response = web.FileResponse(Path(__file__).parent / 'mini_app' / 'static' / name)
     response.headers['Cache-Control'] = 'no-cache'
