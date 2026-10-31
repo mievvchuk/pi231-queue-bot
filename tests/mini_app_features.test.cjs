@@ -589,3 +589,32 @@ test("admin session participants open a focused detail including an empty state"
   await back.events.click();
   assert.match(features.page("admin-history").textContent, /Інший предмет/);
 });
+
+test("working Saturdays keep past dates in a read-only archive", async () => {
+  const { features, S } = setup(async () => ({
+    items: [
+      { date: "2026-11-07", source_day: "tuesday", week_type: "numerator" },
+    ],
+    archived: [
+      { date: "2026-10-31", source_day: "monday", week_type: "denominator" },
+    ],
+  }));
+  S.mode = "admin";
+  await features.open("admin-saturdays");
+  const page = features.page("admin-saturdays");
+  const archive = descendants(page).find((node) => node.tag === "details");
+  assert.ok(archive);
+  assert.match(archive.textContent, /2026-10-31/);
+  assert.doesNotMatch(archive.textContent, /2026-11-07/);
+  assert.equal(
+    descendants(archive).filter((node) => node.tag === "button").length,
+    0,
+  );
+  assert.equal(
+    descendants(page).filter(
+      (node) =>
+        node.tag === "button" && node.textContent === "Повідомити групу",
+    ).length,
+    1,
+  );
+});

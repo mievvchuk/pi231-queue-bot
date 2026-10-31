@@ -284,6 +284,7 @@ async def timetable(request):
     return web.json_response({'date': dt.isoformat(), 'day': schedule.DAY_NAMES_UK[schedule.DAY_KEYS[dt.weekday()]],
         'week_type': (working_day.get('week_type') if working_day else None) or schedule.get_week_type(dt),
         'source_day': schedule.DAY_NAMES_UK[working_day['replaces_day']] if working_day else None,
+        'working_day_archived': bool(working_day and working_days.is_saturday_archived(dt.isoformat())),
         'lessons': lessons, 'slots': schedule.get_day_slots(lessons), 'replacements': public_replacements})
 
 
@@ -359,9 +360,10 @@ async def admin_user(request):
 
 def setup(app):
     prefix = '/api/miniapp'
-    from . import student_api, admin_api
+    from . import student_api, admin_api, avatars
     student_api.setup(app)
     admin_api.setup(app)
+    avatars.setup(app)
     app.router.add_get(prefix+'/bootstrap', bootstrap)
     app.router.add_get(prefix+'/schedule', timetable)
     app.router.add_get(prefix+'/queues/{sid}', detail)

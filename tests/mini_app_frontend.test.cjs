@@ -57,7 +57,7 @@ function setup() {
   // Export the existing closure only in this VM; production contains no test hooks.
   vm.runInContext(
     source.slice(0, source.indexOf('  document.addEventListener("keydown"')) +
-      "\nthis.appTest = {S, loadSchedule, loadWeek, navigate, adminPage};\n})();",
+      "\nthis.appTest = {S, loadSchedule, loadWeek, navigate, adminPage, topbar, profilePage, loadAvatars};\n})();",
     context,
   );
   const app = context.appTest;
@@ -248,4 +248,64 @@ test("day timetable renders five numbered timed slots without inventing lessons"
   assert.ok(!slots[4].textContent.includes("Машинне навчання"));
   assert.ok(slots[1].textContent.includes("Машинне навчання"));
   assert.ok(slots[1].textContent.includes("Викладач · ауд. 231"));
+});
+
+test("Telegram avatars keep initials on missing photo and never rerender an active form", async () => {
+  const { app, context, root } = setup();
+  app.S.data.me.is_registered = true;
+  context.URL = {
+    createObjectURL: () => "blob:own-telegram-photo",
+    revokeObjectURL() {},
+  };
+  context.document.querySelectorAll = () => [];
+  const requests = [];
+  context.fetch = async (path, options) => {
+    requests.push([path, options]);
+    return path.includes("/bot")
+      ? { status: 204 }
+      : { status: 200, blob: async () => ({ type: "image/jpeg" }) };
+  };
+  const originalForm = root.children;
+  await app.loadAvatars();
+  assert.equal(root.children, originalForm);
+  assert.equal(app.S.avatars.bot, null);
+  assert.equal(app.S.avatars.me, "blob:own-telegram-photo");
+  const nodes = (node) =>
+    node instanceof Element ? [node, ...node.children.flatMap(nodes)] : [];
+  assert.equal(
+    nodes(app.topbar()).filter(
+      (node) =>
+        node.tag === "img" && node.attrs.src === "blob:own-telegram-photo",
+    ).length,
+    1,
+  );
+  assert.equal(
+    nodes(app.profilePage()).filter((node) => node.tag === "img").length,
+    1,
+  );
+  assert.ok(app.topbar().textContent.includes("ПІ"));
+  assert.equal(requests.length, 2);
+  assert.ok(
+    requests.every(
+      ([, opts]) => opts.headers.Authorization === "tma signed-test-data",
+    ),
+  );
+  await app.loadAvatars();
+  assert.equal(requests.length, 2);
+});
+
+test("an archived Saturday stays dated history and never carries into the next week", async () => {
+  const { app, context, root } = setup();
+  context.fetch = async (url) => {
+    const date = new URL(url, "https://offline.test").searchParams.get("date");
+    return result({
+      ...schedule(date),
+      source_day: date === "2026-10-31" ? "Понеділок" : null,
+      working_day_archived: date === "2026-10-31",
+    });
+  };
+  await app.loadSchedule("2026-10-31");
+  assert.match(root.textContent, /Завершено/);
+  await app.loadWeek("2026-11-03");
+  assert.doesNotMatch(root.textContent, /За розкладом:|Завершено/);
 });

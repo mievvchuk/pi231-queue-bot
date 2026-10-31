@@ -153,7 +153,10 @@ async def manage(request):
             return response({'active': project(replacements.get_replacements(conn, group_name=config.STUDENT_GROUP)),
                              'archived': project(replacements.get_archived_replacements(conn, config.STUDENT_GROUP))})
         if section == 'saturdays':
-            return response({'items': [{'date': r['date'], 'source_day': r['replaces_day'], 'week_type': r['week_type']} for r in working_days.list_working_saturdays(conn)]})
+            active, archived = working_days.split_working_saturdays(conn)
+            project = lambda rows: [{'date': r['date'], 'source_day': r['replaces_day'], 'week_type': r['week_type'],
+                                     'status': r['status'], 'archived_at': r['archived_at']} for r in rows]
+            return response({'items': project(active), 'archived': project(archived)})
         if section == 'reports':
             sid = None
             if 'subject_id' in request.query:
@@ -302,6 +305,8 @@ async def manage(request):
     elif section == 'saturdays':
         day = iso_date(data.get('date'))
         if date.fromisoformat(day).weekday() != 5: raise BotError('Оберіть суботу.')
+        if action in ('save', 'delete') and working_days.is_saturday_archived(day):
+            raise BotError('Ця субота вже в архіві. Історичний запис доступний лише для перегляду.')
         if action == 'delete': working_days.remove_working_saturday(conn, day)
         elif action == 'save':
             source, week = data.get('source_day'), data.get('week_type')
@@ -311,6 +316,7 @@ async def manage(request):
         elif action == 'notify':
             row = working_days.get_working_saturday(conn, day)
             if not row: raise BotError('Суботу не налаштовано.')
+            if working_days.is_saturday_archived(day): raise BotError('Ця робоча субота вже в архіві.')
             result = await broadcast(ctx, f"📢 Робоча субота {day}: {working_days.DAY_NAMES_UK[row['replaces_day']]}. Розклад доступний у боті.")
             return response({'message': 'Оголошення надіслано.', **result})
         else: raise BotError('Невідома дія.')

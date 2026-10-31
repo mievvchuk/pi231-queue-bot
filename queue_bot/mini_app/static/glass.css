@@ -1,0 +1,402 @@
+/* Apple-inspired materials, system typography and restrained motion.
+   Blur stays on navigation and overlays; long content lists remain inexpensive. */
+:root,
+:root[data-theme="dark"] {
+  --bg: #0c1018;
+  --surface: rgb(28 35 49 / 86%);
+  --surface2: rgb(47 58 77 / 75%);
+  --text: #f5f5f7;
+  --muted: #b1bfd2;
+  --line: rgb(222 235 255 / 15%);
+  --accent: #96caff;
+  --accent-fill: #0866c9;
+  --accent-soft: rgb(56 151 255 / 17%);
+  --danger: #ffb0b5;
+  --danger-fill: #ba2f3c;
+  --danger-soft: rgb(255 95 109 / 14%);
+  --ok: #9ae6b4;
+  --ok-soft: rgb(48 209 88 / 13%);
+  --warn: #ffd494;
+  --warn-soft: rgb(255 159 10 / 15%);
+  --glass: rgb(30 38 53 / 76%);
+  --glass-solid: #202938;
+  --glass-edge: rgb(231 242 255 / 24%);
+  --reflection: rgb(255 255 255 / 11%);
+  --shadow: 0 12px 36px rgb(0 0 0 / 15%);
+  --ambient:
+    radial-gradient(ellipse at 6% 0%, rgb(50 115 190 / 24%), transparent 52%),
+    radial-gradient(ellipse at 98% 28%, rgb(115 95 168 / 16%), transparent 55%);
+  font-family:
+    -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui,
+    sans-serif;
+  letter-spacing: -0.012em;
+}
+:root[data-theme="light"] {
+  --bg: #f2f4f8;
+  --surface: rgb(255 255 255 / 90%);
+  --surface2: rgb(233 239 248 / 86%);
+  --text: #182233;
+  --muted: #4f6076;
+  --line: rgb(57 79 109 / 15%);
+  --accent: #005bb8;
+  --accent-fill: #0066cc;
+  --accent-soft: rgb(0 102 204 / 9%);
+  --danger: #ad2435;
+  --danger-fill: #ba2f3c;
+  --danger-soft: rgb(186 47 60 / 9%);
+  --ok: #1a6839;
+  --ok-soft: rgb(40 167 80 / 9%);
+  --warn: #81500c;
+  --warn-soft: rgb(227 151 36 / 13%);
+  --glass: rgb(250 252 255 / 78%);
+  --glass-solid: #f5f8fc;
+  --glass-edge: rgb(255 255 255 / 95%);
+  --reflection: rgb(255 255 255 / 90%);
+  --shadow: 0 12px 36px rgb(42 70 108 / 9%);
+  --ambient:
+    radial-gradient(ellipse at 0% 0%, rgb(105 177 244 / 22%), transparent 54%),
+    radial-gradient(
+      ellipse at 100% 28%,
+      rgb(187 168 228 / 19%),
+      transparent 56%
+    );
+}
+body {
+  background-color: var(--bg);
+  background-image: var(--ambient);
+  background-attachment: fixed;
+  font-family: inherit;
+}
+h1,
+h2,
+h3 {
+  font-weight: 650;
+}
+.page-title h1,
+.welcome h1 {
+  letter-spacing: -0.045em;
+}
+.topbar,
+.bottom-nav,
+.sheet,
+.toast {
+  background: var(--glass);
+  border: 1px solid var(--glass-edge);
+  box-shadow:
+    inset 0 1px 0 var(--reflection),
+    var(--shadow);
+  -webkit-backdrop-filter: blur(24px) saturate(140%);
+  backdrop-filter: blur(24px) saturate(140%);
+}
+.topbar {
+  position: sticky;
+  top: max(8px, env(safe-area-inset-top, 0px));
+  z-index: 7;
+  border-radius: 24px;
+  padding: 12px;
+  margin-bottom: 16px;
+}
+.brand {
+  gap: 10px;
+  font-weight: 700;
+}
+.brand small {
+  font-size: 11px;
+  font-weight: 450;
+}
+.brand-logo {
+  border-radius: 14px;
+  box-shadow: inset 0 1px 0 var(--reflection);
+}
+.brand-logo,
+.avatar {
+  overflow: hidden;
+}
+.avatar-face {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  position: relative;
+  overflow: hidden;
+  border-radius: inherit;
+}
+.avatar-photo {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: inherit;
+}
+.header-avatar {
+  padding: 0;
+  border-radius: 50%;
+}
+.icon-button,
+.mode {
+  border-radius: 50px;
+}
+.mode {
+  min-height: 42px;
+  padding: 9px 12px;
+}
+.mode,
+.icon-button,
+.segments,
+.button.secondary,
+.secondary {
+  background: var(--surface2);
+  border: 1px solid var(--line);
+  box-shadow: inset 0 1px 0 var(--reflection);
+}
+.queue-card,
+.card,
+.stat-card,
+.lesson,
+.profile-heading,
+.swap-request {
+  border-radius: 23px;
+  border-color: var(--line);
+  box-shadow:
+    inset 0 1px 0 var(--reflection),
+    0 5px 18px rgb(0 0 0 / 3%);
+}
+.queue-card {
+  padding: 20px;
+}
+.subject-icon {
+  border-radius: 17px;
+}
+.button,
+.text-button,
+.back-button {
+  border-radius: 50px;
+}
+.button {
+  min-height: 47px;
+  padding: 12px 18px;
+  font-weight: 600;
+}
+.primary,
+.button.primary {
+  background: var(--accent-fill);
+  color: #fff;
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 21%),
+    0 5px 14px rgb(0 102 204 / 16%);
+}
+.button.danger {
+  box-shadow: none;
+}
+.badge,
+.position-tile {
+  border-radius: 14px;
+}
+.segments {
+  border-radius: 50px;
+  padding: 5px;
+  gap: 4px;
+}
+.segments button {
+  border-radius: 50px;
+  min-height: 38px;
+}
+.segments .selected {
+  background: var(--surface);
+  box-shadow: 0 2px 8px rgb(0 0 0 / 9%);
+}
+.bottom-nav {
+  bottom: max(10px, env(safe-area-inset-bottom, 0px));
+  width: calc(100% - 24px);
+  max-width: 700px;
+  border-radius: 30px;
+  padding: 7px;
+  gap: 3px;
+}
+.nav-item {
+  border-radius: 24px;
+  min-height: 53px;
+  padding: 9px 5px;
+}
+.nav-item.active {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.sheet-overlay {
+  background: rgb(7 14 25 / 40%);
+  -webkit-backdrop-filter: blur(5px);
+  backdrop-filter: blur(5px);
+}
+.sheet {
+  border-radius: 30px 30px 0 0;
+}
+.sheet-handle {
+  background: var(--muted);
+  opacity: 0.5;
+}
+.field input,
+.field select,
+.field textarea,
+.date-control,
+.lab-choice {
+  border-radius: 16px;
+  background: var(--surface);
+  border-color: var(--line);
+}
+.lesson-empty {
+  background: transparent;
+  box-shadow: none;
+}
+.notice {
+  border-radius: 18px;
+}
+.saturday-archive > summary {
+  padding: 8px 0;
+  cursor: pointer;
+  font-weight: 600;
+}
+.saturday-archive[open] > summary {
+  margin-bottom: 12px;
+}
+.toast {
+  border-radius: 22px;
+}
+button,
+a,
+input,
+select,
+textarea {
+  transition:
+    background-color 180ms ease,
+    color 180ms ease,
+    border-color 180ms ease,
+    box-shadow 180ms ease,
+    transform 220ms cubic-bezier(0.2, 0.75, 0.2, 1);
+}
+button:not(:disabled):active {
+  transform: scale(0.975);
+}
+main {
+  animation: glass-appear 220ms cubic-bezier(0.2, 0.75, 0.2, 1);
+}
+@keyframes glass-appear {
+  from {
+    opacity: 0.6;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@media (hover: hover) and (pointer: fine) {
+  .queue-card:hover,
+  .button:hover:not(:disabled) {
+    transform: translateY(-2px);
+  }
+}
+@media (min-width: 640px) {
+  .sheet {
+    border-radius: 30px;
+  }
+}
+@media (min-width: 1024px) {
+  .bottom-nav {
+    left: 12px;
+    top: 12px;
+    bottom: 12px;
+    width: 212px;
+    max-width: none;
+    border-radius: 28px;
+    padding: 22px 10px;
+    gap: 6px;
+  }
+  .nav-item {
+    padding: 11px 14px;
+    border-radius: 19px;
+  }
+  .topbar {
+    min-height: 76px;
+  }
+}
+@media (max-width: 359px) {
+  .topbar {
+    padding: 9px;
+    gap: 6px;
+    border-radius: 20px;
+  }
+  .brand {
+    gap: 6px;
+    font-size: 14px;
+  }
+  .brand-logo {
+    width: 32px;
+    height: 32px;
+  }
+  .mode {
+    padding: 8px;
+    font-size: 10px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+    scroll-behavior: auto !important;
+  }
+  button:not(:disabled):active,
+  .queue-card:hover,
+  .button:hover:not(:disabled) {
+    transform: none;
+  }
+}
+@media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
+  :root,
+  :root[data-theme="dark"],
+  :root[data-theme="light"] {
+    --surface: var(--glass-solid);
+    --surface2: var(--glass-solid);
+    --glass: var(--glass-solid);
+  }
+  body {
+    background-image: none;
+  }
+  .topbar,
+  .bottom-nav,
+  .sheet,
+  .toast,
+  .sheet-overlay {
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
+@supports not (backdrop-filter: blur(1px)) {
+  .topbar,
+  .bottom-nav,
+  .sheet,
+  .toast {
+    background: var(--glass-solid);
+  }
+}
+@media (forced-colors: active) {
+  body,
+  .topbar,
+  .bottom-nav,
+  .sheet,
+  .card,
+  .queue-card,
+  .button {
+    background: Canvas;
+    color: CanvasText;
+    border: 1px solid CanvasText;
+    box-shadow: none;
+  }
+  .topbar,
+  .bottom-nav,
+  .sheet {
+    backdrop-filter: none;
+  }
+}

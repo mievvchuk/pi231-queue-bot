@@ -1,9 +1,10 @@
 import logging
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 from queue_bot import config
 log = logging.getLogger(__name__)
 UK_TZ = ZoneInfo(config.TIMEZONE)
+ARCHIVE_TZ = ZoneInfo('Europe/Kyiv')
 
 DAY_KEYS_ORDER = ["monday", "tuesday", "wednesday", "thursday", "friday"]
 DAY_NAMES_UK = {
@@ -15,6 +16,30 @@ DAY_NAMES_UK = {
     "saturday": "Субота",
     "sunday": "Неділя",
 }
+
+
+def now_in_kyiv() -> datetime:
+    return datetime.now(ARCHIVE_TZ)
+
+
+def saturday_archive_time(date_str: str) -> datetime:
+    return datetime.combine(date.fromisoformat(date_str), time(13, 30), tzinfo=ARCHIVE_TZ)
+
+
+def is_saturday_archived(date_str: str, *, now: datetime | None = None) -> bool:
+    return (now or now_in_kyiv()).astimezone(ARCHIVE_TZ) >= saturday_archive_time(date_str)
+
+
+def split_working_saturdays(conn, *, now: datetime | None = None) -> tuple[list[dict], list[dict]]:
+    """Date-derived archive survives restarts and keeps the original schedule history."""
+    current = now or now_in_kyiv()
+    active, archived = [], []
+    for row in list_working_saturdays(conn):
+        ended = is_saturday_archived(row['date'], now=current)
+        item = {**row, 'status': 'archived' if ended else 'active',
+                'archived_at': saturday_archive_time(row['date']).isoformat() if ended else None}
+        (archived if ended else active).append(item)
+    return active, list(reversed(archived))
 
 
 def ensure_working_saturdays_table(conn) -> None:
@@ -78,7 +103,10 @@ def list_working_saturdays(conn, from_date: str | None = None) -> list[dict]:
 
 def get_next_saturday(ref_date: date | None = None) -> date:
     if ref_date is None:
-        ref_date = datetime.now(UK_TZ).date()
+        current = now_in_kyiv()
+        ref_date = current.date()
+        if ref_date.weekday() == 5 and is_saturday_archived(ref_date.isoformat(), now=current):
+            return ref_date + timedelta(days=7)
     days_ahead = 5 - ref_date.weekday()
     if days_ahead < 0:  # If today is Sunday (weekday 6)
         days_ahead += 7

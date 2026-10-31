@@ -184,8 +184,9 @@ async def test_owner_proposals_bugs_and_maintenance_validate_and_persist(admin_c
 
 
 @pytest.mark.asyncio
-async def test_saturdays_admin_management_and_group_invitations(admin_client, conn):
+async def test_saturdays_admin_management_and_group_invitations(admin_client, conn, monkeypatch):
     from queue_bot.services import working_days
+    monkeypatch.setattr(working_days, 'now_in_kyiv', lambda: datetime(2026, 10, 31, 12, 0, tzinfo=working_days.UK_TZ))
     assert (await post(admin_client, 'saturdays', {'action': 'save', 'date': '2026-11-02', 'source_day': 'monday'})).status == 400
     assert (await post(admin_client, 'saturdays', {'action': 'save', 'date': '2026-10-31', 'source_day': 'monday', 'week_type': 'denominator'})).status == 200
     assert working_days.get_working_saturday(conn, '2026-10-31')['week_type'] == 'denominator'
@@ -304,3 +305,30 @@ async def test_owner_bug_projection_indicates_photo_without_telegram_file_id(adm
     payload = await (await admin_client.get('/api/miniapp/admin/manage/bugs?mode=admin', headers=headers(100))).json()
     assert payload['items'][0]['has_photo'] is True
     assert 'sensitive-telegram-file-id' not in str(payload)
+
+@pytest.mark.asyncio
+async def test_archived_saturday_is_not_upcoming_or_repeated_next_week(admin_client, conn, monkeypatch):
+    from queue_bot.services import working_days
+    monkeypatch.setattr(working_days, 'now_in_kyiv', lambda: datetime(2026, 10, 31, 13, 30, tzinfo=working_days.UK_TZ))
+    working_days.set_working_saturday(conn, '2026-10-31', 'monday', 'denominator')
+    working_days.set_working_saturday(conn, '2026-11-14', 'tuesday', 'numerator')
+    result = await admin_client.get('/api/miniapp/admin/manage/saturdays?mode=admin', headers=headers(100))
+    data = await result.json()
+    assert [item['date'] for item in data['items']] == ['2026-11-14']
+    assert [item['date'] for item in data['archived']] == ['2026-10-31']
+    assert (await post(admin_client, 'saturdays', {'action': 'notify', 'date': '2026-10-31'})).status == 400
+    future = await (await admin_client.get('/api/miniapp/schedule?date=2026-11-07', headers=headers(1))).json()
+    assert future['source_day'] is None and not future['working_day_archived']
+    history = await (await admin_client.get('/api/miniapp/schedule?date=2026-10-31', headers=headers(1))).json()
+    assert history['source_day'] == 'Понеділок' and history['working_day_archived']
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('action',['delete','save'])
+async def test_stale_mini_app_form_cannot_mutate_archived_saturday(admin_client, conn, monkeypatch, action):
+    from queue_bot.services import working_days
+    working_days.set_working_saturday(conn,'2026-10-31','monday','denominator')
+    monkeypatch.setattr(working_days,'now_in_kyiv',lambda:datetime(2026,10,31,13,30,tzinfo=working_days.ARCHIVE_TZ))
+    result=await post(admin_client,'saturdays',{'action':action,'date':'2026-10-31','source_day':'tuesday','week_type':'numerator'})
+    assert result.status==400
+    row=working_days.get_working_saturday(conn,'2026-10-31')
+    assert row and row['replaces_day']=='monday' and row['week_type']=='denominator'
