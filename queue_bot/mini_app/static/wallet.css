@@ -85,7 +85,10 @@ main { max-width: 760px; margin-inline: auto; }
 .compact-record > svg { width: 12px; height: 12px; color: var(--muted); }
 .create-queue { margin-top: 22px; }
 .queue-filters { max-width: 400px; }
-.queue-filters .selected { background: var(--surface2); }
+.queue-filters { gap: 6px; padding: 5px; }
+.queue-filters > button { display: flex; align-items: center; justify-content: center; gap: 8px; border: 1px solid var(--line); background: var(--surface); color: var(--muted); min-height: 44px; }
+.queue-filters > button svg { width: 17px; height: 17px; }
+.queue-filters .selected { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent-soft); }
 .subject-row { border-radius: 16px; background: var(--surface); }
 .primary, .button.primary { color: var(--on-accent); }
 .button.primary { border-radius: 13px; box-shadow: none; }
@@ -120,6 +123,11 @@ main { max-width: 760px; margin-inline: auto; }
 .you { font-size: 9px; border: 1px solid var(--line); border-radius: 6px; text-transform: uppercase; }
 .queue-tools { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 10px; margin-top: 14px; }
 .queue-tools .button { font-size: 12px; padding-inline: 8px; }
+.queue-secondary-actions .action-stack { margin: 10px 0; gap: 10px; }
+.queue-secondary-actions .button-row { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 10px; }
+.queue-secondary-actions .button, .queue-dock .text-button { display: flex; align-items: center; justify-content: center; gap: 8px; }
+.queue-secondary-actions svg, .queue-dock svg { width: 18px; height: 18px; flex-shrink: 0; }
+.saturday-empty { margin-block: 14px; }
 .other-queue-actions { margin-top: 16px; }
 .other-queue-actions summary { cursor: pointer; color: var(--muted); font-size: 13px; padding: 12px 0; }
 .queue-dock { position: fixed; bottom: calc(88px + env(safe-area-inset-bottom)); left: 50%; transform: translateX(-50%); width: calc(100% - 32px); max-width: 728px; z-index: 4; display: grid; gap: 4px; background: var(--bg); padding: 10px 0 0; }

@@ -130,7 +130,7 @@ async def test_callback_requires_matching_browser_cookie_and_cannot_replay(clien
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('overrides', [{'aud': 'other'}, {'iss': 'https://evil.example'}, {'exp': 1},
-                                     {'nonce': 'wrong'}, {'id': True}, {'id': '1'}, {'iat': int(time.time())+1000}])
+                                     {'nonce': 'wrong'}, {'id': True}, {'id': 'not-a-number'}, {'iat': int(time.time())+1000}])
 async def test_verified_id_rejects_bad_claims(client, login_config, monkeypatch, signing_key, overrides):
     monkeypatch.setattr(auth, 'public_keys', AsyncMock(return_value=[
         {**json.loads(jwt.algorithms.RSAAlgorithm.to_jwk(signing_key.public_key())), 'kid': 'test-key'}]))
@@ -241,3 +241,31 @@ async def test_exchange_accepts_successful_chunked_response(client, login_config
     async with TestServer(app) as server:
         monkeypatch.setattr(auth, 'ISSUER', str(server.make_url('')).rstrip('/'))
         assert await auth.exchange('code', 'verifier', 'https://queue.example/auth/telegram/callback') == 'offline.jwt.token'
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('use_id', [False, True])
+async def test_numeric_subject_only_and_string_id_finish_real_callback(client, login_config, monkeypatch, signing_key, use_id):
+    params,binding,_ = await begin(client)
+    claims = dict(iss=auth.ISSUER,aud='123456',sub='1',iat=int(time.time()),exp=int(time.time())+300,nonce=params['nonce'][0])
+    if use_id:
+        claims['id']='1'
+    token=jwt.encode(claims,signing_key,algorithm='RS256',headers={'kid':'test-key'})
+    monkeypatch.setattr(auth,'exchange',AsyncMock(return_value=token))
+    monkeypatch.setattr(auth,'public_keys',AsyncMock(return_value=[{**json.loads(jwt.algorithms.RSAAlgorithm.to_jwk(signing_key.public_key())),'kid':'test-key'}]))
+    result=await client.get('/auth/telegram/callback',params={'state':params['state'][0],'code':'test-code'},headers={'Cookie':f'{auth.FLOW_COOKIE}={binding}'},allow_redirects=False)
+    assert result.headers['Location']=='/app/'
+    cookie={'Cookie':f'{auth.SESSION_COOKIE}={result.cookies[auth.SESSION_COOKIE].value}'}
+    data=await (await client.get('/api/miniapp/bootstrap',headers=cookie)).json()
+    assert data['me']['name']=='Петренко Іван'
+    assert not data['me']['is_admin']
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('subject', ['', 'abc', '1.0', '-1', '0001', '١', str(2**52)])
+async def test_subject_fallback_rejects_noncanonical_or_out_of_range_identifiers(client, login_config, monkeypatch, signing_key, subject):
+    claims=dict(iss=auth.ISSUER,aud='123456',sub=subject,iat=int(time.time()),exp=int(time.time())+300,nonce='nonce')
+    token=jwt.encode(claims,signing_key,algorithm='RS256',headers={'kid':'test-key'})
+    monkeypatch.setattr(auth,'public_keys',AsyncMock(return_value=[{**json.loads(jwt.algorithms.RSAAlgorithm.to_jwk(signing_key.public_key())),'kid':'test-key'}]))
+    with pytest.raises(auth.LoginFailure):
+        await auth.verify_token(type('Request',(),{'app':client.app})(),token,'nonce')

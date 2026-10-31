@@ -57,6 +57,8 @@
       : { 'X-CSRF-Token': browserSession.csrf || '' };
   }
   const paths = {
+    up: 'M12 20V4 M5 11l7-7 7 7',
+    down: 'M12 4v16 M5 13l7 7 7-7',
     home: 'M3 11 12 3l9 8 M5 10v11h5v-7h4v7h5V10',
     more: 'M5 12h.01 M12 12h.01 M19 12h.01',
     queues: "M4 4h16v4H4z M4 12h16 M4 17h10 M4 21h7",
@@ -70,7 +72,7 @@
     close: "M6 6l12 12 M18 6 6 18",
   };
   function icon(name) {
-    if (window.PI231Icon && name !== 'home' && name !== 'more') return window.PI231Icon(name);
+    if (window.PI231Icon && !['home','more','up','down'].includes(name)) return window.PI231Icon(name);
     const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
     for (const [k, v] of Object.entries({
       viewBox: "0 0 24 24",
@@ -155,6 +157,7 @@
       );
     };
     const render = (index, x) => {
+      lens.hidden = index < 0;
       buttons.forEach((node, i) => {
         node.classList.toggle("selected", i === index);
         if (i === index) node.setAttribute("aria-current", "page");
@@ -216,10 +219,8 @@
     container.addEventListener("keydown", (event) => {
       if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
       event.preventDefault();
-      commit(
-        (selected + (event.key === "ArrowRight" ? 1 : buttons.length - 1)) %
-          buttons.length,
-      );
+      commit(selected < 0 ? (event.key === 'ArrowRight' ? 0 : buttons.length-1)
+        : (selected + (event.key === "ArrowRight" ? 1 : buttons.length - 1)) % buttons.length);
       buttons[selected].focus();
     });
     // Measure after insertion and whenever the control changes size. Disconnect
@@ -488,7 +489,7 @@
   }
   function theme() {
     document.documentElement.dataset.theme =
-      tg?.colorScheme ||
+      !initData ? 'dark' : tg?.colorScheme ||
       (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
   }
   async function load() {
@@ -839,8 +840,8 @@
         small('Обери предмет і своє місце.'),
       ),
       el('div',{class:'segments queue-filters'},
-        btn('Усі',()=>{S.queueFilter='all';render();},S.queueFilter==='all'?'selected':''),
-        btn('Мої · '+own.length,()=>{S.queueFilter='mine';render();},S.queueFilter==='mine'?'selected':''),
+        el('button',{type:'button',class:S.queueFilter==='all'?'selected':'','aria-pressed':String(S.queueFilter==='all'),onclick:()=>{S.queueFilter='all';render();}},icon('queues'),'Усі'),
+        el('button',{type:'button',class:S.queueFilter==='mine'?'selected':'','aria-pressed':String(S.queueFilter==='mine'),onclick:()=>{S.queueFilter='mine';render();}},icon('profile'),'Мої · '+own.length),
       ),
       btn(
         [icon("plus"), "Відкрити чергу"],
@@ -888,9 +889,9 @@
     if (own) {
       dock.append(
         btn(
-          q.labs.length
+          [icon('check'), q.labs.length
             ? "Здав" + (own.labs?.length > 1 ? " лабораторні" : "")
-            : "Завершити запис",
+            : "Завершити запис"],
           () => {
             if (q.labs.length && own.labs?.length > 1) completionForm(q, own);
             else mutate("/queues/" + q.id + "/complete", reference(own));
@@ -900,12 +901,12 @@
       );
       if (q.labs.length)
         controls.append(
-          btn("Лабораторні та час", () => labForm(q, own), "button secondary"),
+          btn([icon('code-slash'),"Лабораторні та час"], () => labForm(q, own), "button secondary"),
         );
       if (!consultation(q))
         otherActions.append(
           btn(
-            "Не здав — у кінець",
+            [icon('refresh'),"Не здав — у кінець"],
             () =>
               confirmSheet(
                 "Перейти в кінець черги?",
@@ -920,7 +921,7 @@
           "div",
           { class: "button-row" },
           btn(
-            own.swap_wish === "higher" ? "Зняти «Хочу вище»" : "Хочу вище ↑",
+            [icon('up'),own.swap_wish === "higher" ? "Зняти «Хочу вище»" : "Хочу вище ↑"],
             () =>
               mutate("/queues/" + q.id + "/wish", {
                 ...reference(own),
@@ -929,7 +930,7 @@
             "button secondary",
           ),
           btn(
-            own.swap_wish === "lower" ? "Зняти «Хочу нижче»" : "Хочу нижче ↓",
+            [icon('down'),own.swap_wish === "lower" ? "Зняти «Хочу нижче»" : "Хочу нижче ↓"],
             () =>
               mutate("/queues/" + q.id + "/wish", {
                 ...reference(own),
@@ -945,7 +946,7 @@
       },'button secondary'));
       dock.append(
         btn(
-          "Вийти з черги",
+          [icon('close'),"Вийти з черги"],
           () =>
             confirmSheet(
               "Вийти з черги?",
@@ -956,7 +957,7 @@
         ),
       );
     } else if (q.status === "open")
-      dock.append(btn("Стати в чергу", () => labForm(q), "button primary"));
+      dock.append(btn([icon('plus'),"Стати в чергу"], () => labForm(q), "button primary"));
     else
       controls.append(
         el(
@@ -1081,7 +1082,7 @@
           )
         : null,
       controls,
-      own ? el('details',{class:'other-queue-actions'},el('summary',{},'Інші дії з чергою'),otherActions) : null,
+      own ? el('div',{class:'queue-secondary-actions'},otherActions) : null,
       dock,
       own && !isAdmin() && q.count > 1
         ? el(
@@ -1510,10 +1511,7 @@
     const segmentContainer = el("div", { class: "segments" }, segmentButtons);
     segmentControl = attachLiquidLens(segmentContainer, {
       buttons: segmentButtons,
-      selectedIndex: Math.max(
-        0,
-        segmentChoices.findIndex((choice) => choice.selected),
-      ),
+      selectedIndex: segmentChoices.findIndex((choice) => choice.selected),
       onSelect: (index) => segmentChoices[index].select(),
     });
     return el(
@@ -1531,7 +1529,7 @@
         ? el(
             "p",
             { class: "notice" },
-            "Навчальний день за розкладом: " +
+            (data.working_day_archived ? "Архівна робоча субота за розкладом: " : "Навчальний день за розкладом: ") +
               data.source_day +
               (data.working_day_archived ? " · Завершено" : ""),
           )
@@ -1855,12 +1853,12 @@
       ),
       el(
         "div",
-        { class: "admin-grid" },
+        { class: "more-list admin-categories" },
         sections.map(([key, title, description]) =>
           btn(
-            [el("strong", {}, title), small(description), icon("arrow")],
+            [icon(({'admin-history':'queues','admin-group':'users','admin-subjects':'mortarboard','admin-replacements':'schedule','admin-saturdays':'schedule','admin-polls':'polls','admin-reports':'polls',owner:'owner'})[key]),el('span',{},el("strong", {}, title), small(description)), icon("arrow")],
             () => openFeature(key),
-            "card admin-category",
+            "more-row admin-category",
           ),
         ),
       ),
@@ -2020,6 +2018,10 @@
   });
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape" && !S.busy) closeSheet();
+  });
+  window.setInterval(() => features?.tick?.(), 1000);
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') features?.tick?.();
   });
   theme();
   tg?.onEvent?.("themeChanged", theme);

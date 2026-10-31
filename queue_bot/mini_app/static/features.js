@@ -40,6 +40,7 @@ window.createPI231Features = function (H) {
   ]);
   let state = { key: null, loading: false, data: null, error: null, token: 0 },
     pollRequest = 0;
+  let saturdayTicker = null;
   const adminPath = (key) =>
     "/admin/manage/" + (key === "owner" ? "owner" : key.slice(6));
   const rows = (items) => (Array.isArray(items) ? items : []);
@@ -915,6 +916,36 @@ window.createPI231Features = function (H) {
       ["numerator", "Чисельник"],
       ["denominator", "Знаменник"],
     ]);
+    let active = [...rows(data.items)], archived = [...rows(data.archived)];
+    const activeList = el('div', {class:'list feature-list'});
+    const archiveList = el('div', {class:'list feature-list'});
+    const archiveSummary = el('summary',{});
+    const archivePanel = el('details',{class:'saturday-archive card'},archiveSummary,archiveList);
+    const offset = data.server_time ? Date.parse(data.server_time)-Date.now() : 0;
+    const description = item => (dayNames[item.source_day] || item.source_day) + ' · ' +
+      (item.week_type==='denominator'?'Знаменник':item.week_type==='numerator'?'Чисельник':'Автоматично');
+    function drawLists() {
+      activeList.replaceChildren(...(active.length ? active.map(item => card(
+        el('h3',{},item.date),small(description(item)),
+        el('div',{class:'button-row'},
+          btn('Повідомити групу',()=>confirm('Надіслати повідомлення про суботу?',item.date+' · '+item.source_day,path,{action:'notify',date:item.date}),'button secondary'),
+          btn('Видалити',()=>confirm('Видалити робочу суботу?',item.date,path,{action:'delete',date:item.date}),'text-button danger'),
+        ),
+      )) : [el('p',{class:'notice saturday-empty'},'Немає активних робочих субот.')]));
+      archived.sort((a,b)=>b.date.localeCompare(a.date));
+      archiveList.replaceChildren(...archived.map(item=>card(el('h3',{},item.date),badge('Завершено'),small(description(item)))));
+      archiveSummary.textContent = 'Архів робочих субот · '+archived.length;
+      archivePanel.hidden = archived.length===0;
+    }
+    saturdayTicker = () => {
+      const ended = active.filter(item=>item.archive_at && Date.parse(item.archive_at)<=Date.now()+offset);
+      if (!ended.length) return;
+      active=active.filter(item=>!ended.includes(item));
+      archived.push(...ended);
+      drawLists();
+    };
+    drawLists();
+    saturdayTicker();
     return [
       card(
         small(
@@ -940,66 +971,9 @@ window.createPI231Features = function (H) {
             ),
         ),
       ),
-      list(rows(data.items), (item) =>
-        card(
-          el("h3", {}, item.date),
-          small(
-            (dayNames[item.source_day] || item.source_day) +
-              " · " +
-              (item.week_type === "denominator"
-                ? "Знаменник"
-                : item.week_type === "numerator"
-                  ? "Чисельник"
-                  : "Автоматично"),
-          ),
-          el(
-            "div",
-            { class: "button-row" },
-            btn(
-              "Повідомити групу",
-              () =>
-                confirm(
-                  "Надіслати повідомлення про суботу?",
-                  item.date + " · " + item.source_day,
-                  path,
-                  { action: "notify", date: item.date },
-                ),
-              "button secondary",
-            ),
-            btn(
-              "Видалити",
-              () =>
-                confirm("Видалити робочу суботу?", item.date, path, {
-                  action: "delete",
-                  date: item.date,
-                }),
-              "text-button danger",
-            ),
-          ),
-        ),
-      ),
-      rows(data.archived).length
-        ? el(
-            "details",
-            { class: "saturday-archive card" },
-            el("summary", {}, "Архів робочих субот · " + data.archived.length),
-            list(data.archived, (item) =>
-              card(
-                el("h3", {}, item.date),
-                badge("Завершено"),
-                small(
-                  (dayNames[item.source_day] || item.source_day) +
-                    " · " +
-                    (item.week_type === "denominator"
-                      ? "Знаменник"
-                      : item.week_type === "numerator"
-                        ? "Чисельник"
-                        : "Автоматично"),
-                ),
-              ),
-            ),
-          )
-        : null,
+      el('h2',{},'Активні робочі суботи'),
+      activeList,
+      archivePanel,
     ];
   }
   async function readImage(file) {
@@ -1953,5 +1927,7 @@ window.createPI231Features = function (H) {
     );
     return main;
   }
-  return { open, page, openPoll: pollDetail };
+  return { open, page, openPoll: pollDetail,
+    tick: () => { if(S.feature==='admin-saturdays' && allowed('admin-saturdays') && !state.loading && !state.error) saturdayTicker?.(); },
+  };
 };

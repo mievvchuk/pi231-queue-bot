@@ -155,8 +155,10 @@ async def manage(request):
         if section == 'saturdays':
             active, archived = working_days.split_working_saturdays(conn)
             project = lambda rows: [{'date': r['date'], 'source_day': r['replaces_day'], 'week_type': r['week_type'],
-                                     'status': r['status'], 'archived_at': r['archived_at']} for r in rows]
-            return response({'items': project(active), 'archived': project(archived)})
+                                     'status': r['status'], 'archived_at': r['archived_at'],
+                                     'archive_at': working_days.saturday_archive_time(r['date']).isoformat()} for r in rows]
+            return response({'items': project(active), 'archived': project(archived),
+                             'server_time': working_days.now_in_kyiv().isoformat()})
         if section == 'reports':
             sid = None
             if 'subject_id' in request.query:

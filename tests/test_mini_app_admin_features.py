@@ -316,6 +316,8 @@ async def test_archived_saturday_is_not_upcoming_or_repeated_next_week(admin_cli
     data = await result.json()
     assert [item['date'] for item in data['items']] == ['2026-11-14']
     assert [item['date'] for item in data['archived']] == ['2026-10-31']
+    assert data['server_time'].startswith('2026-10-31T13:30:00')
+    assert data['archived'][0]['archive_at'] == '2026-10-31T13:30:00+02:00'
     assert (await post(admin_client, 'saturdays', {'action': 'notify', 'date': '2026-10-31'})).status == 400
     future = await (await admin_client.get('/api/miniapp/schedule?date=2026-11-07', headers=headers(1))).json()
     assert future['source_day'] is None and not future['working_day_archived']
