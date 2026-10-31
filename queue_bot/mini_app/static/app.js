@@ -23,6 +23,11 @@
     avatarLoading: false,
     avatarCheckedAt: 0,
   };
+  const browserSession = { ready: !!initData, authenticated: false, csrf: null, enabled: false };
+  function authHeaders() {
+    return initData ? { Authorization: 'tma ' + initData }
+      : { 'X-CSRF-Token': browserSession.csrf || '' };
+  }
   const paths = {
     queues: "M4 4h16v4H4z M4 12h16 M4 17h10 M4 21h7",
     schedule: "M4 5h16v16H4z M8 3v4 M16 3v4 M4 11h16 M8 15h2 M14 15h2 M8 18h2",
@@ -301,18 +306,23 @@
       {
         method: data === undefined ? "GET" : "POST",
         headers: {
-          Authorization: "tma " + initData,
+          ...authHeaders(),
           ...(data === undefined ? {} : { "Content-Type": "application/json" }),
         },
         ...(data === undefined ? {} : { body: JSON.stringify(data) }),
         cache: "no-store",
-        credentials: "omit",
+        credentials: "same-origin",
       },
     );
     const result = await response.json().catch(() => ({
       error: "Сервер тимчасово недоступний. Спробуйте ще раз.",
     }));
     if (!response.ok) {
+      if (response.status === 401 && !initData) {
+        browserSession.authenticated = false;
+        browserSession.csrf = null;
+        S.data = null;
+      }
       const error = new Error(result.error || "Не вдалося виконати запит.");
       error.status = response.status;
       error.code = result.code;
@@ -328,8 +338,8 @@
     const epoch = S.epoch,
       mode = S.mode;
     const response = await fetch("/api/miniapp" + path + "?mode=" + S.mode, {
-      headers: { Authorization: "tma " + initData },
-      credentials: "omit",
+      headers: authHeaders(),
+      credentials: "same-origin",
       cache: "no-store",
     });
     if (!response.ok) {
@@ -361,8 +371,8 @@
         "mode=" +
         S.mode,
       {
-        headers: { Authorization: "tma " + initData },
-        credentials: "omit",
+        headers: authHeaders(),
+        credentials: "same-origin",
         cache: "no-store",
       },
     );
@@ -417,8 +427,8 @@
           const response = await fetch(
             "/api/miniapp/avatar/" + kind + "?mode=" + S.mode,
             {
-              headers: { Authorization: "tma " + initData },
-              credentials: "omit",
+              headers: authHeaders(),
+              credentials: "same-origin",
               cache: "no-store",
             },
           );
@@ -1591,7 +1601,17 @@
         ),
         btn("Допомога", () => openFeature("help"), "button secondary"),
       ),
-      btn("Повернутися до бота", () => tg?.close(), "button secondary"),
+      btn(initData ? "Повернутися до бота" : "До черг", () => initData ? tg?.close() : navigate('queues'), "button secondary"),
+      btn("Додати на головний екран", async () => {
+        toast(await window.PI231PWA?.install() || 'Скористайтесь меню браузера → Встановити застосунок.');
+      }, "button secondary"),
+      !initData ? btn("Вийти з акаунта", async () => {
+        try {
+          const response = await fetch('/auth/logout', { method: 'POST', credentials: 'same-origin', headers: authHeaders() });
+          if (!response.ok) throw new Error('Не вдалося вийти. Оновіть сторінку.');
+          location.reload();
+        } catch (error) { toast(error.message, true); }
+      }, "button secondary") : null,
     );
   }
   function banForm(userId, name) {
@@ -1845,12 +1865,9 @@
   function render() {
     liquidCleanups.splice(0).forEach((cleanup) => cleanup());
     root.replaceChildren(topbar());
-    if (!initData) {
+    if (!initData && !browserSession.authenticated) {
       root.append(
-        empty(
-          "Відкрий з Telegram",
-          "Зайди в бот ПІ-231 та натисни «Мініапка». Це потрібно для безпечного входу.",
-        ),
+        loginPage(),
       );
       return;
     }
@@ -1953,12 +1970,43 @@
   tg?.ready();
   tg?.expand();
   render();
-  if (initData)
-    load().then(async () => {
+  function loginPage() {
+    const panel = el('main', {class: 'login-page'},
+      el('h1', {}, 'Твій простір ПІ-231'),
+      el('p', {class: 'muted'}, 'Черги, розклад та опитування — з телефона чи комп’ютера.'),
+    );
+    if (!browserSession.ready) panel.append(el('p', {role: 'status'}, 'Перевіряю вхід…'));
+    else if (browserSession.enabled) {
+      if (new URLSearchParams(location.search).get('login') === 'failed')
+        panel.append(el('p', {class: 'notice', role: 'alert'}, 'Вхід не завершено. Спробуй ще раз.'));
+      panel.append(el('a', {href: '/auth/telegram/start', class: 'button primary'}, 'Увійти через Telegram'),
+        el('p', {class: 'muted'}, 'Підтвердь свій акаунт у Telegram. Твої записи під’єднаються автоматично.'));
+    } else panel.append(el('p', {class: 'notice'}, 'Вхід у браузері поки не налаштовано. Відкрий мініапку через меню бота в Telegram.'));
+    panel.append(btn('Додати на головний екран', async () => toast(await window.PI231PWA?.install() || 'Скористайся меню браузера → Встановити застосунок.'), 'button secondary'));
+    return panel;
+  }
+  async function startApp() {
+    if (!initData) {
+      try {
+        const response = await fetch('/auth/session', { credentials: 'same-origin', cache: 'no-store' });
+        if (!response.ok) throw new Error('Session unavailable');
+        const session = await response.json();
+        browserSession.authenticated = session.authenticated === true;
+        browserSession.csrf = session.csrf;
+        browserSession.enabled = session.login_enabled === true;
+      } catch (_) {
+        browserSession.enabled = true;
+      }
+      browserSession.ready = true;
+      render();
+    }
+    if (initData || browserSession.authenticated) await load().then(async () => {
       const pid = new URLSearchParams(location.search).get("poll");
       if (pid && /^[1-9][0-9]*$/.test(pid) && S.data?.me.is_registered) {
         await openFeature("polls");
         features.openPoll(Number(pid));
       }
     });
+  }
+  void startApp();
 })();
