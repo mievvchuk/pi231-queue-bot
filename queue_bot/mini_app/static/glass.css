@@ -66,6 +66,56 @@ body {
   background-image: var(--ambient);
   background-attachment: fixed;
   font-family: inherit;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+input,
+textarea,
+[contenteditable="true"],
+[contenteditable="true"] * {
+  -webkit-user-select: text;
+  user-select: text;
+  -webkit-touch-callout: default;
+}
+#app,
+main,
+.sheet,
+.queue-copy,
+.subject-copy,
+.lesson-body,
+.top-tools,
+.button-row > * {
+  min-width: 0;
+}
+main,
+.sheet {
+  overflow-wrap: anywhere;
+}
+input,
+select,
+textarea,
+img,
+.report-image {
+  max-width: 100%;
+}
+.button,
+.badge,
+.join-label {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.button-row {
+  flex-wrap: wrap;
+}
+.segments {
+  width: 100%;
+}
+.segments > button {
+  flex: 1 1 0;
+  min-width: 0;
+  padding-inline: 8px;
+  white-space: normal;
 }
 h1,
 h2,
@@ -292,7 +342,7 @@ h3 {
   padding: 9px 5px;
 }
 .nav-item.active {
-  background: var(--accent-soft);
+  background: transparent;
   color: var(--accent);
 }
 .sheet-overlay {
@@ -407,6 +457,12 @@ main {
     padding: 11px 14px;
     border-radius: 19px;
   }
+  .bottom-nav .liquid-lens {
+    display: none;
+  }
+  .bottom-nav .nav-item.active {
+    background: var(--accent-soft);
+  }
   .topbar {
     min-height: 76px;
   }
@@ -428,6 +484,38 @@ main {
   .mode {
     padding: 8px;
     font-size: 10px;
+  }
+}
+@media (max-width: 479px) {
+  .topbar {
+    flex-wrap: wrap;
+  }
+  .brand {
+    flex-shrink: 0;
+  }
+  .top-tools {
+    margin-left: auto;
+    gap: 4px;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+  .bottom-nav {
+    width: calc(100% - 16px);
+    gap: 0;
+    padding-inline: 4px;
+  }
+  .nav-item {
+    padding-inline: 2px;
+    font-size: 9px;
+    white-space: nowrap;
+    overflow-wrap: normal;
+  }
+  .queue-card {
+    padding: 16px;
+  }
+  .lab-grid,
+  .admin-grid {
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 @media (prefers-reduced-motion: reduce) {
