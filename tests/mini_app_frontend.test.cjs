@@ -10,7 +10,8 @@ class Element {
     this.tag = tag;
     this.children = [];
     this.attrs = {};
-    this.classList = { toggle() {} };
+    this.classList = { add() {}, remove() {}, toggle() {} };
+    this.style = { setProperty() {} };
   }
   append(...items) {
     this.children.push(...items);
@@ -22,6 +23,12 @@ class Element {
     this.attrs[key] = value;
   }
   addEventListener() {}
+  removeAttribute(key) {
+    delete this.attrs[key];
+  }
+  getBoundingClientRect() {
+    return { left: 0, width: 1 };
+  }
   get textContent() {
     return this.children
       .map((c) => (c instanceof Element ? c.textContent : String(c)))
@@ -57,7 +64,7 @@ function setup() {
   // Export the existing closure only in this VM; production contains no test hooks.
   vm.runInContext(
     source.slice(0, source.indexOf('  document.addEventListener("keydown"')) +
-      "\nthis.appTest = {S, loadSchedule, loadWeek, navigate, adminPage, topbar, profilePage, loadAvatars};\n})();",
+      "\nthis.appTest = {S, loadSchedule, loadWeek, navigate, adminPage, topbar, profilePage, loadAvatars, attachLiquidLens: typeof attachLiquidLens === 'function' ? attachLiquidLens : null, installPressOptics: typeof installPressOptics === 'function' ? installPressOptics : null};\n})();",
     context,
   );
   const app = context.appTest;
@@ -308,4 +315,35 @@ test("an archived Saturday stays dated history and never carries into the next w
   assert.match(root.textContent, /Завершено/);
   await app.loadWeek("2026-11-03");
   assert.doesNotMatch(root.textContent, /За розкладом:|Завершено/);
+});
+
+test("Liquid Optics v2.8 keeps a pure-black dark canvas with accessible fallbacks", () => {
+  const css = fs.readFileSync(
+    path.join(__dirname, "../queue_bot/mini_app/static/glass.css"),
+    "utf8",
+  );
+  assert.match(css, /--bg:\s*#000(?:000)?\b/);
+  assert.match(css, /\.lesson\.liquid-pressed/);
+  assert.match(css, /prefers-reduced-motion/);
+  assert.match(css, /prefers-reduced-transparency/);
+  assert.match(css, /@supports not \(backdrop-filter/);
+});
+
+test("Liquid Optics exposes one reusable lens controller for navigation and segments", () => {
+  const { app } = setup();
+  assert.equal(typeof app.attachLiquidLens, "function");
+});
+
+test("Liquid Optics exposes press handling separately from queue business actions", () => {
+  const { app } = setup();
+  assert.equal(typeof app.installPressOptics, "function");
+});
+
+test("Liquid lens prevents a synthetic click from navigating twice after pointer release", () => {
+  const source = fs.readFileSync(
+    path.join(__dirname, "../queue_bot/mini_app/static/app.js"),
+    "utf8",
+  );
+  assert.match(source, /suppressClickUntil/);
+  assert.match(source, /activate/);
 });
