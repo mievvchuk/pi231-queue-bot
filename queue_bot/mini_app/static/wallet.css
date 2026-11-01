@@ -137,7 +137,21 @@ main { max-width: 760px; margin-inline: auto; }
 .queue-dock:empty { display: none; }
 .queue-dock .text-button { min-height: 35px; }
 .queue-detail .back-button { min-height: 44px; padding: 0; color: var(--accent); }
-button.liquid-pressing { transform: scale(.99); transition: transform 120ms ease !important; }
+/* One transform per interactive surface; no pointer-following tilt or filter. */
+button.liquid-pressing { transform: scale(.985); }
+button, .button { transition: background-color 160ms ease, color 160ms ease, border-color 160ms ease, transform 160ms cubic-bezier(.2,.7,.3,1), opacity 160ms ease; }
+.more-row.liquid-pressing, .compact-record.liquid-pressing, .subject-row.liquid-pressing { transform: none; background: var(--accent-soft); }
+.icon-button.liquid-pressing { transform: scale(.94); }
+.liquid-control > button:active, .liquid-control > button.liquid-pressing { transform: none; }
+.liquid-lens { visibility: hidden; transition: none; }
+.liquid-lens.lens-ready { visibility: visible; transition: transform 220ms cubic-bezier(.2,.7,.3,1), width 220ms cubic-bezier(.2,.7,.3,1); }
+.liquid-dragging .liquid-lens { transition: none; filter: none; }
+.page-enter { animation: page-enter 180ms ease-out both; }
+@keyframes page-enter { from { opacity: .5; transform: translateY(5px); } to { opacity: 1; transform: none; } }
+.theme-toggle svg { animation: theme-icon-enter 180ms ease-out; }
+@keyframes theme-icon-enter { from { opacity: .3; transform: rotate(-30deg) scale(.8); } to { opacity: 1; transform: none; } }
+.icon-button[aria-label="Оновити"]:disabled svg { animation: refresh-spin 900ms linear infinite; }
+@keyframes refresh-spin { to { transform: rotate(360deg); } }
 @media (max-width: 359px) {
   .topbar { padding-inline: 0; }
   .brand { font-size: 16px; gap: 6px; }
@@ -177,6 +191,10 @@ button.liquid-pressing { transform: scale(.99); transition: transform 120ms ease
   .queue-detail { padding-bottom: 20px; }
 }
 @media (prefers-reduced-motion: reduce) { button.liquid-pressing { transform: none; } }
+@media (prefers-reduced-motion: reduce) {
+  .page-enter, .theme-toggle svg, .icon-button[aria-label="Оновити"]:disabled svg { animation: none; }
+  .liquid-lens.lens-ready, button, .button { transition: none; }
+}
 @media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
   :root, :root[data-theme="dark"], :root[data-theme="light"] { --glass: var(--glass-solid); }
 }

@@ -84,8 +84,54 @@ const assets = path.join(__dirname, '../queue_bot/mini_app/static');
           await page.screenshot({ path: process.env.PI231_LAYOUT_SCREENSHOT, fullPage: true });
       }
     }
+    // Theme changes must preserve the live page and survive a full reload.
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto('https://layout.invalid/app/');
+    await page.locator('.home-queue-hero').waitFor();
+    await page.waitForFunction(() => !document.querySelector('.progress'));
+    await page.evaluate(() => { window.originalMain = document.querySelector('main'); });
+    await page.getByRole('button', { name: 'Увімкнути світлу тему', exact: true }).click();
+    assert.equal(await page.evaluate(() => document.documentElement.dataset.theme), 'light');
+    assert.equal(await page.evaluate(() => document.querySelector('main') === window.originalMain), true);
+    assert.equal(await page.evaluate(() => localStorage.getItem('pi231-theme')), 'light');
+    await page.reload();
+    await page.locator('.home-queue-hero').waitFor();
+    assert.equal(await page.evaluate(() => document.documentElement.dataset.theme), 'light');
+    if (process.env.PI231_LIGHT_SCREENSHOT) await page.screenshot({ path: process.env.PI231_LIGHT_SCREENSHOT, fullPage: true });
+    await page.getByRole('button', { name: 'Увімкнути темну тему', exact: true }).click();
+    await page.waitForFunction(() => document.querySelector('.bottom-nav .lens-ready'));
+    await page.waitForFunction(() => !document.querySelector('.progress'));
+    await page.evaluate(() => {
+      window.originalNav = document.querySelector('.bottom-nav');
+      window.originalLens = document.querySelector('.bottom-nav .liquid-lens');
+      window.startLensX = window.originalLens.getBoundingClientRect().x;
+    });
+    const queueButton = page.getByRole('button', { name: 'Черги', exact: true });
+    const target = await queueButton.boundingBox();
+    await page.mouse.move(target.x + target.width / 2, target.y + target.height / 2);
+    await page.mouse.down();
+    assert.equal(await page.evaluate(() => document.querySelector('.bottom-nav .liquid-lens').getBoundingClientRect().x), await page.evaluate(() => window.startLensX), 'tap-down must not teleport lens');
+    await page.evaluate(() => {
+      window.lensFrames = [];
+      window.motionDone = new Promise(resolve => {
+        const frame = () => {
+          const lens = document.querySelector('.bottom-nav .liquid-lens');
+          window.lensFrames.push({x:lens.getBoundingClientRect().x, same: lens === window.originalLens && document.querySelector('.bottom-nav') === window.originalNav});
+          if (window.lensFrames.length < 25) requestAnimationFrame(frame); else resolve();
+        };
+        requestAnimationFrame(frame);
+      });
+    });
+    await page.mouse.up();
+    const frames = await page.evaluate(async () => { await window.motionDone; return window.lensFrames; });
+    assert.ok(frames.every(frame => frame.same), 'navigation/lens recreated during tab switch');
+    assert.ok(frames.at(-1).x > frames[0].x + 20, 'lens did not slide to new tab');
+    for (let i = 1; i < frames.length; i++) assert.ok(frames[i].x >= frames[i-1].x - 1, 'lens jumped backwards');
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    assert.equal(await page.locator('.liquid-lens').evaluate(node => getComputedStyle(node).transitionDuration), '0s');
+    await page.emulateMedia({ reducedMotion: 'no-preference' });
     assert.deepEqual(errors, []);
-    console.log('PASS: mobile/desktop home and admin/owner at 320–1920px; card alignment, readable rows, compact sidebar, no overflow or JS errors');
+    console.log('PASS: 320–1920px home/admin layout; persistent themes; stable nav identity and monotonic lens animation; reduced motion; no JS errors');
   } finally {
     await browser.close();
   }
