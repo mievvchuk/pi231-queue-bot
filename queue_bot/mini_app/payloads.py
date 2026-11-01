@@ -35,12 +35,24 @@ def queue_view(conn, subjects, session, uid, *, detail=False, admin=False):
         result['entries'] = [entry_view(row, uid, admin) for row in rows]
         result['labs'] = list(lab_catalog.labs_for_session(session))
         result['can_pick_position'] = queues.has_free_slots(conn, session['id']) or not queues.are_first_10_occupied(conn, session['id'])
+        # Reflect existing queue rules: vacant placeholders can be taken at any
+        # position, while new selectable positions are limited to the first ten.
+        by_position = {row['position']: row for row in rows}
+        last = max(by_position, default=0)
+        limit = max(last, 10 if not queues.are_first_10_occupied(conn, session['id']) else last)
+        result['join_slots'] = [dict(number=number, state=(
+            'yours' if number in by_position and by_position[number]['telegram_id'] == uid else
+            'busy' if number in by_position and by_position[number]['user_id'] is not None else 'free'))
+            for number in range(1, limit + 1)]
+        result['append_position'] = last + 1
     return result
 
 
-def swap_views(conn, uid):
+def swap_views(conn, uid, *, outgoing=False):
     # Expiration remains authoritative in respond(); the view exposes only live invitations.
-    rows = conn.execute('''SELECT r.token, r.session_id, r.status, r.expires_at, u.full_name AS sender_name
+    actor = 'u' if outgoing else 'target'
+    rows = conn.execute(f'''SELECT r.token, r.session_id, r.status, r.expires_at, u.full_name AS sender_name,
+        target.full_name AS target_name, a.position AS sender_position, b.position AS target_position
         FROM swap_requests r JOIN users target ON target.id = r.target_user_id
         JOIN users u ON u.id = r.sender_user_id
         JOIN queue_entries a ON a.id = r.sender_entry_id AND a.status = 'active'
@@ -48,7 +60,7 @@ def swap_views(conn, uid):
         JOIN queue_entries b ON b.id = r.target_entry_id AND b.status = 'active'
             AND b.user_id = r.target_user_id AND b.entry_revision = r.target_revision
         JOIN queue_sessions s ON s.id = r.session_id
-        WHERE target.telegram_id = ? AND s.status IN ('open', 'closed')
+        WHERE {actor}.telegram_id = ? AND s.status IN ('open', 'closed')
         AND (r.status = 'accepted' OR (r.status = 'pending' AND r.expires_at > ?))
         ORDER BY r.id DESC LIMIT 30''', (uid, datetime.now(timezone.utc).isoformat())).fetchall()
     return [dict(row) for row in rows]

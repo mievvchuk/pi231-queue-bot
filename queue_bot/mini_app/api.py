@@ -172,7 +172,7 @@ async def bootstrap(request):
         next_lesson = None
     return web.json_response({'me': {'name': request[REQ_USER]['full_name'], 'is_registered': True, 'is_admin': admins.is_admin(ctx['conn'], uid), 'is_owner': admins.is_owner(ctx['conn'], uid)},
         'queues': [queue_view(ctx['conn'], ctx['subjects'], row, uid) for row in sessions],
-        'swaps': swap_views(ctx['conn'], uid), 'today': schedule.get_current_date().isoformat(),
+        'swaps': swap_views(ctx['conn'], uid), 'outgoing_swaps': swap_views(ctx['conn'], uid, outgoing=True), 'today': schedule.get_current_date().isoformat(),
         'next_lesson': next_lesson})
 
 
@@ -203,7 +203,7 @@ async def student_action(request):
         if position is not None and not queues.has_free_slots(conn, sid) and queues.are_first_10_occupied(conn, sid):
             raise BotError('Перші 10 місць зайняті. Запишіться в кінець черги.')
         place, _ = queues.join_queue(conn, uid, sid, position, lab_numbers=numbers, planned_minutes=minutes)
-        return web.json_response({'message': f'Ви записалися. Ваше місце: {place}.'})
+        return web.json_response({'message': f'Ви записалися. Ваше місце: {place}.', 'position': place, 'queue_id': sid})
     session, entry = current_entry(request, data)
     if action == 'not-passed':
         if session['queue_type'] == 'consultation' or 'Курсова' in names(ctx['subjects'], session)[0]:

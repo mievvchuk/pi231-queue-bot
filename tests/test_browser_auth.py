@@ -192,7 +192,10 @@ async def test_forged_signatures_never_become_browser_sessions(client, login_con
 
 @pytest.mark.asyncio
 async def test_pwa_assets_are_public_and_real_api_stays_private(client):
-    for name in ('manifest.webmanifest', 'sw.js', 'pwa.js', 'icon-192.png', 'icon-512.png'):
+    for name in ('manifest.webmanifest', 'sw.js', 'pwa.js', 'icon-192.png', 'icon-512.png',
+                 'design.js', 'design.css', 'design-adapter.css', 'bootstrap-icons.css',
+                 'bootstrap-icons.woff2', 'manrope-400.ttf', 'manrope-500.ttf',
+                 'manrope-600.ttf', 'manrope-700.ttf', 'manrope-800.ttf'):
         assert (await client.get('/app/' + name)).status == 200
     manifest = await (await client.get('/app/manifest.webmanifest')).json(content_type=None)
     assert manifest['display'] == 'standalone'
