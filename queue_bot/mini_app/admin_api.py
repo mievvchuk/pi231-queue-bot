@@ -130,7 +130,7 @@ async def manage(request):
             from .payloads import names
             for row in queues.list_sessions(conn, ('open', 'closed', 'archived')):
                 subject, teacher = names(catalog, row)
-                sessions.append({'id': row['id'], 'subject': subject, 'teacher': teacher, 'status': row['status'],
+                sessions.append({'id': row['id'], 'subject_id': row['subject_id'], 'teacher_id': row['teacher_id'], 'subject': subject, 'teacher': teacher, 'status': row['status'],
                                  'date': str(row['created_at']), 'type': row['queue_type']})
             entries = []
             sid = None
@@ -141,7 +141,10 @@ async def manage(request):
                     raise BotError('Некоректна черга.')
                 if not queues.get_session(conn, sid):
                     raise BotError('Сесію не знайдено.')
-                entries = [{**dict(row), 'status': 'active'} for row in queues.get_entries(conn, sid) if row['user_id'] is not None] + queues.get_history(conn, sid)
+                entries = conn.execute('''SELECT e.id, e.user_id, e.position, e.status, e.created_at,
+                    e.completed_at, e.lab_count, e.planned_minutes, e.labs_passed, e.selected_labs,
+                    e.passed_labs, u.full_name FROM queue_entries e LEFT JOIN users u ON u.id = e.user_id
+                    WHERE e.session_id = ? AND e.user_id IS NOT NULL ORDER BY e.id''', (sid,)).fetchall()
             return response({'sessions': sessions, 'entries': entries, 'session_id': sid})
         if section == 'group':
             return await api.admin_users(request)

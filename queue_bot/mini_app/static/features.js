@@ -78,6 +78,7 @@ window.createPI231Features = function (H) {
       active: "Активне",
       archived: "Завершено",
       completed: "Здав",
+      transferred: "Перенесено в іншу чергу",
       removed: "Не здав / перенесено",
       left: "Вийшов із черги",
     })[value] ||
@@ -523,69 +524,53 @@ window.createPI231Features = function (H) {
     );
     return content;
   }
+  function historyTime(value) {
+    if (!value) return 'Дата не вказана';
+    let text=String(value).trim().replace(' ', 'T').replace(/(\.\d{3})\d+/, '$1');
+    const dateOnly=/^\d{4}-\d{2}-\d{2}$/.test(text);
+    if (dateOnly) text+='T12:00:00Z';
+    else if (!/(Z|[+-]\d{2}:?\d{2})$/i.test(text)) text+='Z';
+    const date=new Date(text);
+    return Number.isNaN(date.getTime()) ? 'Дата не вказана' : new Intl.DateTimeFormat('uk-UA', {timeZone:'Europe/Kyiv',day:'2-digit',month:'2-digit',year:'numeric',...(dateOnly?{}:{hour:'2-digit',minute:'2-digit'})}).format(date);
+  }
   function historyPage(data) {
+    const caption=el('p',{class:'history-timezone'},'Дата й час за Києвом');
+    const sessionMeta=session=>small([session?.teacher,historyTime(session?.date),statusText(session?.status)].filter(Boolean).join(' · '));
     if (data.session_id != null) {
-      const session = rows(data.sessions).find(
-        (item) => String(item.id) === String(data.session_id),
-      );
-      return [
-        btn("До списку сесій", () => open("admin-history"), "button secondary"),
-        card(
-          el("h2", {}, session?.subject || "Обрана сесія"),
-          small(
-            [session?.teacher, session?.date, statusText(session?.status)]
-              .filter(Boolean)
-              .join(" · "),
-          ),
-          el("h3", {}, "Учасники сесії"),
-          rows(data.entries).length
-            ? list(data.entries, (entry) =>
-                card(
-                  el("h3", {}, entry.name || entry.full_name || "Студент"),
-                  small(
-                    [
-                      entry.position ? "Місце №" + entry.position : null,
-                      statusText(entry.status),
-                      entry.completed_at,
-                    ]
-                      .filter(Boolean)
-                      .join(" · "),
-                  ),
-                ),
-              )
-            : el("p", { class: "empty" }, "У цій сесії ще немає учасників."),
-        ),
-      ];
+      const session=rows(data.sessions).find(item=>String(item.id)===String(data.session_id));
+      const people=new Map();
+      for(const entry of rows(data.entries)) {
+        const key=entry.user_id ?? entry.full_name ?? entry.name ?? entry.id;
+        if(!people.has(key))people.set(key,[]);
+        people.get(key).push(entry);
+      }
+      const participants=[...people.values()].map(attempts=>{
+        const latest=attempts[attempts.length-1],active=attempts.find(e=>e.status==='active');
+        return el('section',{class:'card request-card history-person'},
+          el('h3',{},latest.full_name||latest.name||'Студент'),
+          el('div',{class:'history-person-summary'},badge(statusText(active?.status||latest.status)),active?.position?small('Місце №'+active.position):null,small('Записів: '+attempts.length)),
+          small('Остання дія: '+historyTime(latest.completed_at||latest.created_at)),
+          el('details',{class:'history-attempts'},el('summary',{},'Історія записів · '+attempts.length),
+            ...attempts.map((entry,index)=>el('div',{class:'history-attempt'},el('strong',{},'Запис '+(index+1)+' · '+statusText(entry.status)),
+              small('Додано: '+historyTime(entry.created_at)),entry.completed_at?small('Завершено: '+historyTime(entry.completed_at)):null,
+              entry.labs_passed?small('Здано лабораторних: '+entry.labs_passed):null))));
+      });
+      return [btn('До списку сесій',()=>open('admin-history'),'button secondary'),caption,
+        card(el('h2',{},session?.subject||'Обрана сесія'),sessionMeta(session),el('h3',{},'Учасники сесії · '+people.size),
+          el('div',{class:'history-participants'},...(participants.length?participants:[el('p',{class:'empty'},'У цій сесії ще немає учасників.')])) )];
     }
-    return [
-      list(rows(data.sessions), (item) =>
-        card(
-          el("h3", {}, item.subject),
-          small(
-            [item.teacher, item.date, statusText(item.status)]
-              .filter(Boolean)
-              .join(" · "),
-          ),
-          btn(
-            "Учасники сесії",
-            () =>
-              open(
-                "admin-history",
-                false,
-                "?sid=" + encodeURIComponent(item.id),
-              ),
-            "button secondary",
-          ),
-          ["open", "closed"].includes(item.status)
-            ? btn(
-                "Завершити сесію",
-                () => finishSession(item),
-                "button secondary",
-              )
-            : null,
-        ),
-      ),
-    ];
+    const groups=new Map();
+    for(const session of rows(data.sessions)){
+      const key=session.subject_id??session.subject;
+      if(!groups.has(key))groups.set(key,{name:session.subject,sessions:[]});
+      groups.get(key).sessions.push(session);
+    }
+    return [caption,el('div',{class:'history-subjects'},...[...groups.values()].sort((a,b)=>(a.name||'').localeCompare(b.name||'','uk')).map(group=>
+      el('section',{class:'history-subject'},el('h2',{},group.name+' · '+group.sessions.length),
+        ...group.sessions.sort((a,b)=>String(b.date||'').localeCompare(String(a.date||''))).map(item=>
+          el('article',{class:'card request-card history-session'},sessionMeta(item),
+            el('div',{class:'button-row'},btn('Учасники сесії',()=>open('admin-history',false,'?sid='+encodeURIComponent(item.id)),'button secondary'),
+              ['open','closed'].includes(item.status)?btn('Завершити сесію',()=>finishSession(item),'button secondary'):null))))))];
   }
   async function finishSession(session) {
     const ctx = { key: S.feature, token: state.token, epoch: S.epoch };
@@ -660,9 +645,9 @@ window.createPI231Features = function (H) {
     const path = adminPath("admin-group"),
       fullName = input({ maxlength: 200 });
     const users = rows(data.users || data.items),
-      roster = el("div", { class: "list" });
-    const userCard = (user) =>
-      card(
+      roster = el("div", { class: "student-roster" });
+    const userCard = (user) => {
+      const node = card(
         el("h3", {}, user.full_name || user.name),
         small("ID: " + user.telegram_id),
         badge(user.is_blocked ? "Обмежено" : "Активний"),
@@ -755,7 +740,18 @@ window.createPI231Features = function (H) {
               ),
             ),
       );
-    const show = (query) =>
+      const children=[...node.children];
+      const avatar=el('span',{class:'student-avatar','aria-hidden':'true'},el('span',{},(user.full_name||user.name||'Студент').split(' ').filter(Boolean).map(n=>n[0]).slice(0,2).join('')));
+      const identity=el('div',{class:'student-identity','data-student-id':user.id,'data-telegram-id':user.telegram_id},avatar,
+        el('div',{class:'student-copy'},children[0],el('span',{class:'student-username'},user.telegram_id>0?'Завантаження Telegram…':'Без Telegram'),
+          small(user.telegram_id>0?'Telegram ID: '+user.telegram_id:'Додано вручну · Telegram ще не підключено'),
+          el('div',{class:'student-flags'},children[2],user.protected?children[3]:null)));
+      if(!user.protected)children[3]?.setAttribute('class','button-row student-actions');
+      node.setAttribute('class','card request-card student-card');
+      node.replaceChildren(identity,...(!user.protected?children.slice(3):[]));
+      return node;
+    };
+    const show = (query) => {
       roster.replaceChildren(
         ...users
           .filter((u) =>
@@ -765,6 +761,8 @@ window.createPI231Features = function (H) {
           )
           .map(userCard),
       );
+      H.enrichStudents?.(roster);
+    };
     show("");
     const search = input({
       type: "search",
@@ -1451,7 +1449,7 @@ window.createPI231Features = function (H) {
     else {
       const view = el("div", { class: "report-view" });
       const tabs = el("div", {
-        class: "segments",
+        class: "segments report-tabs",
         role: "tablist",
         "aria-label": "Подання звіту",
       });
@@ -1459,13 +1457,13 @@ window.createPI231Features = function (H) {
         summary: () =>
           el(
             "div",
-            { class: "feature-metrics" },
-            numberCard("Зареєстрованих студентів", statistics.registered_users),
+            { class: "reports-overview" },
+            el("div", {class:"report-stats"}, numberCard("Зареєстрованих студентів", statistics.registered_users),
             numberCard("Студентів без Telegram", statistics.placeholder_users),
             numberCard("Активних сесій", statistics.active_sessions),
             numberCard("Архівних сесій", statistics.archived_sessions),
-            numberCard("Успішність", statistics.pass_rate, "%"),
-            donut("Типи черг", [
+            numberCard("Успішність", statistics.pass_rate, "%")),
+            el("div", {class:"report-charts"}, donut("Типи черг", [
               ["Звичайні пари", statistics.lessons_count],
               ["Консультації", statistics.consults_count],
               ["Курсові", statistics.cw_count],
@@ -1475,7 +1473,7 @@ window.createPI231Features = function (H) {
               ["Не здано / перенесено", statistics.total_removed],
               ["Вихід із черги", statistics.total_left],
               ["Активні", statistics.total_active],
-            ]),
+            ])),
           ),
         subjects: () =>
           chart(
@@ -1543,8 +1541,8 @@ window.createPI231Features = function (H) {
       ? value
       : 0;
   function numberCard(label, value, suffix = "") {
-    return card(
-      small(label),
+    return el("section", {class:"card request-card report-stat"},
+      el("span",{class:"report-stat-label"},label),
       el("strong", { class: "report-number" }, count(value) + suffix),
     );
   }
@@ -1695,7 +1693,7 @@ window.createPI231Features = function (H) {
       el("h2", {}, "Звіт за предметом"),
       el(
         "div",
-        { class: "feature-metrics" },
+        { class: "report-stats" },
         numberCard("Сесій", report.sessions_count),
         numberCard("Усього здано", report.total_passed),
       ),
@@ -1728,7 +1726,7 @@ window.createPI231Features = function (H) {
                       count(student.passed_count),
                       count(student.not_passed_count),
                       student.current_position ?? "—",
-                      rows(student.dates).join(", ") || "—",
+                      rows(student.dates).map(historyTime).join(", ") || "—",
                     ].map((value) => el("td", {}, value)),
                   ),
                 ),
