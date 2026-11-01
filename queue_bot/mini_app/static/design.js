@@ -225,17 +225,18 @@ window.createPI231Design = function (H) {
       el('aside',{class:'detail-side'},card('',el('h3',{},'Твої звернення'),el('p',{class:'muted'},'Історія повідомлень та відповіді адміністратора.'),button('Переглянути',()=>openFeature('bugs'),'secondary','chat-left-text')),card('',el('h3',{},'Зв’язатися з нами'),el('p',{class:'muted'},'Опиши проблему й додай скриншот, якщо він допоможе.'),button('Нове звернення',()=>openFeature('bugs'),'primary','plus-lg')))));
   }
   function videoGuides(){
-    return el('section',{class:'video-guides'},el('div',{class:'section-heading'},el('h2',{},'Відеоінструкції'),small('По 30 секунд · українські підписи')),
+    return el('section',{class:'video-guides'},el('div',{class:'section-heading'},el('h2',{},'Відеоінструкції'),small('По 40 секунд · українська озвучка й підписи')),
       el('div',{class:'video-guide-grid'},(window.PI231VideoGuides||[]).map(guide=>btn([
         el('span',{class:'video-guide-cover'},el('img',{src:guide.poster,alt:'',loading:'lazy',decoding:'async'}),el('span',{class:'video-guide-play','aria-hidden':'true'},glyph('play-fill')),el('span',{class:'video-guide-duration'},guide.duration+' с')),
         el('span',{class:'video-guide-copy'},el('strong',{},glyph(guide.icon),' '+guide.title),el('small',{},guide.description)),
       ],()=>openVideoGuide(guide),'card video-guide-card'))));
   }
   function openVideoGuide(guide){
-    const panel=sheet(guide.title,'Навчальний приклад на тестових даних. Відео з підписами, без звуку.');panel.classList.add('video-guide-dialog');
+    const panel=sheet(guide.title,'Навчальний приклад на тестових даних. Увімкни звук, щоб почути пояснення українською. За потреби обери повільніший темп під відео.');panel.classList.add('video-guide-dialog');
     const error=el('p',{class:'notice',hidden:true,role:'alert'},'Не вдалося завантажити відео. Спробуй відкрити його окремо або прочитай кроки нижче.');
     const video=el('video',{class:'guide-video',controls:true,playsInline:true,preload:'metadata',poster:guide.poster,onerror:()=>{error.hidden=false;}},el('source',{src:guide.src,type:'video/mp4'}),el('track',{src:guide.captions,kind:'captions',srclang:'uk',label:'Українські підписи'}));
-    panel.append(video,error,el('details',{class:'guide-transcript'},el('summary',{},'Текстова інструкція'),el('ol',{},guide.steps.map(step=>el('li',{},step)))),el('a',{class:'button secondary',href:guide.src,target:'_blank',rel:'noopener'},'Відкрити відео окремо'));
+    const speed=el('select',{'aria-label':'Швидкість відео',onchange:event=>{const rate=Number(event.target.value);if([0.75,1,1.25].includes(rate))video.playbackRate=rate;}},el('option',{value:'0.75'},'0,75× · повільніше'),el('option',{value:'1',selected:true},'1× · звичайно'),el('option',{value:'1.25'},'1,25× · швидше'));
+    panel.append(video,error,el('label',{class:'guide-speed'},el('span',{},'Швидкість'),speed),el('details',{class:'guide-transcript'},el('summary',{},'Текстова інструкція'),el('ol',{},guide.steps.map(step=>el('li',{},step)))),el('a',{class:'button secondary',href:guide.src,target:'_blank',rel:'noopener'},'Відкрити відео окремо'));
   }
   function swapsPage(){
     const main=el('main',{class:'page make-swaps'},heading('Черги','Обміни місцями')),list=el('div',{class:'two-col'}),tabs=el('div',{class:'segment'});
