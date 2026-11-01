@@ -1,5 +1,6 @@
 """Signed-user/bot avatar proxy. Telegram file URLs and tokens never leave the server."""
 import asyncio
+import re
 from collections import OrderedDict
 from io import BytesIO
 from time import monotonic
@@ -90,5 +91,82 @@ async def avatar(request):
                         headers={'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff'})
 
 
+def _student_target(request):
+    from . import api
+    from queue_bot.services import users
+    api.require_admin(request)
+    ctx = request[api.REQ_CONTEXT]
+    student = users.get_user_by_id(ctx['conn'], api.path_id(request, 'user_id'))
+    if not student:
+        raise BotError('Студента не знайдено.')
+    return ctx, student
+
+
+async def _student_profile(ctx, uid):
+    cache = ctx.setdefault('student_profile_cache', OrderedDict())
+    cached = cache.get(uid)
+    if cached and cached[0] > monotonic():
+        cache.move_to_end(uid)
+        return cached[1]
+    pending = ctx.setdefault('student_profile_pending', {})
+    async def load():
+        semaphore = ctx.setdefault('student_profile_slots', asyncio.Semaphore(4))
+        value = dict(username=None, username_available=False, photo=None)
+        async with semaphore:
+            try:
+                async with asyncio.timeout(8):
+                    try:
+                        chat = await ctx['bot'].get_chat(uid)
+                        username = getattr(chat, 'username', None)
+                        if isinstance(username, str) and re.fullmatch(r'[A-Za-z0-9_]{1,32}', username):
+                            value['username'] = username
+                        value['username_available'] = True
+                    except Exception:
+                        pass
+                    try:
+                        value['photo'] = await _load(ctx['bot'], 'student', uid)
+                    except Exception:
+                        pass
+            except TimeoutError:
+                pass
+        cache[uid] = (monotonic() + (300 if value['username_available'] or value['photo'] else 60), value)
+        cache.move_to_end(uid)
+        while len(cache) > 64:
+            cache.popitem(last=False)
+        return value
+    if uid not in pending:
+        if len(pending) >= 64:
+            return dict(username=None, username_available=False, photo=None)
+        pending[uid] = asyncio.create_task(load())
+        pending[uid].add_done_callback(lambda finished: pending.pop(uid, None) if pending.get(uid) is finished else None)
+    task = pending[uid]
+    try:
+        return await asyncio.shield(task)
+    finally:
+        if task.done() and pending.get(uid) is task:
+            pending.pop(uid, None)
+
+
+async def student_profile(request):
+    """Only admins in admin mode can resolve a student stored in this database."""
+    from . import api
+    ctx, student = _student_target(request)
+    target = student['telegram_id']
+    profile = await _student_profile(ctx, target) if target > 0 else dict(username=None, username_available=False, photo=None)
+    # Telegram I/O yields: recheck actor permissions and the target's current binding.
+    api.revalidate(request)
+    _, current = _student_target(request)
+    if current['telegram_id'] != target:
+        raise BotError('Профіль студента змінився. Оновіть список.')
+    headers = {'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff'}
+    if request.match_info['resource'] == 'avatar':
+        raw = profile['photo']
+        return web.Response(body=raw, status=200 if raw else 204,
+                            content_type='image/jpeg' if raw else None, headers=headers)
+    return web.json_response(dict(username=profile['username'], has_photo=bool(profile['photo']),
+                                  username_available=profile['username_available']), headers=headers)
+
+
 def setup(app):
     app.router.add_get('/api/miniapp/avatar/{kind}', avatar)
+    app.router.add_get('/api/miniapp/admin/users/{user_id}/{resource:telegram|avatar}', student_profile)

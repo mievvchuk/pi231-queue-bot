@@ -577,13 +577,12 @@ test("admin session participants open a focused detail including an empty state"
   const { features, S } = setup(async (path) => ({
     sessions,
     entries: [],
-    session_id: path.includes("sid=11") ? 11 : null,
+    session_id: path.includes("sid=") ? Number(path.split("sid=")[1]) : null,
   }));
   S.mode = "admin";
   await features.open("admin-history");
-  const button = descendants(features.page("admin-history")).find(
-    (node) => node.tag === "button" && node.textContent === "Учасники сесії",
-  );
+  const section = descendants(features.page("admin-history")).find(node => node.attrs.class === "history-subject" && node.textContent.includes("Машинне навчання"));
+  const button = descendants(section).find(node => node.tag === "button" && node.textContent === "Учасники сесії");
   await button.events.click();
   const page = features.page("admin-history");
   assert.match(page.textContent, /Машинне навчання/);
@@ -645,4 +644,15 @@ test('open Saturday screen archives past 13:30 using server time without resetti
   assert.equal(descendants(archive).filter(n=>n.tag==='button').length,0);
   assert.equal(descendants(page).filter(n=>n.tag==='button'&&n.textContent==='Повідомити групу').length,1);
   assert.equal(formDate.value,'2026-11-21');
+});
+
+test("history groups attempts by stable student identity and renders Kyiv timestamps", async()=>{
+ const {features,S}=setup(async()=>({session_id:5,sessions:[{id:5,subject:'КПЗ',date:'2026-10-31 21:37:45.651405+00:00',status:'archived'}],entries:[
+ {id:1,user_id:7,full_name:'Один Студент',status:'completed',created_at:'2026-10-31 20:00:00',completed_at:'2026-10-31T21:38:09.602856+00:00'},
+ {id:2,user_id:7,full_name:'Один Студент',status:'completed',created_at:'2026-10-31 21:00:00',completed_at:'2026-10-31T21:39:19Z'},
+ {id:3,user_id:8,full_name:'Один Студент',status:'active',position:1,created_at:'2026-07-01 21:30:00'}]}));
+ S.mode='admin';await features.open('admin-history');const page=features.page('admin-history');
+ assert.equal(descendants(page).filter(n=>n.attrs.class==='card request-card history-person').length,2);
+ assert.match(page.textContent,/Учасники сесії · 2/);assert.match(page.textContent,/23:37/);assert.match(page.textContent,/02.07.2026, 00:30/);
+ assert.doesNotMatch(page.textContent,/T21:|651405|602856/);assert.match(page.textContent,/Історія записів · 2/);
 });

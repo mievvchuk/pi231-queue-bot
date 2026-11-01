@@ -87,6 +87,9 @@ async def test_history_finish_and_reports_are_json_serializable(admin_client, co
     assert queues.get_user_position(conn, 1, new_id) == 2
     active_history = await (await admin_client.get(f'/api/miniapp/admin/manage/history?sid={new_id}&mode=admin', headers=headers(100))).json()
     assert len(active_history['entries']) == 1 and active_history['entries'][0]['status'] == 'active'
+    assert active_history['entries'][0]['user_id'] == entry['user_id']
+    assert active_history['entries'][0]['id'] > 0
+    assert all('subject_id' in session for session in active_history['sessions'])
     for section in (f'history?sid={sid}&', 'reports?subject_id=1&'):
         result = await admin_client.get('/api/miniapp/admin/manage/'+section+'mode=admin', headers=headers(100))
         assert result.status == 200

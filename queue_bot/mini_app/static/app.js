@@ -1946,9 +1946,57 @@
       form,
     );
   }
+  const studentProfiles=new Map();
+  function enrichStudents(roster) {
+    roster.disposeProfiles?.();
+    let disposed=false, observer;
+    const urls=[];
+    roster.disposeProfiles=()=>{disposed=true;observer?.disconnect();urls.splice(0).forEach(url=>URL.revokeObjectURL(url));};
+    liquidCleanups.push(roster.disposeProfiles);
+    const waiting=[];let running=0;
+    const alive=node=>!disposed&&isAdmin()&&node.isConnected;
+    async function show(node) {
+      const id=node.dataset.studentId,telegram=node.dataset.telegramId,key=id+':'+telegram;
+      if(!alive(node)||Number(telegram)<=0)return;
+      const label=node.querySelector('.student-username');
+      try {
+        let cached=studentProfiles.get(key);
+        if(!cached||cached.until<Date.now()) {
+          cached={value:await api('/admin/users/'+encodeURIComponent(id)+'/telegram'),until:Date.now()+300000};
+          if(!alive(node))return;
+          studentProfiles.set(key,cached);
+          if(studentProfiles.size>64)studentProfiles.delete(studentProfiles.keys().next().value);
+        }
+        if(!alive(node))return;
+        const profile=cached.value;
+        label.textContent=profile.username?'@'+profile.username:profile.username_available?'Username не задано':'Профіль недоступний';
+        if(profile.has_photo){
+          const response=await fetch('/api/miniapp/admin/users/'+encodeURIComponent(id)+'/avatar?mode=admin',{headers:authHeaders(),credentials:'same-origin',cache:'no-store'});
+          if(response.status!==200||!response.headers.get('content-type')?.startsWith('image/'))return;
+          const blob=await response.blob();
+          if(!alive(node))return;
+          const url=URL.createObjectURL(blob);urls.push(url);
+          const image=el('img',{src:url,alt:'',loading:'lazy'});
+          image.addEventListener('error',()=>image.remove(),{once:true});
+          node.querySelector('.student-avatar').append(image);
+        }
+      }catch(error){
+        if(!disposed && [401,403].includes(error.status)){studentProfiles.clear();if(S.data)S.fatal=error.message;render();return;}
+        if(alive(node))label.textContent='Профіль недоступний';
+      }
+    }
+    function drain(){while(running<3&&waiting.length&&!disposed){const node=waiting.shift();running++;show(node).finally(()=>{running--;drain();});}}
+    window.requestAnimationFrame(()=>{
+      if(disposed)return;
+      const nodes=[...roster.querySelectorAll('.student-identity')];
+      if(window.IntersectionObserver){observer=new IntersectionObserver(entries=>{for(const entry of entries)if(entry.isIntersecting){observer.unobserve(entry.target);waiting.push(entry.target);}drain();},{rootMargin:'150px'});nodes.forEach(node=>observer.observe(node));}
+      else {waiting.push(...nodes);drain();}
+    });
+  }
   let previousView = null;
   function render() {
     liquidCleanups.splice(0).forEach((cleanup) => cleanup());
+    if(!isAdmin())studentProfiles.clear();
     if (navCache) navCache.node.hidden = !S.data || (!initData && !browserSession.authenticated);
     // Keep navigation connected: detaching its lens cancels CSS interpolation.
     if (root.removeChild && navCache?.node.parentNode === root) {
@@ -2051,6 +2099,7 @@
     openQueue,
     openImage,
     updateBusy,
+    enrichStudents,
   });
   design = window.createPI231Design?.({S, el, btn, small, api, sheet, closeSheet, navigate, openFeature, openQueue,
     labForm, avatarFace, consultation, labText, isAdmin, render, toast, appearanceSettings, setAppearance,
