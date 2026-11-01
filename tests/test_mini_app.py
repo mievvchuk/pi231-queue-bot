@@ -125,6 +125,43 @@ async def test_api_cannot_bypass_lab_requirements(client, conn, body):
 
 
 @pytest.mark.asyncio
+async def test_join_grid_uses_real_vacancies_and_rechecks_conflicting_choice(client, conn):
+    sid = queues.create_session(conn, 100, 1, 1)
+    queues.join_queue(conn, 2, sid, 3, lab_numbers=[1], planned_minutes=10)
+    path = f'/api/miniapp/queues/{sid}'
+    view = await (await client.get(path, headers=headers())).json()
+    assert view['append_position'] == 4
+    assert view['join_slots'] == [dict(number=n, state='busy' if n == 3 else 'free') for n in range(1, 11)]
+    # Another actor fills the selected vacancy after the grid was loaded.
+    queues.join_queue(conn, 100, sid, 2, lab_numbers=[1], planned_minutes=10)
+    payload = {'position': 2, 'labs': [1], 'minutes': 10}
+    assert (await client.post(path+'/join', headers=headers(), json=payload)).status == 400
+    assert queues.get_user_position(conn, 1, sid) is None
+    payload['position'] = 1
+    response = await client.post(path+'/join', headers=headers(), json=payload)
+    assert response.status == 200
+    assert (await response.json())['position'] == 1
+    view = await (await client.get(path, headers=headers())).json()
+    assert view['join_slots'][0] == {'number': 1, 'state': 'yours'}
+
+
+@pytest.mark.asyncio
+async def test_full_first_ten_only_offer_tail_or_existing_vacancies(client, conn, make_user):
+    sid = queues.create_session(conn, 100, 1, 1)
+    for uid in range(10, 21):
+        make_user(uid, 'Студент Тест' + chr(1040 + uid))
+        queues.join_queue(conn, uid, sid, lab_numbers=[1], planned_minutes=10)
+    path = f'/api/miniapp/queues/{sid}'
+    view = await (await client.get(path, headers=headers())).json()
+    assert len(view['join_slots']) == 11
+    assert all(s['state'] == 'busy' for s in view['join_slots'])
+    assert view['append_position'] == 12
+    queues.leave_queue(conn, 10, sid)
+    view = await (await client.get(path, headers=headers())).json()
+    assert view['join_slots'][0]['state'] == 'free'
+
+
+@pytest.mark.asyncio
 async def test_consultation_and_legacy_completion_do_not_ask_labs(client, conn):
     sid = queues.create_session(conn, 100, 7, 1)
     assert (await client.post(f'/api/miniapp/queues/{sid}/join', headers=headers(), json={})).status == 200
@@ -180,6 +217,13 @@ async def test_swap_created_and_answered_through_shared_service(client, conn):
     assert (await client.post(path, headers=headers(), json=body)).status == 400
     inbox = await (await client.get('/api/miniapp/bootstrap', headers=headers(2))).json()
     token = inbox['swaps'][0]['token']
+    sent = await (await client.get('/api/miniapp/bootstrap', headers=headers())).json()
+    assert sent['outgoing_swaps'][0]['token'] == token
+    assert sent['outgoing_swaps'][0]['sender_position'] == 1
+    assert sent['outgoing_swaps'][0]['target_position'] == 2
+    assert sent['swaps'] == [] and inbox['outgoing_swaps'] == []
+    unrelated = await (await client.get('/api/miniapp/bootstrap', headers=headers(100))).json()
+    assert unrelated['swaps'] == [] and unrelated['outgoing_swaps'] == []
     assert (await client.post(f'/api/miniapp/swaps/{token}', headers=headers(), json={'accept': True})).status == 400
     assert (await client.post(f'/api/miniapp/swaps/{token}', headers=headers(2), json={'accept': True})).status == 200
     assert queues.get_user_position(conn, 1, sid) == 2

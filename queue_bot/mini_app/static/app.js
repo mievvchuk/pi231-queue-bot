@@ -24,6 +24,7 @@
     avatarLoading: false,
     avatarCheckedAt: 0,
   };
+  let design = null;
   const browserSession = { ready: !!initData, authenticated: false, csrf: null, enabled: false };
   function loginFailureMessage(reason) {
     const messages = {
@@ -458,33 +459,33 @@
     if (key === "polls" || key === "help") S.tab = key;
     return features.open(key);
   }
+  const presentation = {theme:'system',accent:'lime',reduced:false};
+  try {
+    const stored = JSON.parse(window.localStorage?.getItem('pi231-appearance') || '{}');
+    if(['light','dark','system'].includes(stored.theme)) presentation.theme=stored.theme;
+    else { const old=window.localStorage?.getItem('pi231-theme'); if(['light','dark'].includes(old))presentation.theme=old; }
+    if(['lime','blue','violet','teal','pink','orange'].includes(stored.accent))presentation.accent=stored.accent;
+    presentation.reduced=stored.reduced===true;
+  } catch (_) {}
+  function appearanceSettings(){return {...presentation};}
+  function setAppearance(change){
+    if(['light','dark','system'].includes(change.theme))presentation.theme=change.theme;
+    if(['lime','blue','violet','teal','pink','orange'].includes(change.accent))presentation.accent=change.accent;
+    if(typeof change.reduced==='boolean')presentation.reduced=change.reduced;
+    try {window.localStorage?.setItem('pi231-appearance',JSON.stringify(presentation));}catch(_){}
+    theme();
+  }
   function theme() {
-    let preference;
-    try { preference = window.localStorage?.getItem('pi231-theme'); } catch (_) {}
-    const value = ['light', 'dark'].includes(preference) ? preference :
-      (!initData ? 'dark' : tg?.colorScheme ||
-      (window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'));
-    document.documentElement.dataset.theme = value;
-    document.documentElement.style.colorScheme = value;
-    const color = value === 'dark' ? '#000000' : '#f4f5f0';
-    document.querySelector?.('meta[name="theme-color"]')?.setAttribute('content', color);
-    try { tg?.setHeaderColor?.(color); tg?.setBackgroundColor?.(color); } catch (_) {}
+    const value=presentation.theme==='system'?(tg?.colorScheme || (window.matchMedia?.('(prefers-color-scheme: dark)')?.matches?'dark':'light')):presentation.theme;
+    const html=document.documentElement;
+    html.dataset.theme=value; html.dataset.accent=presentation.accent;
+    html.style.colorScheme=value; html.classList.toggle('reduce-motion',presentation.reduced);
+    const color=value==='dark'?'#111410':'#f4f5f0';
+    document.querySelector?.('meta[name="theme-color"]')?.setAttribute('content',color);
+    try {tg?.setHeaderColor?.(color);tg?.setBackgroundColor?.(color);}catch(_){}
     return value;
   }
-  function toggleTheme() {
-    const value = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
-    try { window.localStorage?.setItem('pi231-theme', value); } catch (_) {}
-    // Apply without rebuilding the page: input, focus, scroll and glass stay put.
-    document.documentElement.dataset.theme = value;
-    document.documentElement.style.colorScheme = value;
-    document.querySelector?.('meta[name="theme-color"]')?.setAttribute('content', value === 'dark' ? '#000000' : '#f4f5f0');
-    try { tg?.setHeaderColor?.(value === 'dark' ? '#000000' : '#f4f5f0'); tg?.setBackgroundColor?.(value === 'dark' ? '#000000' : '#f4f5f0'); } catch (_) {}
-    document.querySelectorAll?.('.theme-toggle').forEach(button => {
-      button.setAttribute('aria-label', value === 'dark' ? 'Увімкнути світлу тему' : 'Увімкнути темну тему');
-      button.setAttribute('aria-pressed', String(value === 'light'));
-      button.replaceChildren(icon(value === 'dark' ? 'sun' : 'moon'));
-    });
-  }
+  function toggleTheme(){setAppearance({theme:document.documentElement.dataset.theme==='dark'?'light':'dark'});}
   async function load() {
     const epoch = ++S.epoch;
     S.loading = true;
@@ -584,6 +585,7 @@
     else load();
   }
   function topbar() {
+    if(design) return design.topbar();
     const tools = el("div", { class: "top-tools" });
     const themeToggle = btn(icon(document.documentElement?.dataset.theme === 'light' ? 'moon' : 'sun'), toggleTheme, 'icon-button theme-toggle');
     themeToggle.setAttribute('aria-label', document.documentElement?.dataset.theme === 'light' ? 'Увімкнути темну тему' : 'Увімкнути світлу тему');
@@ -653,6 +655,7 @@
   }
   let navCache = null;
   function bottomnav() {
+    if(design){const node=design.navigation();if(navCache?.node!==node)navCache?.node.remove?.();navCache={node};return node;}
     const tabs = [
       ["home", "Головна"],
       ["queues", "Черги"],
@@ -785,6 +788,7 @@
     );
   }
   function homePage() {
+    if(design) return design.homePage();
     const own = mine(), primary = own[0], lesson = S.data.next_lesson;
     const rooms = lesson?.lessons.flatMap(item => item.teachers_raw?.map(t => t.room).filter(Boolean) || [item.room].filter(Boolean)) || [];
     const subjects = [...new Set(lesson?.lessons.map(item => item.subject) || [])];
@@ -833,6 +837,7 @@
     );
   }
   function queuesPage() {
+    if(design) return design.queuesPage();
     const qs = S.queueFilter === 'mine' ? mine() : S.data.queues,
       own = mine();
     return el(
@@ -1041,6 +1046,7 @@
         action ? icon(isAdmin() ? "admin" : "arrow") : null,
       );
     });
+    if(design) return design.queuePage(q,own,entries,controls,dock,otherActions);
     return el(
       "main",
       {class:'queue-detail'+(isAdmin()?' admin-detail':'')},
@@ -1171,6 +1177,7 @@
     );
   }
   function labForm(q, own) {
+    if(design && !own) return design.joinWizard(q);
     const panel = sheet(
         own ? "Твої лабораторні" : "Запис на здачу",
         q.labs.length
@@ -1355,6 +1362,7 @@
     }
   }
   function lessonCard(slot) {
+    if(design) return design.lessonCard(slot);
     const lessons = slot.lessons || [slot];
     return el(
       "article",
@@ -1610,7 +1618,15 @@
       ),
     );
   }
+  function swapsPage(){
+    if(design)return design.swapsPage();
+    return el("main",{class:"page swaps-page"},design?design.heading("Черги","Обміни місцями"):el("h1",{},"Обміни місцями"),inbox());
+  }
+  async function logout(){
+    try {const response=await fetch("/auth/logout",{method:"POST",credentials:"same-origin",headers:authHeaders()});if(!response.ok)throw new Error("Не вдалося вийти. Оновіть сторінку.");location.reload();}catch(error){toast(error.message,true);}
+  }
   function profilePage() {
+    if(design) return design.profilePage();
     const own = mine(),
       name = S.data.me.name;
     return el(
@@ -1811,6 +1827,7 @@
     panel.append(form);
   }
   function adminPage() {
+    if(design) return design.adminPage();
     const sections = [
       [
         "admin-history",
@@ -1934,8 +1951,8 @@
     // Keep navigation connected: detaching its lens cancels CSS interpolation.
     if (root.removeChild && navCache?.node.parentNode === root) {
       [...root.children].forEach(node => { if (node !== navCache.node) root.removeChild(node); });
-      if (!S.queue) root.insertBefore(topbar(), navCache.node);
-    } else root.replaceChildren(...(S.queue ? [] : [topbar()]));
+      if (design ? Boolean(S.data && (initData || browserSession.authenticated)) : !S.queue) root.insertBefore(topbar(), navCache.node);
+    } else root.replaceChildren(...((design ? !S.data || (!initData && !browserSession.authenticated) : S.queue) ? [] : [topbar()]));
     if (!initData && !browserSession.authenticated) {
       root.append(
         loginPage(),
@@ -1978,17 +1995,20 @@
       return;
     }
     const page = S.feature
-        ? features.page(S.feature)
+        ? (design && S.feature==='help' ? design.helpPage() : features.page(S.feature))
         : S.queue
           ? queuePage()
           : S.tab === "schedule"
             ? schedulePage()
+            : S.tab === "swaps"
+            ? swapsPage()
             : S.tab === "profile"
               ? profilePage()
               : S.tab === "admin" && isAdmin()
                 ? adminPage()
                 : S.tab === 'more' ? morePage()
                   : S.tab === 'home' ? homePage() : queuesPage();
+    design?.decorate(page);
     const nav = bottomnav();
     if (root.insertBefore && nav.parentNode === root) root.insertBefore(page, nav);
     else root.append(page, nav);
@@ -2030,10 +2050,14 @@
     openImage,
     updateBusy,
   });
+  design = window.createPI231Design?.({S, el, btn, small, api, sheet, closeSheet, navigate, openFeature, openQueue,
+    labForm, avatarFace, consultation, labText, isAdmin, render, toast, appearanceSettings, setAppearance,
+    mutate, load, logout, completionForm, adminEntryForm, confirmSheet, reference, download, installCard, browserSession, loginFailureMessage, initData});
+  window.matchMedia?.('(prefers-color-scheme: dark)')?.addEventListener?.('change',()=>{if(presentation.theme==='system')theme();});
   document.addEventListener("keydown", (event) => {
-    if (event.key === "Escape" && !S.busy) closeSheet();
+    if (event.key === "Escape" && !S.busy) {closeSheet();design?.closeMenu();}
   });
-  window.setInterval(() => features?.tick?.(), 1000);
+  window.setInterval(() => {features?.tick?.();design?.tick?.();}, 1000);
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') features?.tick?.();
   });
@@ -2050,6 +2074,7 @@
   tg?.expand();
   render();
   function loginPage() {
+    if(design) return design.loginPage();
     const panel = el('main', {class: 'login-page'},
       el('h1', {}, 'Твій простір ПІ-231'),
       el('p', {class: 'muted'}, 'Черги, розклад та опитування — з телефона чи комп’ютера.'),
