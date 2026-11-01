@@ -70,9 +70,11 @@
       "M20 7v5h-5 M4 17v-5h5 M6 7a7 7 0 0 1 12-1l2 6 M4 12l2 6a7 7 0 0 0 12-1",
     back: "M19 12H5 M10 7l-5 5 5 5",
     close: "M6 6l12 12 M18 6 6 18",
+    sun: 'M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8 M12 2v2 M12 20v2 M2 12h2 M20 12h2 M5 5l1.5 1.5 M17.5 17.5 19 19 M5 19l1.5-1.5 M17.5 6.5 19 5',
+    moon: 'M20 15A9 9 0 0 1 9 4a9 9 0 1 0 11 11Z',
   };
   function icon(name) {
-    if (window.PI231Icon && !['home','more','up','down'].includes(name)) return window.PI231Icon(name);
+    if (window.PI231Icon && !['home','more','up','down','sun','moon'].includes(name)) return window.PI231Icon(name);
     const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
     for (const [k, v] of Object.entries({
       viewBox: "0 0 24 24",
@@ -109,7 +111,7 @@
   const btn = (text, fn, cls = "button") =>
     el("button", { type: "button", class: cls, onclick: fn }, text);
   const liquidCleanups = [];
-  function attachLiquidLens(container, { buttons, selectedIndex = 0, onSelect }) {
+  function attachLiquidLens(container, { buttons, selectedIndex = 0, onSelect, persistent = false }) {
     if (!container || !buttons?.length) return null;
     const lens = el("span", { class: "liquid-lens", "aria-hidden": true });
     let selected = selectedIndex;
@@ -121,6 +123,8 @@
     let geometry = null;
     let moveFrame = null;
     let latestX = 0;
+    let ready = false;
+    const cleanup = persistent ? [] : liquidCleanups;
     container.append(lens);
     container.classList.add("liquid-control");
 
@@ -144,6 +148,10 @@
       lens.style.width = width + "px";
       lens.style.transform =
         "translate3d(" + (center - frame.left - width / 2) + "px, 0, 0)";
+      if (!ready) {
+        ready = true;
+        window.requestAnimationFrame?.(() => lens.classList.add('lens-ready'));
+      }
     };
     const nearest = (x) => {
       const rs = rects();
@@ -187,16 +195,20 @@
       origin = { x: event.clientX, y: event.clientY };
       hovered = nearest(event.clientX);
       dragged = false;
-      container.classList.add("liquid-dragging");
-      container.setPointerCapture?.(pointerId);
-      setLens(hovered, event.clientX);
+      // A tap stays at the selected item. Only an intentional horizontal drag
+      // captures the pointer and moves the glass; vertical scrolling is untouched.
     });
     container.addEventListener("pointermove", (event) => {
       if (event.pointerId !== pointerId || !origin) return;
       const dx = event.clientX - origin.x;
       const dy = event.clientY - origin.y;
       if (Math.abs(dy) > 12 && Math.abs(dy) > Math.abs(dx)) return cancel();
-      dragged ||= Math.abs(dx) > 5;
+      if (!dragged && Math.abs(dx) <= 8) return;
+      if (!dragged) {
+        dragged = true;
+        container.classList.add('liquid-dragging');
+        container.setPointerCapture?.(pointerId);
+      }
       hovered = nearest(event.clientX);
       latestX = event.clientX;
       if (moveFrame === null) {
@@ -208,14 +220,20 @@
     });
     container.addEventListener("pointerup", (event) => {
       if (event.pointerId !== pointerId) return;
+      if (!dragged) return cancel(); // Native click handles taps and keyboard activation.
       const next = nearest(event.clientX);
-      cancel();
+      if (moveFrame !== null) window.cancelAnimationFrame?.(moveFrame);
+      moveFrame = null;
+      pointerId = null;
+      origin = null;
+      dragged = false;
+      container.classList.remove('liquid-dragging');
       suppressClickUntil = Date.now() + 300;
       commit(next);
       tg?.HapticFeedback?.selectionChanged?.();
     });
     container.addEventListener("pointercancel", cancel);
-    liquidCleanups.push(cancel);
+    cleanup.push(cancel);
     container.addEventListener("keydown", (event) => {
       if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
       event.preventDefault();
@@ -228,7 +246,7 @@
     if (window.ResizeObserver) {
       const observer = new window.ResizeObserver(() => { measure(); render(selected); });
       observer.observe(container);
-      liquidCleanups.push(() => observer.disconnect());
+      cleanup.push(() => observer.disconnect());
     }
     window.requestAnimationFrame?.(() => {
       if (container.isConnected) { measure(); render(selected); }
@@ -240,67 +258,20 @@
       },
       commit,
       cancel,
+      select: (index) => { selected = index; render(index); },
     };
   }
   function installPressOptics(root) {
-    const reduceMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)")
-      ?.matches;
-    root
-      .querySelectorAll?.(
-        ".queue-card, .subject-row, .lesson, .button, .card",
-      )
+    // Only interactive surfaces receive feedback, never a form/card parent.
+    root.querySelectorAll?.('button:not(.nav-item), .lesson[role="button"]')
       .forEach((node) => {
-        let pointerId = null;
-        let start = null;
-        let pressFrame = null;
-        let latestPoint = null;
-        const clear = () => {
-          if (pressFrame !== null) window.cancelAnimationFrame?.(pressFrame);
-          pressFrame = null;
-          pointerId = null;
-          start = null;
-          node.classList.remove("liquid-pressing", "liquid-pressed");
-          node.style.removeProperty("--press-x");
-          node.style.removeProperty("--press-y");
-          node.style.removeProperty("--press-shift-x");
-          node.style.removeProperty("--press-shift-y");
-          node.style.removeProperty("--press-rotate-x");
-          node.style.removeProperty("--press-rotate-y");
-        };
-        node.addEventListener("pointerdown", (event) => {
-          if (event.button !== undefined && event.button !== 0) return;
-          pointerId = event.pointerId;
-          const rect = node.getBoundingClientRect();
-          start = { x: event.clientX, y: event.clientY, rect };
-          node.classList.add("liquid-pressing");
-          if (node.classList.contains("lesson")) node.classList.add("liquid-pressed");
+        const clear = () => node.classList.remove('liquid-pressing');
+        node.addEventListener('pointerdown', (event) => {
+          if (node.disabled || (event.button !== undefined && event.button !== 0)) return;
+          node.classList.add('liquid-pressing');
         });
-        node.addEventListener("pointermove", (event) => {
-          if (event.pointerId !== pointerId || !start) return;
-          const dx = event.clientX - start.x;
-          const dy = event.clientY - start.y;
-          if (Math.abs(dy) > 12 && Math.abs(dy) > Math.abs(dx)) return clear();
-          latestPoint = { x: event.clientX, y: event.clientY };
-          if (pressFrame !== null) return;
-          pressFrame = window.requestAnimationFrame?.(() => {
-          pressFrame = null;
-          if (!start) return;
-          const dx = latestPoint.x - start.x;
-          const dy = latestPoint.y - start.y;
-          const x = Math.max(0, Math.min(100, ((latestPoint.x - start.rect.left) / start.rect.width) * 100));
-          const y = Math.max(0, Math.min(100, ((latestPoint.y - start.rect.top) / start.rect.height) * 100));
-          node.style.setProperty("--press-x", x + "%");
-          node.style.setProperty("--press-y", y + "%");
-          if (!reduceMotion) {
-            node.style.setProperty("--press-shift-x", Math.max(-3, Math.min(3, dx * 0.06)) + "px");
-            node.style.setProperty("--press-shift-y", Math.max(-2, Math.min(2, dy * 0.04)) + "px");
-            node.style.setProperty("--press-rotate-x", Math.max(-1, Math.min(1, -dy * 0.02)) + "deg");
-            node.style.setProperty("--press-rotate-y", Math.max(-1, Math.min(1, dx * 0.02)) + "deg");
-          }
-          }) ?? null;
-        });
-        node.addEventListener("pointerup", clear);
-        node.addEventListener("pointercancel", clear);
+        for (const event of ['pointerup', 'pointercancel', 'pointerleave', 'blur'])
+          node.addEventListener(event, clear);
         liquidCleanups.push(clear);
       });
   }
@@ -488,9 +459,31 @@
     return features.open(key);
   }
   function theme() {
-    document.documentElement.dataset.theme =
-      !initData ? 'dark' : tg?.colorScheme ||
-      (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+    let preference;
+    try { preference = window.localStorage?.getItem('pi231-theme'); } catch (_) {}
+    const value = ['light', 'dark'].includes(preference) ? preference :
+      (!initData ? 'dark' : tg?.colorScheme ||
+      (window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'));
+    document.documentElement.dataset.theme = value;
+    document.documentElement.style.colorScheme = value;
+    const color = value === 'dark' ? '#000000' : '#f4f5f0';
+    document.querySelector?.('meta[name="theme-color"]')?.setAttribute('content', color);
+    try { tg?.setHeaderColor?.(color); tg?.setBackgroundColor?.(color); } catch (_) {}
+    return value;
+  }
+  function toggleTheme() {
+    const value = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
+    try { window.localStorage?.setItem('pi231-theme', value); } catch (_) {}
+    // Apply without rebuilding the page: input, focus, scroll and glass stay put.
+    document.documentElement.dataset.theme = value;
+    document.documentElement.style.colorScheme = value;
+    document.querySelector?.('meta[name="theme-color"]')?.setAttribute('content', value === 'dark' ? '#000000' : '#f4f5f0');
+    try { tg?.setHeaderColor?.(value === 'dark' ? '#000000' : '#f4f5f0'); tg?.setBackgroundColor?.(value === 'dark' ? '#000000' : '#f4f5f0'); } catch (_) {}
+    document.querySelectorAll?.('.theme-toggle').forEach(button => {
+      button.setAttribute('aria-label', value === 'dark' ? 'Увімкнути світлу тему' : 'Увімкнути темну тему');
+      button.setAttribute('aria-pressed', String(value === 'light'));
+      button.replaceChildren(icon(value === 'dark' ? 'sun' : 'moon'));
+    });
   }
   async function load() {
     const epoch = ++S.epoch;
@@ -592,6 +585,10 @@
   }
   function topbar() {
     const tools = el("div", { class: "top-tools" });
+    const themeToggle = btn(icon(document.documentElement?.dataset.theme === 'light' ? 'moon' : 'sun'), toggleTheme, 'icon-button theme-toggle');
+    themeToggle.setAttribute('aria-label', document.documentElement?.dataset.theme === 'light' ? 'Увімкнути темну тему' : 'Увімкнути світлу тему');
+    themeToggle.setAttribute('aria-pressed', String(document.documentElement?.dataset.theme === 'light'));
+    tools.append(themeToggle);
     if (S.data?.me.is_admin)
       tools.append(
         btn(
@@ -654,6 +651,7 @@
       tools,
     );
   }
+  let navCache = null;
   function bottomnav() {
     const tabs = [
       ["home", "Головна"],
@@ -662,6 +660,11 @@
       ["more", "Ще"],
     ];
     const activeTab = S.queue ? 'queues' : (S.feature || ['profile', 'admin', 'polls', 'help'].includes(S.tab)) ? 'more' : S.tab;
+    if (navCache) {
+      navCache.buttons.forEach((node, i) => node.classList.toggle('active', tabs[i][0] === activeTab));
+      navCache.control.select(Math.max(0, tabs.findIndex(([key]) => key === activeTab)));
+      return navCache.node;
+    }
     const buttons = tabs.map(([key, label]) => {
       const node = btn(
         [icon(key), el("span", {}, label)],
@@ -680,8 +683,10 @@
     control = attachLiquidLens(nav, {
       buttons,
       selectedIndex: Math.max(0, tabs.findIndex(([key]) => key === activeTab)),
+      persistent: true,
       onSelect: (index) => navigate(tabs[index][0]),
     });
+    navCache = {node: nav, buttons, control};
     return nav;
   }
   function empty(title, text) {
@@ -1922,9 +1927,15 @@
       form,
     );
   }
+  let previousView = null;
   function render() {
     liquidCleanups.splice(0).forEach((cleanup) => cleanup());
-    root.replaceChildren(...(S.queue ? [] : [topbar()]));
+    if (navCache) navCache.node.hidden = !S.data || (!initData && !browserSession.authenticated);
+    // Keep navigation connected: detaching its lens cancels CSS interpolation.
+    if (root.removeChild && navCache?.node.parentNode === root) {
+      [...root.children].forEach(node => { if (node !== navCache.node) root.removeChild(node); });
+      if (!S.queue) root.insertBefore(topbar(), navCache.node);
+    } else root.replaceChildren(...(S.queue ? [] : [topbar()]));
     if (!initData && !browserSession.authenticated) {
       root.append(
         loginPage(),
@@ -1966,8 +1977,7 @@
       root.append(registrationPage());
       return;
     }
-    root.append(
-      S.feature
+    const page = S.feature
         ? features.page(S.feature)
         : S.queue
           ? queuePage()
@@ -1978,9 +1988,13 @@
               : S.tab === "admin" && isAdmin()
                 ? adminPage()
                 : S.tab === 'more' ? morePage()
-                  : S.tab === 'home' ? homePage() : queuesPage(),
-      bottomnav(),
-    );
+                  : S.tab === 'home' ? homePage() : queuesPage();
+    const nav = bottomnav();
+    if (root.insertBefore && nav.parentNode === root) root.insertBefore(page, nav);
+    else root.append(page, nav);
+    const view = S.feature || (S.queue ? 'queue-' + S.queue.id : S.mode + '-' + S.tab);
+    if (view !== previousView) root.querySelector?.('main')?.classList.add('page-enter');
+    previousView = view;
     root.classList.toggle("is-loading", S.loading && !S.scheduleLoading);
     if (S.loading)
       root.append(
