@@ -18,7 +18,7 @@ function detail(id){const q=queues.find(q=>q.id===id);const own=id===2;
  return {...q,labs:id===3?[]:[{number:1,title:'Лабораторна 1',max_minutes:30},{number:2,title:'Лабораторна 2',max_minutes:20}],entries,
  can_pick_position:true,append_position:own?5:4,join_slots:Array.from({length:10},(_,i)=>({number:i+1,state:own&&i===3?'yours':i===0||i===2||(conflict&&i===1)?'busy':'free'}))};}
 (async()=>{const browser=await chromium.launch({channel:process.env.PI231_BROWSER_CHANNEL||'chrome',headless:true});try{
- const page=await browser.newPage(),errors=[],failedAssets=[];page.on('pageerror',e=>errors.push(e.message));
+ const page=await browser.newPage(),errors=[],failedAssets=[],mediaRequests=[];page.on('pageerror',e=>errors.push(e.message));
  await page.route('https://telegram.org/**',r=>r.fulfill({contentType:'text/javascript',body:'window.Telegram={WebApp:{initData:'+JSON.stringify(anonymous?'':'offline')+',colorScheme:"light",ready(){},expand(){},onEvent(){}}}'}));
  await page.route('https://design.invalid/**',async route=>{
   const url=new URL(route.request().url()),p=url.pathname;
@@ -26,6 +26,7 @@ function detail(id){const q=queues.find(q=>q.id===id);const own=id===2;
   if(p==='/api/miniapp/bootstrap')return route.fulfill({json:{today:'2026-11-02',me:{name:'Євчук Михайло',is_registered:true,is_admin:true,is_owner:true},queues,swaps:[],next_lesson:{date:'2026-11-02',startTime:'11:50',endTime:'13:10',pair:3,lessons:[{subject:'Машинне навчання',room:'231'}]}}});
   if(p.startsWith('/api/miniapp/avatar/'))return route.fulfill({status:204});
   if(p==='/api/miniapp/admin/users')return route.fulfill({json:{users:[{id:1,name:'Тест Студент'}]}});
+  if(p==='/api/miniapp/admin/manage/admins')return route.fulfill({json:{items:[{telegram_id:123,full_name:'Петренко Приклад'},{telegram_id:456,full_name:null}]}});
   if(/^\/api\/miniapp\/queues\/\d+$/.test(p))return route.fulfill({json:detail(Number(p.split('/').pop()))});
   if(p==='/api/miniapp/queues/1/join'){
    joinCalls++;const data=route.request().postDataJSON();assert.deepEqual(data.labs,[1,2]);assert.ok(data.minutes>=5&&data.minutes<=50);
@@ -36,7 +37,8 @@ function detail(id){const q=queues.find(q=>q.id===id);const own=id===2;
   if(p.startsWith('/api/miniapp/'))return route.fulfill({json:{items:[],users:[],sessions:[],subjects:[],teachers:[],polls:[],reports:[],archived:[],stats:{},summary:{},server_time:'2026-11-02T10:00:00+02:00'}});
   const name=p.endsWith('/')?'index.html':path.basename(p),file=path.join(assets,name);
   if(!fs.existsSync(file)){failedAssets.push(name);return route.fulfill({status:404});}
-  const types={'.html':'text/html','.js':'text/javascript','.css':'text/css','.woff2':'font/woff2','.woff':'font/woff','.ttf':'font/ttf','.png':'image/png'};
+  if(name.endsWith('.mp4'))mediaRequests.push(name);
+  const types={'.html':'text/html','.js':'text/javascript','.css':'text/css','.woff2':'font/woff2','.woff':'font/woff','.ttf':'font/ttf','.png':'image/png','.jpg':'image/jpeg','.mp4':'video/mp4','.vtt':'text/vtt'};
   return route.fulfill({body:fs.readFileSync(file),contentType:types[path.extname(name)]||'text/plain'});
  });
  const settle=async()=>{await page.waitForFunction(()=>!document.querySelector('.progress'));await page.evaluate(()=>document.fonts.ready);await page.waitForFunction(()=>[...document.getAnimations()].every(a=>a.playState==='finished'||a.effect?.getTiming().iterations===Infinity));};
@@ -82,6 +84,7 @@ function detail(id){const q=queues.find(q=>q.id===id);const own=id===2;
  await page.getByRole('button',{name:'Переглянути місця',exact:true}).click();assert.equal(await page.locator('.wizard-progress > div').count(),2,'consultation must skip labs/time');
  assert.match(await page.locator('.wizard-panel').textContent(),/Обери вільне місце/);await page.getByRole('button',{name:'Скасувати',exact:true}).click();
  await page.locator('.bottom-nav button[data-page="schedule"]').click();await page.locator('.timeline .lesson-row').first().waitFor();await settle();assert.equal(await page.locator('.timeline .lesson-row').count(),5);await noOverflow('schedule');
+ assert.equal(await page.locator('.timeline .lesson-empty').first().evaluate(node=>getComputedStyle(node).borderTopStyle),'none','empty schedule row still has an outer border');
  await page.locator('.bottom-nav button[data-page="profile"]').click();await page.locator('.make-profile').waitFor();await settle();await noOverflow('profile');
  await page.getByRole('button',{name:'Усі розділи',exact:true}).click();await page.locator('.mode-switch').click();await page.locator('.make-admin').waitFor();await settle();await noOverflow('admin');
  if(out)await page.screenshot({path:path.join(out,'figma-admin-mobile.png'),fullPage:true});
@@ -93,10 +96,20 @@ function detail(id){const q=queues.find(q=>q.id===id);const own=id===2;
   assert.equal(await page.locator('main .notice.error:visible').count(),0,key+' failed to render: '+await page.locator('main').textContent());
   assert.equal(await page.locator('main input, main textarea, main button').count()>0,true,key+' controls missing');
  }
+ await page.locator('main').getByRole('button',{name:'Адміністратори',exact:true}).click();await page.waitForFunction(()=>!document.querySelector('main .loading'));
+ assert.match(await page.locator('main').textContent(),/Петренко Приклад/);assert.match(await page.locator('main').textContent(),/Telegram ID: 123/);assert.match(await page.locator('main').textContent(),/Профіль ще не зареєстрований/);
  await page.getByRole('button',{name:'Усі розділи',exact:true}).click();await page.locator('.mode-switch').click();await page.locator('.make-home').waitFor();
  for(const key of ['swaps','polls','help']){
   await page.getByRole('button',{name:'Усі розділи',exact:true}).click();await page.locator('.sidebar button[data-page="'+key+'"]').click();
   await settle();await noOverflow(key);
+ }
+ assert.equal(await page.locator('.video-guide-card').count(),6);assert.equal(mediaRequests.length,0,'help preloads videos before selection');
+ for(let i=0;i<6;i++){
+  await page.locator('.video-guide-card').nth(i).click();await page.waitForFunction(()=>{const v=document.querySelector('.guide-video');return v&&v.readyState>=1;});
+  const duration=await page.locator('.guide-video').evaluate(node=>node.duration);assert.ok(duration>=20&&duration<=40,'video duration '+duration);
+  if(i===0){await page.locator('.guide-video').evaluate(async node=>{window.guideTestVideo=node;await node.play();node.currentTime=10;});await page.waitForFunction(()=>window.guideTestVideo.currentTime>=10);}
+  await page.getByRole('button',{name:'Закрити',exact:true}).click();
+  if(i===0)assert.equal(await page.evaluate(()=>window.guideTestVideo.paused&&!window.guideTestVideo.isConnected),true,'closing guide leaves playback active');
  }
  anonymous=true;await page.goto('https://design.invalid/app/?login=failed&reason=profile_missing');await page.locator('.make-login').waitFor();await settle();
  assert.equal(await page.getByRole('link',{name:'Увійти через Telegram',exact:true}).getAttribute('href'),'/auth/telegram/start');

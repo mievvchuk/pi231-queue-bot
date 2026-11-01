@@ -1802,12 +1802,14 @@ window.createPI231Features = function (H) {
       list(rows(data.items || data.admins), (admin) => {
         const telegramId =
           typeof admin === "object" ? admin.telegram_id : admin;
+        const name = typeof admin === "object" && (admin.full_name || admin.name);
         return card(
-          el("strong", {}, "Telegram ID: " + telegramId),
+          el("strong", {}, name || "Профіль ще не зареєстрований"),
+          small("Telegram ID: " + telegramId),
           btn(
             "Зняти права",
             () =>
-              confirm("Зняти права адміністратора?", String(telegramId), path, {
+              confirm("Зняти права адміністратора?", (name ? name + " · " : "") + telegramId, path, {
                 action: "remove",
                 telegram_id: telegramId,
               }),

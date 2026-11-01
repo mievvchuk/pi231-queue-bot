@@ -5,6 +5,10 @@ from aiohttp import web
 from queue_bot import __version__, config
 from queue_bot.mini_app import api, browser_auth
 
+GUIDE_ASSETS = {f'guide-{topic}.{extension}'
+                for topic in ('join', 'complete', 'swap', 'appearance', 'install-phone', 'install-desktop')
+                for extension in ('mp4', 'jpg', 'vtt')}
+
 
 async def healthcheck(request: web.Request) -> web.Response:
     return web.Response(text=f'PI-231 Queue Bot is running! [{__version__}]\nStatus: OK\n', content_type='text/plain')
@@ -12,7 +16,7 @@ async def healthcheck(request: web.Request) -> web.Response:
 
 async def asset(request):
     name = request.match_info.get('asset') or 'index.html'
-    if name not in ('index.html', 'app.js', 'app.css', 'theme.css', 'glass.css', 'wallet.css', 'icons.js', 'features.js', 'design.js', 'design.css', 'design-adapter.css', 'bootstrap-icons.css', 'bootstrap-icons.woff2', 'bootstrap-icons.woff', 'manrope-400.ttf', 'manrope-500.ttf', 'manrope-600.ttf', 'manrope-700.ttf', 'manrope-800.ttf', 'MANROPE-LICENSE.txt', 'pwa.js', 'manifest.webmanifest', 'sw.js', 'icon-192.png', 'icon-512.png', 'onest-cyrillic.woff2', 'onest-latin.woff2', 'FONT-LICENSE.txt', 'BOOTSTRAP-ICONS-LICENSE.txt'):
+    if name not in GUIDE_ASSETS and name not in ('index.html', 'app.js', 'app.css', 'theme.css', 'glass.css', 'wallet.css', 'icons.js', 'features.js', 'help-videos.js', 'design.js', 'design.css', 'design-adapter.css', 'bootstrap-icons.css', 'bootstrap-icons.woff2', 'bootstrap-icons.woff', 'manrope-400.ttf', 'manrope-500.ttf', 'manrope-600.ttf', 'manrope-700.ttf', 'manrope-800.ttf', 'MANROPE-LICENSE.txt', 'pwa.js', 'manifest.webmanifest', 'sw.js', 'icon-192.png', 'icon-512.png', 'onest-cyrillic.woff2', 'onest-latin.woff2', 'FONT-LICENSE.txt', 'BOOTSTRAP-ICONS-LICENSE.txt'):
         raise web.HTTPNotFound()
     response = web.FileResponse(Path(__file__).parent / 'mini_app' / 'static' / name)
     response.headers['Cache-Control'] = 'no-cache'
