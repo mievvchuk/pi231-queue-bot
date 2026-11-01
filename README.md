@@ -227,7 +227,7 @@ GitHub Actions runs the Python suite with a PostgreSQL 16 service, runs the two 
 - The bot uses in-memory FSM dialogue state. **Unfinished multi-step conversations are lost on process restart**, while persisted database records remain.
 - Pending two-photo Telegram album collection must be restarted after a process restart.
 - The timetable source can be overridden via `SCHEDULE_PATH`; modifying the repository's default JSON does not overwrite a separately configured live timetable.
-- The Mini App's browser sessions are maintained server-side in memory; a restart may require browser users to sign in again.
+- Browser/PWA sessions last seven days from sign-in and are stored in the database (only a hash of the cookie token). They survive application restarts and deployments when the same persistent database is used. Logout revokes the session; clearing browser data or switching browsers requires another sign-in. Login attempts in progress still expire after ten minutes or a restart.
 - Keep bot tokens, database credentials, recognition keys, and Telegram Login secrets out of commits and PR descriptions.
 
 ## Contributing

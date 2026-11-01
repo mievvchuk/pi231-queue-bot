@@ -65,14 +65,24 @@ def cookie(response, name, value, age):
                         samesite='Lax', path='/')
 
 
+def session_connection(request):
+    from queue_bot.mini_app.api import CONTEXT
+    context = request.app[CONTEXT]
+    if not context.get('ready') or context.get('conn') is None:
+        raise AuthenticationError('Сервер запускається. Спробуйте ще раз.')
+    return context['conn']
+
+
 def current_session(request):
-    store = request.app[STORE]['sessions']
     value = request.cookies.get(SESSION_COOKIE, '')
     if not value or len(value) > 128:
         raise AuthenticationError('Увійдіть через Telegram.')
-    session = store.get(digest(value))
+    conn = session_connection(request)
+    token_hash = digest(value)
+    session = conn.execute('SELECT uid, csrf, expires FROM browser_sessions WHERE token_hash = ?',
+                           (token_hash,)).fetchone()
     if not session or session['expires'] <= time.time():
-        store.pop(digest(value), None)
+        conn.execute('DELETE FROM browser_sessions WHERE token_hash = ?', (token_hash,))
         raise AuthenticationError('Сесія завершилася. Увійдіть через Telegram ще раз.')
     return session
 
@@ -225,15 +235,17 @@ async def callback(request):
         if not context.get('ready'):
             raise LoginFailure('server_restarting')
         restrictions.require_available(context['conn'], uid)
-        sessions = request.app[STORE]['sessions']
-        prune(sessions)
-        if len(sessions) >= 4096:
-            raise LoginFailure('server_busy')
-        old = request.cookies.get(SESSION_COOKIE, '')
-        sessions.pop(digest(old), None)
+        from queue_bot.storage.database import transaction
+        conn = context['conn']
         session_id = secrets.token_urlsafe(32)
-        sessions[digest(session_id)] = dict(uid=uid, csrf=secrets.token_urlsafe(32),
-                                            expires=time.time() + SESSION_TTL)
+        with transaction(conn):
+            conn.execute('DELETE FROM browser_sessions WHERE expires <= ?', (int(time.time()),))
+            old = request.cookies.get(SESSION_COOKIE, '')
+            conn.execute('DELETE FROM browser_sessions WHERE token_hash = ?', (digest(old),))
+            if conn.execute('SELECT COUNT(*) FROM browser_sessions').fetchone()[0] >= 4096:
+                raise LoginFailure('server_busy')
+            conn.execute('INSERT INTO browser_sessions (token_hash, uid, csrf, expires) VALUES (?, ?, ?, ?)',
+                         (digest(session_id), uid, secrets.token_urlsafe(32), int(time.time()) + SESSION_TTL))
         response = redirect_to('/app/')
         cookie(response, SESSION_COOKIE, session_id, SESSION_TTL)
         cookie(response, FLOW_COOKIE, '', 0)
@@ -278,7 +290,8 @@ async def logout(request):
         browser_identity(request)
     except AuthenticationError:
         return web.json_response({'error': 'Оновіть сторінку.'}, status=401)
-    request.app[STORE]['sessions'].pop(digest(request.cookies.get(SESSION_COOKIE, '')), None)
+    session_connection(request).execute('DELETE FROM browser_sessions WHERE token_hash = ?',
+                                        (digest(request.cookies.get(SESSION_COOKIE, '')),))
     response = web.json_response({'ok': True})
     cookie(response, SESSION_COOKIE, '', 0)
     return response
@@ -294,7 +307,7 @@ async def no_auth_cache(request, handler):
 
 
 def setup(app):
-    app[STORE] = {'flows': {}, 'sessions': {}}
+    app[STORE] = {'flows': {}}
     app.router.add_get('/auth/session', session_info)
     app.router.add_get('/auth/telegram/start', start)
     app.router.add_get('/auth/telegram/callback', callback)
