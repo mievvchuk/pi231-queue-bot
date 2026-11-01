@@ -8,6 +8,16 @@ try:
 except ImportError:
     psycopg = None
 
+BROWSER_SESSIONS_SCHEMA = """
+CREATE TABLE IF NOT EXISTS browser_sessions (
+    token_hash TEXT PRIMARY KEY,
+    uid BIGINT NOT NULL,
+    csrf TEXT NOT NULL,
+    expires BIGINT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_browser_sessions_expires ON browser_sessions(expires);
+"""
+
 MIGRATIONS = [
     """
     CREATE TABLE IF NOT EXISTS users (
@@ -205,7 +215,9 @@ CREATE UNIQUE INDEX IF NOT EXISTS ux_pending_swap_pair ON swap_requests(session_
     """,
 ]
 
-PG_SCHEMA = """
+MIGRATIONS.append(BROWSER_SESSIONS_SCHEMA)
+
+PG_SCHEMA = BROWSER_SESSIONS_SCHEMA + """
 CREATE TABLE IF NOT EXISTS working_saturdays (
     date TEXT PRIMARY KEY,
     replaces_day TEXT NOT NULL,
@@ -447,7 +459,7 @@ class PGConnectionWrapper:
         lastrowid = None
 
         cur = self.raw.cursor(row_factory=dict_row)
-        tables_without_id = {"bot_updates", "bot_state", "working_saturdays"}
+        tables_without_id = {"bot_updates", "bot_state", "working_saturdays", "browser_sessions"}
         table_match = re.search(r"insert\s+into\s+([a-zA-Z_0-9]+)", pg_sql, re.IGNORECASE)
         table_name = table_match.group(1).lower() if table_match else ""
 

@@ -3,7 +3,7 @@ import hashlib
 import json
 import time
 from urllib.parse import parse_qs, urlsplit
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import jwt
 import pytest
@@ -13,6 +13,20 @@ from queue_bot import config
 from queue_bot.mini_app import browser_auth as auth
 from queue_bot.services import restrictions
 from tests.test_mini_app import client, headers
+
+
+def test_postgres_session_insert_uses_hash_key_without_returning_id():
+    from queue_bot.storage.database import PGConnectionWrapper, BROWSER_SESSIONS_SCHEMA, PG_SCHEMA
+    raw = MagicMock()
+    raw.closed = False
+    conn = PGConnectionWrapper(raw, 'unused-offline-dsn')
+    raw.cursor.return_value.execute.reset_mock()
+    conn.execute('INSERT INTO browser_sessions (token_hash, uid, csrf, expires) VALUES (?, ?, ?, ?)',
+                 ('hash', 1, 'csrf', 123))
+    raw.cursor.return_value.execute.assert_called_once_with(
+        'INSERT INTO browser_sessions (token_hash, uid, csrf, expires) VALUES (%s, %s, %s, %s)',
+        ('hash', 1, 'csrf', 123))
+    assert BROWSER_SESSIONS_SCHEMA in PG_SCHEMA
 
 
 @pytest.fixture
@@ -107,8 +121,35 @@ async def test_browser_session_still_enforces_late_ban_and_expiry(client, conn, 
     cookie = {'Cookie': f'{auth.SESSION_COOKIE}={sid}'}
     conn.execute('UPDATE users SET is_blocked = TRUE WHERE telegram_id = ?', (1,))
     assert (await client.get('/api/miniapp/bootstrap', headers=cookie)).status in (400, 403)
-    client.app[auth.STORE]['sessions'][auth.digest(sid)]['expires'] = 1
+    conn.execute('UPDATE browser_sessions SET expires = 1 WHERE token_hash = ?', (auth.digest(sid),))
     assert (await client.get('/api/miniapp/bootstrap', headers=cookie)).status == 401
+
+
+@pytest.mark.asyncio
+async def test_login_survives_new_app_and_database_connection(client, db_path, login_config, monkeypatch, signing_key):
+    from aiohttp.test_utils import TestClient, TestServer
+    from queue_bot.storage.database import connect
+    from queue_bot.web import create_web_app
+
+    response, _ = await login(client, monkeypatch, signing_key)
+    sid = response.cookies[auth.SESSION_COOKIE].value
+    assert int(response.cookies[auth.SESSION_COOKIE]['max-age']) == 7 * 86400
+    conn = connect(db_path)
+    try:
+        stored = conn.execute('SELECT * FROM browser_sessions').fetchone()
+        assert stored['token_hash'] == auth.digest(sid) and stored['token_hash'] != sid
+        app = create_web_app(conn=conn, bot=AsyncMock())
+        async with TestClient(TestServer(app)) as restarted:
+            cookie = {'Cookie': f'{auth.SESSION_COOKIE}={sid}'}
+            info = await (await restarted.get('/auth/session', headers=cookie)).json()
+            assert info['authenticated'] is True and info['csrf'] == stored['csrf']
+            assert (await restarted.get('/api/miniapp/bootstrap', headers=cookie)).status == 200
+            protected = {**cookie, 'Origin': 'https://queue.example', 'X-CSRF-Token': info['csrf']}
+            assert (await restarted.post('/auth/logout', headers=protected)).status == 200
+        # Revocation is shared across processes, too.
+        assert (await (await client.get('/auth/session', headers=cookie)).json())['authenticated'] is False
+    finally:
+        conn.close()
 
 
 @pytest.mark.asyncio

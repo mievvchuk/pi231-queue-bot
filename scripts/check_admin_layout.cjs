@@ -21,7 +21,12 @@ const assets = path.join(__dirname, '../queue_bot/mini_app/static');
     await page.route('https://layout.invalid/**', route => {
       const url = new URL(route.request().url());
       if (url.pathname === '/api/miniapp/bootstrap') return route.fulfill({ json: {
-        today: '2026-11-01', queues: [], swaps: [],
+        today: '2026-11-01', swaps: [],
+        queues: ['Машинне навчання', 'Людино-машинна взаємодія', 'Конструювання програмного забезпечення', 'Програмування в Інтернет', 'Курсова робота'].map((subject, i) => ({
+          id: i + 1, subject, teacher: 'Викладач', type: 'lesson', status: 'open', count: 18,
+          my_position: i + 1, my_labs: [1, 2], my_planned_minutes: 30,
+        })),
+        next_lesson: { date: '2026-11-02', startTime: '10:00', endTime: '11:20', lessons: [{ subject: 'Машинне навчання', room: '231' }] },
         me: { name: 'Тест Адміністратор', is_registered: true, is_admin: true, is_owner: owner },
       } });
       if (url.pathname.startsWith('/api/miniapp/avatar/')) return route.fulfill({ status: 204 });
@@ -33,9 +38,27 @@ const assets = path.join(__dirname, '../queue_bot/mini_app/static');
       return route.fulfill({ body: fs.readFileSync(file), contentType: types[path.extname(name)] || 'text/plain' });
     });
     for (owner of [false, true]) {
-      for (const width of [320, 390, 430, 768, 1280]) {
+      for (const width of [320, 390, 430, 768, 1024, 1280, 1440, 1920]) {
         await page.setViewportSize({ width, height: 844 });
         await page.goto('https://layout.invalid/app/');
+        await page.locator('.home-queue-hero').waitFor();
+        await page.waitForFunction(() => !document.querySelector('.progress'));
+        await page.evaluate(() => document.fonts.ready);
+        const home = await page.evaluate(() => {
+          const rect = selector => { const r = document.querySelector(selector).getBoundingClientRect(); return {x:r.x,y:r.y,right:r.right,bottom:r.bottom,width:r.width,height:r.height}; };
+          return {main:rect('main'), hero:rect('.home-queue-hero'), lesson:rect('.upcoming-card'), nav:rect('.bottom-nav')};
+        });
+        if (width >= 1024) {
+          assert.ok(home.main.width >= Math.min(width - 300, 1120) && home.main.width <= 1121, `desktop content width: ${width}`);
+          assert.ok(home.hero.right <= home.lesson.x, `desktop cards overlap: ${width}`);
+          assert.ok(Math.abs(home.hero.y - home.lesson.y) < 1, `desktop cards not aligned: ${width} ${JSON.stringify(home)}`);
+          assert.ok(home.nav.right < home.main.x && home.nav.height < 320, `desktop sidebar oversized: ${width}`);
+        } else {
+          assert.ok(home.lesson.bottom <= home.hero.y, `mobile cards no longer stacked: ${width}`);
+        }
+        assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
+        if (process.env.PI231_DESKTOP_SCREENSHOT && !owner && width === 1440)
+          await page.screenshot({ path: process.env.PI231_DESKTOP_SCREENSHOT, fullPage: true });
         await page.getByRole('button', { name: 'До адміна', exact: true }).click();
         await page.getByRole('heading', { name: 'Керування', exact: true }).waitFor();
         await page.waitForFunction(() => !document.querySelector('.progress'));
@@ -62,7 +85,7 @@ const assets = path.join(__dirname, '../queue_bot/mini_app/static');
       }
     }
     assert.deepEqual(errors, []);
-    console.log('PASS: admin/owner rows at 320, 390, 430, 768, 1280px; text width, row height, distinct icon columns, no overflow or JS errors');
+    console.log('PASS: mobile/desktop home and admin/owner at 320–1920px; card alignment, readable rows, compact sidebar, no overflow or JS errors');
   } finally {
     await browser.close();
   }
