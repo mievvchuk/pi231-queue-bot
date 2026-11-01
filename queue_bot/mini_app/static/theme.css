@@ -638,7 +638,7 @@ input::file-selector-button {
   flex: 1;
 }
 .lesson-empty {
-  border-style: dashed;
+  border: 0;
   background: transparent;
 }
 .lesson-body > .lesson-time {

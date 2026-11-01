@@ -1105,7 +1105,9 @@
     );
   }
   function closeSheet() {
-    document.getElementById("sheet")?.remove();
+    const panel=document.getElementById("sheet");
+    panel?.querySelectorAll?.('video')?.forEach(video=>video.pause());
+    panel?.remove();
   }
   function sheet(title, description) {
     closeSheet();

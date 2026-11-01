@@ -193,7 +193,7 @@ async def test_forged_signatures_never_become_browser_sessions(client, login_con
 @pytest.mark.asyncio
 async def test_pwa_assets_are_public_and_real_api_stays_private(client):
     for name in ('manifest.webmanifest', 'sw.js', 'pwa.js', 'icon-192.png', 'icon-512.png',
-                 'design.js', 'design.css', 'design-adapter.css', 'bootstrap-icons.css',
+                 'design.js', 'help-videos.js', 'design.css', 'design-adapter.css', 'bootstrap-icons.css',
                  'bootstrap-icons.woff2', 'manrope-400.ttf', 'manrope-500.ttf',
                  'manrope-600.ttf', 'manrope-700.ttf', 'manrope-800.ttf'):
         assert (await client.get('/app/' + name)).status == 200
@@ -203,6 +203,26 @@ async def test_pwa_assets_are_public_and_real_api_stays_private(client):
     assert (await client.get('/auth/session')).headers['Cache-Control'] == 'no-store'
     assert (await client.get('/api/miniapp/bootstrap')).status == 401
     assert (await client.get('/api/miniapp/bootstrap', headers=headers())).status == 200
+
+
+@pytest.mark.asyncio
+async def test_video_guides_are_seekable_public_media_without_exposing_api(client):
+    from queue_bot.web import GUIDE_ASSETS
+    topics = ('join', 'complete', 'swap', 'appearance', 'install-phone', 'install-desktop')
+    assert len(GUIDE_ASSETS) == 18
+    for topic in topics:
+        url = '/app/guide-' + topic
+        response = await client.get(url + '.mp4', headers={'Range': 'bytes=0-127'})
+        assert response.status == 206
+        assert response.content_type == 'video/mp4'
+        assert response.headers['Content-Range'].startswith('bytes 0-127/')
+        initial = await response.read()
+        assert len(initial) == 128 and b'ftyp' in initial
+        assert (await client.get(url + '.jpg')).content_type == 'image/jpeg'
+        captions = await (await client.get(url + '.vtt')).text()
+        assert captions.startswith('WEBVTT') and '00:25.000 --> 00:30.000' in captions
+    assert (await client.get('/api/miniapp/bootstrap')).status == 401
+    assert (await client.get('/app/guide-unlisted.mp4')).status == 404
 
 
 @pytest.mark.asyncio

@@ -155,6 +155,13 @@ test("owner-only features never request data after switching to student mode", a
   assert.match(features.page("owner").textContent, /Недостатньо прав/);
 });
 
+test('administrator names accompany identifiers with a truthful unregistered fallback', async()=>{
+  const {S,features}=setup(async()=>({items:[{telegram_id:123,full_name:'Петренко Іван'},{telegram_id:456,full_name:null}]}));
+  S.mode='admin';await features.open('admin-admins');const text=features.page('admin-admins').textContent;
+  assert.match(text,/Петренко Іван/);assert.match(text,/Telegram ID: 123/);
+  assert.match(text,/Профіль ще не зареєстрований/);assert.match(text,/Telegram ID: 456/);
+});
+
 test("native anonymous poll remains read-only and shows actual result counts", async () => {
   const { features, panels } = setup(async (path) =>
     path === "/polls"
