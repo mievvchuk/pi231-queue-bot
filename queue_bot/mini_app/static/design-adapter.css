@@ -178,3 +178,5 @@ button:active:not(:disabled) { transform:scale(.97); }
 .student-actions>button{flex:1;min-width:130px}
 @media(min-width:700px){.report-stats{grid-template-columns:repeat(3,minmax(0,1fr))}.report-charts{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(min-width:1200px){.report-stats{grid-template-columns:repeat(5,minmax(0,1fr))}}
+
+.guide-speed{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin:16px 0;font-size:14px}.guide-speed select{width:auto;max-width:100%;min-width:180px}

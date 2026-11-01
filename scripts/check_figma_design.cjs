@@ -106,7 +106,10 @@ function detail(id){const q=queues.find(q=>q.id===id);const own=id===2;
  assert.equal(await page.locator('.video-guide-card').count(),6);assert.equal(mediaRequests.length,0,'help preloads videos before selection');
  for(let i=0;i<6;i++){
   await page.locator('.video-guide-card').nth(i).click();await page.waitForFunction(()=>{const v=document.querySelector('.guide-video');return v&&v.readyState>=1;});
-  const duration=await page.locator('.guide-video').evaluate(node=>node.duration);assert.ok(duration>=20&&duration<=40,'video duration '+duration);
+  const duration=await page.locator('.guide-video').evaluate(node=>node.duration);assert.ok(duration>=39.9&&duration<=40.1,'video duration '+duration);
+  assert.equal(await page.locator('.guide-video').evaluate(v=>v.muted||v.autoplay),false,'voice video must not be muted or autoplay');
+  await page.getByRole('combobox',{name:'Швидкість відео'}).selectOption('0.75');assert.equal(await page.locator('.guide-video').evaluate(v=>v.playbackRate),0.75);
+  await page.getByRole('combobox',{name:'Швидкість відео'}).selectOption('1');
   if(i===0){await page.locator('.guide-video').evaluate(async node=>{window.guideTestVideo=node;await node.play();node.currentTime=10;});await page.waitForFunction(()=>window.guideTestVideo.currentTime>=10);}
   await page.getByRole('button',{name:'Закрити',exact:true}).click();
   if(i===0)assert.equal(await page.evaluate(()=>window.guideTestVideo.paused&&!window.guideTestVideo.isConnected),true,'closing guide leaves playback active');

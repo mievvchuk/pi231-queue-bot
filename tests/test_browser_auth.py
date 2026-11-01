@@ -212,7 +212,7 @@ async def test_video_guides_are_seekable_public_media_without_exposing_api(clien
     assert len(GUIDE_ASSETS) == 18
     for topic in topics:
         url = '/app/guide-' + topic
-        response = await client.get(url + '.mp4', headers={'Range': 'bytes=0-127'})
+        response = await client.get(url + '.mp4?v=voice-2', headers={'Range': 'bytes=0-127'})
         assert response.status == 206
         assert response.content_type == 'video/mp4'
         assert response.headers['Content-Range'].startswith('bytes 0-127/')
@@ -220,7 +220,7 @@ async def test_video_guides_are_seekable_public_media_without_exposing_api(clien
         assert len(initial) == 128 and b'ftyp' in initial
         assert (await client.get(url + '.jpg')).content_type == 'image/jpeg'
         captions = await (await client.get(url + '.vtt')).text()
-        assert captions.startswith('WEBVTT') and '00:25.000 --> 00:30.000' in captions
+        assert captions.startswith('WEBVTT') and '00:00:40.000' in captions
     assert (await client.get('/api/miniapp/bootstrap')).status == 401
     assert (await client.get('/app/guide-unlisted.mp4')).status == 404
 
