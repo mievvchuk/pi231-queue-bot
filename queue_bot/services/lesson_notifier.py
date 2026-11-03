@@ -106,6 +106,11 @@ async def deliver(bot, conn, subjects, *, now=None):
 async def watch_lessons(bot, conn, subjects, interval=5):
     while True:
         try:
+            from queue_bot.services.lesson_scheduler import sync_schedule
+            sync_schedule(conn, subjects)
+        except Exception:
+            log.exception('Could not read the effective timetable; retrying')
+        try:
             attendance.tick(conn)
             await deliver(bot, conn, subjects)
         except Exception:

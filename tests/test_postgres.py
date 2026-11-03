@@ -10,6 +10,21 @@ from queue_bot.services import admins, queues, restrictions, users
 from queue_bot.services import swap_requests
 
 
+def test_postgres_scheduled_attendance_is_durable_and_keeps_priority(pg_conn):
+    from queue_bot.services import attendance, lesson_scheduler, schedule
+    sid = queues.create_session(pg_conn, 100, 1, 1)
+    queues.join_queue(pg_conn, 1, sid)
+    subjects = [{'id':1,'name':'КПЗ','teachers':[{'id':1,'name':'Щуцький С.В.'}]}]
+    data = {'tuesday':[{'pair':1,'subject':'КПЗ','teacher':'Щуцький С.В.'}]}
+    now = int(datetime(2026, 11, 3, 8, 30, tzinfo=schedule.UK_TZ).timestamp())
+    lesson_scheduler.sync_schedule(pg_conn, subjects, now=now, schedule_data=data)
+    first = attendance.active_run(pg_conn, sid, now=now)
+    assert first and first['ends_at'] == now + 80 * 60
+    lesson_scheduler.sync_schedule(pg_conn, subjects, now=now + 5, schedule_data=data)
+    assert attendance.active_run(pg_conn, sid, now=now + 5)['id'] == first['id']
+    assert queues.get_user_position(pg_conn, 1, sid) == 1
+
+
 @pytest.mark.asyncio
 async def test_postgres_lesson_migration_deadlines_and_priority(pg_conn, monkeypatch):
     from unittest.mock import AsyncMock

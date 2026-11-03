@@ -115,6 +115,9 @@ def stop(conn, actor, sid):
     with transaction(conn):
         require_admin(conn, actor)
         _lock(conn, sid)
+        queues._require_session(conn, sid)
+        from queue_bot.services.lesson_scheduler import suppress_current
+        suppress_current(conn, sid, now_seconds())
         conn.execute('UPDATE lesson_runs SET active = 0 WHERE session_id = ? AND active = 1', (sid,))
         log_action(conn, actor, 'stop_lesson', str(sid))
 

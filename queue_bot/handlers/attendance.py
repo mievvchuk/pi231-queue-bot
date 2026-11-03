@@ -18,7 +18,7 @@ class LateTime(StatesGroup):
 def lesson_summary(conn, sid, uid):
     data = attendance.view(conn, sid, uid)
     if not data:
-        return '\n\nРежим здачі на парі не запущено.'
+        return '\n\nЗдача почнеться автоматично за розкладом відповідної пари.'
     lines = ['\n\nЗдача на парі активна. На відповіді — 10 хвилин.']
     if data['current_name']:
         lines.append('Викликано / зараз здає: ' + html.escape(data['current_name']))
