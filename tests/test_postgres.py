@@ -10,6 +10,30 @@ from queue_bot.services import admins, queues, restrictions, users
 from queue_bot.services import swap_requests
 
 
+@pytest.mark.asyncio
+async def test_postgres_turn_reminder_releases_without_marking_passed(pg_conn, monkeypatch):
+    from unittest.mock import AsyncMock
+    from queue_bot.services import attendance as a
+    from queue_bot.services.lesson_notifier import deliver
+    clock = [10000]
+    monkeypatch.setattr(a, 'now_seconds', lambda: clock[0])
+    sid = queues.create_session(pg_conn, 100, 1, 1)
+    queues.join_queue(pg_conn, 1, sid, lab_numbers=[1,2], planned_minutes=15)
+    a.start(pg_conn, 100, sid)
+    token = lambda: a.view(pg_conn, sid, 1)['own']['token']
+    a.respond(pg_conn, 1, token(), 'present')
+    a.respond(pg_conn, 1, token(), 'ready')
+    clock[0] += 900
+    a.tick(pg_conn)
+    await deliver(AsyncMock(), pg_conn, [])
+    assert a.view(pg_conn, sid, 1)['own']['deadline'] == clock[0] + 600
+    clock[0] += 600
+    a.tick(pg_conn)
+    row = queues.get_entries(pg_conn, sid)[0]
+    assert row['passed_labs'] == '[]' and row['labs_passed'] == 0
+    assert a.view(pg_conn, sid, 1)['own']['state'] == 'skipped'
+
+
 def test_postgres_scheduled_attendance_is_durable_and_keeps_priority(pg_conn):
     from queue_bot.services import attendance, lesson_scheduler, schedule
     sid = queues.create_session(pg_conn, 100, 1, 1)

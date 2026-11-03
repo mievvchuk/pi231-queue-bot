@@ -45,7 +45,7 @@ def _event(conn, row, kind):
 
 def _change(conn, row, state, deadline=None):
     conn.execute('''UPDATE lesson_attendance SET state = ?, deadline = ?, revision = revision + 1,
-        token = ? WHERE id = ?''', (state, deadline, secrets.token_hex(10), row['id']))
+        token = ?, turn_due = NULL WHERE id = ?''', (state, deadline, secrets.token_hex(10), row['id']))
     return conn.execute('SELECT * FROM lesson_attendance WHERE id = ?', (row['id'],)).fetchone()
 
 
@@ -68,6 +68,25 @@ def _sync(conn, run):
 def _advance(conn, run, now):
     _sync(conn, run)
     for row in members(conn, run['id']):
+        if row['state'] == 'serving':
+            due = row['turn_due']
+            if due is None:
+                # Existing turns from before the migration have no start timestamp.
+                entry = queues.get_entry(conn, row['entry_id'])
+                due = now + entry['planned_minutes'] * 60 if entry['planned_minutes'] else 0
+                conn.execute('UPDATE lesson_attendance SET turn_due = ? WHERE id = ?', (due, row['id']))
+            if (due > 0 and due <= now) or (due == 0 and row['turn_due'] is None):
+                reminder = _change(conn, row, 'serving')
+                # Zero means the reminder is queued/awaiting an answer, not a new turn.
+                conn.execute('UPDATE lesson_attendance SET turn_due = 0 WHERE id = ?', (row['id'],))
+                _event(conn, reminder, 'finish_reminder')
+                continue
+            if row['deadline'] is not None and row['deadline'] <= now:
+                entry = queues.get_entry(conn, row['entry_id'])
+                _move_to_tail(conn, entry)
+                timed_out = _change(conn, row, 'skipped')
+                _event(conn, timed_out, 'turn_timeout')
+                continue
         if row['deadline'] is None or row['deadline'] > now:
             continue
         if row['state'] in ('pending', 'called'):
@@ -151,12 +170,25 @@ def respond(conn, uid, token, action, *, minutes=None, now=None):
         row = next((r for r in members(conn, run['id']) if r['token'] == token and r['telegram_id'] == uid), None) if run else None
         if not row:
             raise BotError('Ця кнопка застаріла або призначена іншому студенту.')
-        if row['state'] == 'serving':
+        if row['state'] == 'serving' and action != 'extend':
             raise BotError('Спочатку завершіть поточний підхід.')
         if action == 'ready':
             if row['state'] != 'called' or (row['deadline'] is not None and row['deadline'] <= now):
                 raise BotError('Виклик уже неактуальний. Підтвердьте присутність у черзі.')
-            _change(conn, row, 'serving')
+            entry = queues.get_entry(conn, row['entry_id'])
+            duration = entry['planned_minutes'] if minutes is None else minutes
+            if type(duration) is not int or not 1 <= duration <= 2**31 - 1:
+                raise BotError('Вкажіть, скільки хвилин плануєте здавати.')
+            serving = _change(conn, row, 'serving')
+            conn.execute('UPDATE lesson_attendance SET turn_due = ? WHERE id = ?', (now + duration * 60, serving['id']))
+        elif action == 'extend':
+            if row['state'] != 'serving' or (row['deadline'] is not None and row['deadline'] <= now):
+                raise BotError('Підхід або час на відповідь уже завершено. Оновіть чергу.')
+            if type(minutes) is not int or not 1 <= minutes <= 240:
+                raise BotError('Вкажіть додатковий час від 1 до 240 хвилин.')
+            extended = _change(conn, row, 'serving')
+            conn.execute('UPDATE lesson_attendance SET turn_due = ? WHERE id = ?', (now + minutes * 60, extended['id']))
+            _event(conn, extended, 'turn_extended')
         elif action == 'present':
             # Presence does not replace the separate confirmation of a call.
             if row['state'] == 'called':
@@ -177,16 +209,28 @@ def respond(conn, uid, token, action, *, minutes=None, now=None):
 def require_turn(conn, entry):
     run = active_run(conn, entry['session_id'])
     if run:
-        row = conn.execute("SELECT id FROM lesson_attendance WHERE run_id = ? AND entry_id = ? AND user_id = ? AND state = 'serving'",
+        row = conn.execute("SELECT id, deadline FROM lesson_attendance WHERE run_id = ? AND entry_id = ? AND user_id = ? AND state = 'serving'",
                            (run['id'], entry['id'], entry['user_id'])).fetchone()
         if not row:
             raise BotError('Спочатку дочекайтеся виклику й підтвердьте готовність здавати.')
+        if row['deadline'] is not None and row['deadline'] <= now_seconds():
+            raise BotError('Час на відповідь після нагадування минув. Оновіть чергу.')
 
 
 def end_turn(conn, entry):
     # Called inside the same transaction as moving/closing a queue entry.
-    conn.execute("UPDATE lesson_attendance SET state = 'present', deadline = NULL, warned = 0, revision = revision + 1, token = ? WHERE entry_id = ? AND user_id = ? AND state IN ('called', 'serving') AND run_id IN (SELECT id FROM lesson_runs WHERE active = 1)",
+    conn.execute("UPDATE lesson_attendance SET state = 'present', deadline = NULL, turn_due = NULL, warned = 0, revision = revision + 1, token = ? WHERE entry_id = ? AND user_id = ? AND state IN ('called', 'serving') AND run_id IN (SELECT id FROM lesson_runs WHERE active = 1)",
                  (secrets.token_hex(10), entry['id'], entry['user_id']))
+
+
+def _move_to_tail(conn, entry):
+    """Release a used approach without changing any laboratory results."""
+    end_turn(conn, entry)
+    ids = queues._ordered_ids(conn, entry['session_id'])
+    ids.remove(entry['id'])
+    ids.append(entry['id'])
+    queues._set_order(conn, entry['session_id'], ids)
+    conn.execute('UPDATE queue_entries SET entry_revision = entry_revision + 1, ready_to_swap = FALSE, swap_wish = NULL WHERE id = ?', (entry['id'],))
 
 
 def correct(conn, actor, entry_id, action, *, run_id=None):

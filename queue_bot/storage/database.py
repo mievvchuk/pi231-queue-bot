@@ -219,6 +219,7 @@ from queue_bot.storage.lesson_schema import LESSON_SCHEMA
 
 MIGRATIONS.append(BROWSER_SESSIONS_SCHEMA)
 MIGRATIONS.append(LESSON_SCHEMA)
+MIGRATIONS.append('ALTER TABLE lesson_attendance ADD COLUMN turn_due BIGINT;')
 
 PG_SCHEMA = BROWSER_SESSIONS_SCHEMA + """
 CREATE TABLE IF NOT EXISTS working_saturdays (
@@ -439,6 +440,7 @@ class PGConnectionWrapper:
     def _init_schema(self):
         with self.raw.cursor() as cur:
             cur.execute(PG_SCHEMA)
+            cur.execute('ALTER TABLE lesson_attendance ADD COLUMN IF NOT EXISTS turn_due BIGINT;')
             cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_blocked BOOLEAN NOT NULL DEFAULT FALSE;")
             cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS banned_until TEXT DEFAULT NULL;")
             cur.execute("ALTER TABLE queue_entries ADD COLUMN IF NOT EXISTS lab_count INTEGER DEFAULT NULL CHECK (lab_count IS NULL OR lab_count BETWEEN 1 AND 20);")

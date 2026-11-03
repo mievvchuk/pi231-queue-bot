@@ -429,3 +429,18 @@ test('late student can confirm arrival without losing their queue position',()=>
   assert.ok(page.textContent.includes('На цій парі не буду'));
   assert.equal(app.S.queue.entries[0].position,2);
 });
+
+test('serving student sees their reminder and a separate response deadline in Kyiv time',()=>{
+  const {app}=setup();
+  app.S.queue={id:1,subject:'КПЗ',status:'open',count:1,labs:[{number:1}],
+    entries:[{id:1,name:'Тест Студент',position:1,is_me:true,labs:[1],planned_minutes:20}],
+    lesson:{id:1,ends_at:1800000000,people_ahead:0,own:{state:'serving',token:'test',turn_due:Date.parse('2026-11-03T07:00:00Z')/1000},states:{'1':'Зараз здає'}}};
+  let page=app.queuePage();
+  assert.ok(page.textContent.includes('Нагадування про завершення о 09:00'));
+  assert.ok(page.textContent.includes('Ще здаю'));
+  assert.ok(page.textContent.includes('Я вже завершив'));
+  app.S.queue.lesson.own.turn_due=0;
+  app.S.queue.lesson.own.deadline=Date.parse('2026-11-03T07:10:00Z')/1000;
+  page=app.queuePage();
+  assert.ok(page.textContent.includes('продовжіть час до 09:10'));
+});

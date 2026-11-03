@@ -216,7 +216,7 @@ async def student_action(request):
         return web.json_response({'message': f'Ви записалися. Ваше місце: {place}.', 'position': place, 'queue_id': sid})
     session, entry = current_entry(request, data)
     if action == 'finish-turn':
-        queues.finish_own_entry(conn, uid, sid, passed=False)
+        queues.finish_own_entry(conn, uid, sid, passed=not bool(lab_catalog.labs_for_session(session)))
         await notify_next(request, sid, entry['position'])
         return web.json_response({'message': 'Підхід завершено. Решта робіт збережена, ви в кінці черги.'})
     if action == 'not-passed':
