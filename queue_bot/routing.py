@@ -3,8 +3,8 @@ from aiogram import Dispatcher
 
 
 def ordered_routers():
-    from queue_bot.handlers import navigation, bans, start, polls, admin, schedule, student
-    return (navigation.router, bans.router, start.router, polls.router, admin.router,
+    from queue_bot.handlers import navigation, bans, start, polls, admin, schedule, student, attendance
+    return (attendance.router, navigation.router, bans.router, start.router, polls.router, admin.router,
             schedule.router, student.router, start.fallback_router)
 
 

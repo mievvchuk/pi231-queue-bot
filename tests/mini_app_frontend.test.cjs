@@ -399,3 +399,33 @@ test('queue actions are directly visible with icons rather than a details dropdo
   const retry=allNodes(page).find(n=>n.tag==='button'&&n.textContent.includes('Не здав — у кінець'));
   assert.ok(allNodes(retry).some(n=>n.tag==='svg'));
 });
+
+test('active lesson exposes ten-minute confirmation and keeps completion for the serving student',()=>{
+  const {app}=setup();
+  app.S.queue={id:1,subject:'КПЗ',status:'open',count:1,labs:[{number:1}],
+    entries:[{id:1,name:'Тест Студент',position:5,is_me:true,labs:[1]}],
+    lesson:{id:1,ends_at:1800000000,people_ahead:0,current_name:'Тест Студент',
+      own:{state:'called',token:'test'},states:{'1':'Викликано'}}};
+  const page=app.queuePage();
+  const buttons=allNodes(page).filter(n=>n.tag==='button');
+  assert.ok(page.textContent.includes('10 хвилин'));
+  assert.ok(buttons.some(n=>n.textContent.includes('Готовий здавати')));
+  assert.ok(buttons.some(n=>n.textContent.includes('Пропустити мене')));
+  assert.ok(!buttons.some(n=>n.textContent.includes('Не здав — у кінець')));
+  assert.ok(!buttons.some(n=>n.textContent.includes('Завершити підхід з рештою робіт')));
+  app.S.queue.lesson.own.state='serving';
+  const serving=app.queuePage();
+  assert.ok(serving.textContent.includes('Завершити підхід з рештою робіт'));
+});
+
+test('late student can confirm arrival without losing their queue position',()=>{
+  const {app}=setup();
+  app.S.queue={id:1,subject:'КПЗ',status:'open',count:1,labs:[{number:1}],
+    entries:[{id:1,name:'Тест Студент',position:2,is_me:true,labs:[1]}],
+    lesson:{id:1,ends_at:1800000000,people_ahead:null,own:{state:'late',token:'test'},states:{'1':'Запізнюється'}}};
+  const page=app.queuePage();
+  assert.ok(page.textContent.includes('Запізнюється'));
+  assert.ok(page.textContent.includes('Я вже на місці'));
+  assert.ok(page.textContent.includes('На цій парі не буду'));
+  assert.equal(app.S.queue.entries[0].position,2);
+});

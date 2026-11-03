@@ -28,6 +28,14 @@ def queue_view(conn, subjects, session, uid, *, detail=False, admin=False):
     result = dict(id=session['id'], subject=subject, teacher=teacher, status=session['status'],
                   type=session['queue_type'], title=session['lesson_title'], count=sum(r['user_id'] is not None for r in rows),
                   my_position=queues.get_user_position(conn, uid, session['id']))
+    from queue_bot.services import attendance
+    lesson = attendance.view(conn, session['id'], uid)
+    if lesson:
+        lesson['states'] = {str(k): v for k, v in lesson['states'].items()}
+        if lesson['own']:
+            own_state = lesson['own']
+            lesson['own'] = {k: own_state[k] for k in ('state', 'token', 'deadline')}
+    result['lesson'] = lesson
     own = next((r for r in rows if r['telegram_id'] == uid), None)
     result['my_labs'] = lab_catalog.read_numbers(own['selected_labs']) if own else None
     result['my_planned_minutes'] = own['planned_minutes'] if own else None

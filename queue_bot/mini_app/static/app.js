@@ -897,7 +897,7 @@
       otherActions = el('div',{class:'action-stack'}),
       dock = el('div',{class:'queue-dock'});
     if (own) {
-      dock.append(
+      if (!q.lesson || q.lesson.own?.state === 'serving') dock.append(
         btn(
           [icon('check'), q.labs.length
             ? "Здав" + (own.labs?.length > 1 ? " лабораторні" : "")
@@ -913,7 +913,7 @@
         controls.append(
           btn([icon('code-slash'),"Лабораторні та час"], () => labForm(q, own), "button secondary"),
         );
-      if (!consultation(q))
+      if (!consultation(q) && (!q.lesson || q.lesson.own?.state === 'serving'))
         otherActions.append(
           btn(
             [icon('refresh'),"Не здав — у кінець"],
@@ -976,6 +976,43 @@
           "Запис закрито. Уже записані студенти можуть завершувати здачу.",
         ),
       );
+    if (q.lesson) {
+      const ownState = q.lesson.own;
+      const summary = el('section', {class:'card action-stack'},
+        el('strong',{},'Здача на парі активна'),
+        small('На підтвердження присутності та виклику — 10 хвилин.'),
+        small('До '+new Date(q.lesson.ends_at*1000).toLocaleTimeString('uk-UA',{hour:'2-digit',minute:'2-digit'})),
+        q.lesson.current_name ? small('Викликано / зараз здає: '+q.lesson.current_name) : small('Очікуємо готових студентів.'),
+        ownState ? small(q.lesson.states[String(own.id)] || '') : null,
+        q.lesson.people_ahead != null ? small('Людей попереду: '+q.lesson.people_ahead) : null);
+      if (ownState) {
+        const answer = (response, minutes) => mutate('/queues/'+q.id+'/attendance', {token:ownState.token,response,minutes});
+        if (ownState.state === 'called') summary.append(
+          btn('Готовий здавати',()=>answer('ready'),'button primary'),
+          btn('Пропустити мене',()=>answer('skip'),'button secondary'));
+        else if (ownState.state !== 'serving') summary.append(
+          btn('Я вже на місці',()=>answer('present'),'button primary'),
+          btn('Запізнююсь',()=>{
+            const panel=sheet('Запізнююсь','Через скільки хвилин будете? Місце зберігається, інші поки можуть здавати.');
+            const minutes=el('input',{type:'number',min:1,max:240,step:1,value:10,required:true,'aria-label':'Хвилин до приходу'});
+            const form=el('form',{},minutes,el('button',{type:'submit',class:'button primary'},'Підтвердити запізнення'));
+            form.addEventListener('submit',event=>{event.preventDefault();answer('late',Number(minutes.value));});panel.append(form);
+          },'button secondary'),
+          btn('На цій парі не буду',()=>answer('absent'),'button secondary'));
+      }
+      controls.append(summary);
+    }
+    if (own && q.labs.length && (!q.lesson || q.lesson.own?.state === 'serving'))
+      otherActions.append(btn('Завершити підхід з рештою робіт',()=>confirmSheet(
+        'Завершити підхід?', 'Решта робіт збережеться, а ви перейдете в кінець черги.',
+        ()=>mutate('/queues/'+q.id+'/finish-turn',reference(own))),'button secondary'));
+    if (isAdmin()) {
+      if (q.lesson) controls.append(btn('Зупинити здачу на парі',()=>mutate('/admin/queues/'+q.id,{action:'stop-lesson'}),'button secondary'));
+      else controls.append(btn('Почати здачу на парі',()=>{
+        const panel=sheet('Почати здачу','Студенти отримають запит присутності. На обидві відповіді — 10 хвилин. Оберіть тривалість пари; після неї виклики зупиняться.');
+        [40,80,90].forEach(minutes=>panel.append(btn(minutes+' хв',()=>mutate('/admin/queues/'+q.id,{action:'start-lesson',minutes}),'button secondary')));
+      },'button primary'));
+    }
     if (isAdmin())
       controls.append(
         btn(
@@ -1033,6 +1070,7 @@
             row.name,
             row.is_me ? el("span", { class: "you" }, "ти") : null,
           ),
+          q.lesson?.states[String(row.id)] ? small(q.lesson.states[String(row.id)]) : null,
           row.swap_wish
             ? badge(row.swap_wish === "higher" ? "Хоче вище ↑" : "Хоче нижче ↓")
             : null,
@@ -1764,6 +1802,13 @@
       });
     });
     panel.append(move);
+    if(q.lesson && !row.vacant) {
+      const correct = response => mutate('/admin/entries/'+row.id,{action:'attendance',response,run_id:q.lesson.id,revision:row.entry_revision});
+      panel.append(small(q.lesson.states[String(row.id)] || 'Оновіть чергу'),
+        btn('Підтвердити присутність',()=>correct('present'),'button secondary'),
+        btn('Пропустити на цій парі',()=>correct('skipped'),'button secondary'),
+        btn('Завершити підхід з рештою робіт',()=>correct('finish'),'button secondary'));
+    }
     if (!row.vacant)
       panel.append(
         btn(
@@ -2109,8 +2154,11 @@
     if (event.key === "Escape" && !S.busy) {closeSheet();design?.closeMenu();}
   });
   window.setInterval(() => {features?.tick?.();design?.tick?.();}, 1000);
+  window.setInterval(() => {
+    if(document.visibilityState === 'visible' && S.queue && !S.busy && !S.loading && !document.querySelector('.sheet')) void load();
+  }, 15000);
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible') features?.tick?.();
+    if (document.visibilityState === 'visible') {features?.tick?.(); if(S.queue && !S.busy && !S.loading && !document.querySelector('.sheet')) void load();}
   });
   theme();
   tg?.onEvent?.("themeChanged", theme);

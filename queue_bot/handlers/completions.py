@@ -59,7 +59,7 @@ async def finish_selection(message, state, conn, subjects, numbers, *, telegram_
     if remaining:
         note = (f'✅ Здано: {lab_catalog.format_numbers(numbers)}. '
                 f'Залишилось: <b>{lab_catalog.format_numbers(remaining)}</b>.\n'
-                'Ваше місце збережено. Ліміт перераховано для решти робіт.')
+                'Якщо продовжуєте здавати, місце збережено. Коли закінчите, натисніть «Завершити підхід». Решта робіт перейде в кінець черги.')
     else:
         note = '✅ Усі вибрані лабораторні здані. Вас знято з черги.'
         await notify_next_students(bot or message.bot, conn, subjects, sid, removed_position=old_position)

@@ -95,10 +95,13 @@ async def open_queue_screen(message: Message, conn, subjects, session_id: int, n
     uid = telegram_id if telegram_id is not None else message.from_user.id
     is_adm = admins.is_admin(conn, uid)
     text = '👤 <b>Режим студента</b>\n\n' + format_queue(subjects, session, entries, uid)
+    from queue_bot.handlers.attendance import lesson_summary, show_controls
+    text += lesson_summary(conn, session_id, uid)
     if note:
         text = f"{note}\n\n{text}"
     in_queue = queues.get_user_position(conn, uid, session_id) is not None
     markup = get_queue_view_reply_menu(is_admin=is_adm, can_edit_labs=in_queue and session['status'] != 'archived' and bool(lab_catalog.labs_for_session(session)))
+    await show_controls(message, conn, session_id, uid)
     await message.answer(text, reply_markup=markup)
 
 

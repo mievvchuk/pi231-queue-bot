@@ -1,7 +1,7 @@
 import sqlite3
 import json
 
-from queue_bot.storage.database import transaction
+from queue_bot.storage.database import transaction, PGConnectionWrapper
 from queue_bot.services.admins import log_action, require_admin
 from queue_bot.services.errors import BotError
 from queue_bot.services.restrictions import require_available
@@ -72,7 +72,8 @@ def list_user_sessions(conn: sqlite3.Connection, telegram_id: int) -> list[sqlit
 # ---------- Внутрішні помічники (без власних транзакцій) ----------
 
 def _require_session(conn, session_id: int, statuses=UNFINISHED):
-    session = get_session(conn, session_id)
+    suffix = ' FOR UPDATE' if isinstance(conn, PGConnectionWrapper) else ''
+    session = conn.execute('SELECT * FROM queue_sessions WHERE id = ?' + suffix, (session_id,)).fetchone()
     if session is None:
         raise BotError("Чергу не знайдено.")
     if session["status"] not in statuses:
@@ -85,6 +86,9 @@ def _require_active_entry(conn, entry_id: int):
     if entry is None or entry["status"] != "active":
         raise BotError("Запис не знайдено або він уже неактивний.")
     _require_session(conn, entry["session_id"])
+    entry = get_entry(conn, entry_id)
+    if entry is None or entry['status'] != 'active':
+        raise BotError('Запис уже змінився. Оновіть чергу.')
     return entry
 
 
@@ -110,6 +114,8 @@ def _close_entry(conn, entry, new_status: str) -> None:
         "WHERE id = ?",
         (new_status, entry["id"]),
     )
+    from queue_bot.services.attendance import end_turn
+    end_turn(conn, entry)
     _set_order(conn, entry["session_id"], _ordered_ids(conn, entry["session_id"]))
 
 
@@ -251,6 +257,7 @@ def _place_user_at(conn, session_id: int, user_id: int, position: int, allow_shi
 
 def _own_active_entry(conn, telegram_id: int, session_id: int):
     """Студент працює лише з власним записом (шукаємо за його Telegram ID)."""
+    _require_session(conn, session_id)
     require_available(conn, telegram_id)
     entry = conn.execute(
         """SELECT e.* FROM queue_entries e JOIN users u ON u.id = e.user_id
@@ -332,6 +339,8 @@ def record_own_passed_lab_numbers(conn, telegram_id, session_id, numbers, *, ent
         session = _require_session(conn, session_id)
         entry = _own_active_entry(conn, telegram_id, session_id)
         _check_revision(entry, entry_id, expected_revision)
+        from queue_bot.services.attendance import require_turn
+        require_turn(conn, entry)
         pending = lab_catalog.read_numbers(entry['selected_labs'])
         numbers = lab_catalog.validate_numbers(session, numbers)
         if not pending or not set(numbers).issubset(pending):
@@ -356,6 +365,8 @@ def record_own_passed_labs(conn, telegram_id: int, session_id: int, passed_count
     with transaction(conn):
         _require_session(conn, session_id)
         entry = _own_active_entry(conn, telegram_id, session_id)
+        from queue_bot.services.attendance import require_turn
+        require_turn(conn, entry)
         if entry['selected_labs'] is not None:
             raise BotError('Для цього запису оберіть конкретні здані лабораторні.')
         remaining = entry['lab_count']
@@ -440,9 +451,13 @@ def finish_own_entry(conn: sqlite3.Connection, telegram_id: int, session_id: int
     with transaction(conn):
         entry = _own_active_entry(conn, telegram_id, session_id)
         _require_session(conn, session_id)
+        from queue_bot.services.attendance import require_turn, end_turn
+        require_turn(conn, entry)
         if passed:
             _close_entry(conn, entry, "completed")
             return None
+        end_turn(conn, entry)
+        conn.execute('UPDATE queue_entries SET entry_revision = entry_revision + 1 WHERE id = ?', (entry['id'],))
         ids = _ordered_ids(conn, session_id)
         ids.remove(entry["id"])
         ids.append(entry["id"])

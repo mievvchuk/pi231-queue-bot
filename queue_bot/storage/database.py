@@ -215,7 +215,10 @@ CREATE UNIQUE INDEX IF NOT EXISTS ux_pending_swap_pair ON swap_requests(session_
     """,
 ]
 
+from queue_bot.storage.lesson_schema import LESSON_SCHEMA
+
 MIGRATIONS.append(BROWSER_SESSIONS_SCHEMA)
+MIGRATIONS.append(LESSON_SCHEMA)
 
 PG_SCHEMA = BROWSER_SESSIONS_SCHEMA + """
 CREATE TABLE IF NOT EXISTS working_saturdays (
@@ -364,6 +367,9 @@ CREATE UNIQUE INDEX IF NOT EXISTS ux_pending_swap_pair ON swap_requests(session_
     WHERE status = 'pending';
 
 """
+
+
+PG_SCHEMA += LESSON_SCHEMA.replace('INTEGER PRIMARY KEY AUTOINCREMENT', 'SERIAL PRIMARY KEY')
 
 
 class PGRow(dict):

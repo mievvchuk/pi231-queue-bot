@@ -35,7 +35,9 @@ async def main():
         from queue_bot.services.updates import check_and_broadcast_updates
         from queue_bot.services.schedule_notifier import start_schedule_notifier
         from queue_bot.services.polls import start_polls_watcher
+        from queue_bot.services.lesson_notifier import watch_lessons
         tasks = [
+            asyncio.create_task(watch_lessons(bot, conn, subjects)),
             asyncio.create_task(check_and_broadcast_updates(bot, conn)),
             asyncio.create_task(start_schedule_notifier(bot, conn, interval_sec=config.SCHEDULE_CHECK_INTERVAL)),
             asyncio.create_task(start_polls_watcher(bot, conn, interval_sec=config.POLLS_WATCH_INTERVAL)),
