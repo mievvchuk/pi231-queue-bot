@@ -15,6 +15,10 @@ class LateTime(StatesGroup):
     minutes = State()
 
 
+class TurnTime(StatesGroup):
+    minutes = State()
+
+
 def lesson_summary(conn, sid, uid):
     data = attendance.view(conn, sid, uid)
     if not data:
@@ -81,6 +85,35 @@ async def show_controls(message, conn, sid, uid):
 async def attendance_answer(callback, state, conn, subjects):
     try:
         _, token, action = callback.data.split(':')
+        if action in ('ready', 'extend', 'review', 'done'):
+            found = conn.execute('SELECT r.session_id FROM lesson_attendance a JOIN lesson_runs r ON r.id = a.run_id WHERE a.token = ?', (token,)).fetchone()
+            data = attendance.view(conn, found['session_id'], callback.from_user.id) if found else None
+            if not data or not data['own'] or data['own']['token'] != token:
+                raise BotError('Ця кнопка застаріла або призначена іншому студенту.')
+            own = data['own']
+            entry = queues.get_entry(conn, own['entry_id'])
+            if action in ('extend', 'review', 'done'):
+                attendance.require_turn(conn, entry)
+            if action == 'extend' or action == 'ready' and entry['planned_minutes'] is None:
+                await state.set_state(TurnTime.minutes)
+                await state.update_data(turn_token=token, turn_action=action)
+                prompt = 'Скільки додаткових хвилин потрібно?' if action == 'extend' else 'Скільки хвилин плануєте здавати?'
+                await callback.message.answer(prompt + ' Введіть число від 1 до 240 або /cancel.')
+                await callback.answer()
+                return
+            if action == 'review':
+                from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+                await callback.message.answer('Позначте фактично здані роботи або завершіть підхід із незданими. Поки результат не підтверджено, жодну роботу не зараховано.',
+                    reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                        [InlineKeyboardButton(text='Позначити здані роботи', callback_data=f'att:{token}:done')],
+                        [InlineKeyboardButton(text='Завершити з незданими роботами', callback_data=f'att:{token}:finish')]]))
+                await callback.answer()
+                return
+            if action == 'done':
+                from queue_bot.handlers.completions import begin_completion
+                await begin_completion(callback.message, state, conn, found['session_id'], telegram_id=callback.from_user.id, subjects=subjects)
+                await callback.answer()
+                return
         if action in ('late', 'custom'):
             row = conn.execute('SELECT r.session_id FROM lesson_attendance a JOIN lesson_runs r ON r.id = a.run_id WHERE a.token = ?', (token,)).fetchone()
             data = attendance.view(conn, row['session_id'], callback.from_user.id) if row else None
@@ -131,6 +164,27 @@ async def custom_late_time(message, state, conn, subjects):
     await state.update_data(session_id=sid)
     await deliver(message.bot, conn, subjects)
     await message.answer('Запізнення підтверджено. Місце збережене; поки інші можуть здавати.')
+
+
+@router.message(TurnTime.minutes)
+async def turn_time(message, state, conn, subjects):
+    if message.text == '/cancel':
+        await state.clear()
+        await message.answer('Скасовано. Час підходу не змінено.')
+        return
+    try:
+        minutes = int(message.text or '')
+        if not 1 <= minutes <= 240:
+            raise ValueError
+        data = await state.get_data()
+        sid = attendance.respond(conn, message.from_user.id, data.get('turn_token'), data.get('turn_action'), minutes=minutes)
+    except (ValueError, BotError) as exc:
+        await message.answer(str(exc) if isinstance(exc, BotError) else 'Введіть число від 1 до 240 або /cancel.')
+        return
+    await state.clear()
+    await state.update_data(session_id=sid)
+    await deliver(message.bot, conn, subjects)
+    await message.answer(f'Час підтверджено: {minutes} хв. Після нього бот нагадає про завершення. На відповідь після нагадування — 10 хвилин.')
 
 
 @router.callback_query(F.data.startswith('turn:'))

@@ -18,7 +18,7 @@ def keyboard(row):
     def button(text, action):
         return InlineKeyboardButton(text=text, callback_data=f'att:{token}:{action}')
     if state == 'serving':
-        rows = [[button('Завершити підхід', 'finish')]]
+        rows = [[button('Я вже завершив', 'review')], [button('Ще здаю', 'extend')]]
     elif state == 'called':
         rows = [[button('Готовий здавати', 'ready')], [button('Пропустити мене', 'skip')]]
     else:
@@ -35,6 +35,12 @@ def late_keyboard(token):
 
 
 def message_content(row, kind, title):
+    if kind == 'finish_reminder':
+        return f'{title}\nЧас вашого підходу минув. Ви вже завершили чи ще здаєте? Якщо потрібно більше часу, вкажіть скільки. На відповідь є 10 хвилин. Без відповіді підхід завершиться, а нездані роботи перейдуть у кінець. Здачу автоматично не зараховуємо.'
+    if kind == 'turn_timeout':
+        return f'{title}\nПісля нагадування минуло 10 хвилин без відповіді. Підхід звільнено, запис із незданими роботами перенесено в кінець. Жодної роботи автоматично не зараховано. Щоб знову здавати на цій парі, підтвердьте присутність.'
+    if kind == 'turn_extended':
+        return f'{title}\nДодатковий час підтверджено. Бот нагадає про завершення після вказаного вами часу.'
     if kind == 'warning':
         return f'{title}\nПеред вами залишилося двоє людей. Готуйтеся до здачі. Відповідати на це попередження не потрібно.'
     if kind == 'call':
@@ -91,6 +97,8 @@ async def deliver(bot, conn, subjects, *, now=None):
                 conn.execute('UPDATE lesson_messages SET sent = 1 WHERE id = ?', (event['id'],))
                 # No successful delivery: do not reserve a call indefinitely.
                 conn.execute("UPDATE lesson_attendance SET deadline = ? WHERE id = ? AND revision = ? AND state IN ('pending', 'called')", (now, row['id'], row['revision']))
+                if event['kind'] == 'finish_reminder':
+                    conn.execute("UPDATE lesson_attendance SET deadline = ? WHERE id = ? AND revision = ? AND state = 'serving' AND deadline IS NULL", (now + attendance.RESPONSE_SECONDS, row['id'], row['revision']))
             continue
         except Exception:
             log.exception('Attendance delivery failed for entry %s; retrying', row['entry_id'])
@@ -98,7 +106,7 @@ async def deliver(bot, conn, subjects, *, now=None):
         with transaction(conn):
             attendance._lock(conn, row['session_id'])
             conn.execute('UPDATE lesson_messages SET sent = 1 WHERE id = ?', (event['id'],))
-            if event['kind'] in ('presence', 'reminder', 'call'):
+            if event['kind'] in ('presence', 'reminder', 'call', 'finish_reminder'):
                 conn.execute('UPDATE lesson_attendance SET deadline = ? WHERE id = ? AND revision = ? AND deadline IS NULL',
                              ((now if simulated else attendance.now_seconds()) + attendance.RESPONSE_SECONDS, row['id'], row['revision']))
 

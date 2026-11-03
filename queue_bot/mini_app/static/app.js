@@ -987,8 +987,32 @@
         q.lesson.people_ahead != null ? small('Людей попереду: '+q.lesson.people_ahead) : null);
       if (ownState) {
         const answer = (response, minutes) => mutate('/queues/'+q.id+'/attendance', {token:ownState.token,response,minutes});
+        const durationForm = (response) => {
+          const panel=sheet(response==='extend'?'Ще здаю':'Час підходу',
+            response==='extend'?'Скільки додаткових хвилин потрібно?':'Скільки хвилин плануєте здавати?');
+          const minutes=el('input',{type:'number',min:1,max:240,step:1,value:10,required:true,'aria-label':'Тривалість у хвилинах'});
+          const form=el('form',{},minutes,el('button',{type:'submit',class:'button primary'},'Підтвердити час'));
+          form.addEventListener('submit',event=>{event.preventDefault();answer(response,Number(minutes.value));});
+          panel.append(form);
+        };
+        if (ownState.state === 'serving') {
+          const clock = value => new Date(value*1000).toLocaleTimeString('uk-UA',{timeZone:'Europe/Kyiv',hour:'2-digit',minute:'2-digit'});
+          if(ownState.turn_due>0) summary.append(small('Нагадування про завершення о '+clock(ownState.turn_due)));
+          else if(ownState.turn_due===0) summary.append(small(ownState.deadline
+            ? 'Підтвердьте завершення або продовжіть час до '+clock(ownState.deadline)
+            : 'Ваш час минув. Завершили чи ще здаєте? На відповідь після повідомлення — 10 хвилин.'));
+          summary.append(btn('Ще здаю',()=>durationForm('extend'),'button secondary'),
+            btn('Я вже завершив',()=>{
+              if(!q.labs.length) return mutate('/queues/'+q.id+'/complete',reference(own));
+              const panel=sheet('Завершення підходу','Позначте фактично здані роботи або завершіть із незданими. Автоматично нічого не зараховується.');
+              panel.append(btn('Позначити здані роботи',()=>{
+                if(own.labs?.length>1) completionForm(q,own);
+                else mutate('/queues/'+q.id+'/complete',reference(own));
+              },'button primary'),btn('Завершити з незданими роботами',()=>mutate('/queues/'+q.id+'/finish-turn',reference(own)),'button secondary'));
+            },'button primary'));
+        }
         if (ownState.state === 'called') summary.append(
-          btn('Готовий здавати',()=>answer('ready'),'button primary'),
+          btn('Готовий здавати',()=>own.planned_minutes?answer('ready'):durationForm('ready'),'button primary'),
           btn('Пропустити мене',()=>answer('skip'),'button secondary'));
         else if (ownState.state !== 'serving') summary.append(
           btn('Я вже на місці',()=>answer('present'),'button primary'),

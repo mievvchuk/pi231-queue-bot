@@ -3,7 +3,8 @@
     "message": [
       "begin_lesson",
       "stop_lesson",
-      "custom_late_time"
+      "custom_late_time",
+      "turn_time"
     ],
     "callback_query": [
       "start_lesson",

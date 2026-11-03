@@ -34,7 +34,7 @@ def queue_view(conn, subjects, session, uid, *, detail=False, admin=False):
         lesson['states'] = {str(k): v for k, v in lesson['states'].items()}
         if lesson['own']:
             own_state = lesson['own']
-            lesson['own'] = {k: own_state[k] for k in ('state', 'token', 'deadline')}
+            lesson['own'] = {k: own_state[k] for k in ('state', 'token', 'deadline', 'turn_due')}
     result['lesson'] = lesson
     own = next((r for r in rows if r['telegram_id'] == uid), None)
     result['my_labs'] = lab_catalog.read_numbers(own['selected_labs']) if own else None
