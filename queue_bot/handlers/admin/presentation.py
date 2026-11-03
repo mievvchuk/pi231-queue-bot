@@ -30,6 +30,7 @@ def get_open_session(conn, session_id: int):
 def get_admin_queue_menu(is_open: bool) -> ReplyKeyboardMarkup:
     lock_text = "🔒 Закрити запис" if is_open else "🔓 Відкрити запис"
     rows = [
+        ["Почати здачу на парі", "Зупинити здачу на парі"],
         ["➕ Додати студентів", "🔢 Керувати студентами"],
         [lock_text, "📦 Завершити чергу"],
         ["👤 Режим студента", "🔄 Оновити"],
@@ -61,6 +62,8 @@ async def open_admin_queue_manager(message: Message, conn, subjects, session_id:
     session = get_open_session(conn, session_id)
     entries = queues.get_entries(conn, session_id)
     text = '⚡ <b>Режим адміна</b>\n\n' + format_queue(subjects, session, entries, show_id=True)
+    from queue_bot.handlers.attendance import lesson_summary
+    text += lesson_summary(conn, session_id, message.from_user.id)
     if note:
         text = f"{note}\n\n{text}"
     await message.answer(text, reply_markup=get_admin_queue_menu(session["status"] == "open"))
@@ -109,6 +112,13 @@ async def open_admin_student_manager(message: Message, conn, subjects, entry_id:
 
     is_blocked = bool(user and user["is_blocked"])
     await message.answer(text, reply_markup=get_admin_student_menu(is_blocked))
+    from queue_bot.services import attendance
+    if attendance.active_run(conn, entry['session_id']):
+        from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+        await message.answer('Готовність на цій парі:', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text=label, callback_data=f'attadmin:{entry_id}:{attendance.active_run(conn, entry["session_id"])["id"]}:{action}')]
+            for label, action in [('Підтвердити присутність', 'present'), ('Пропустити на цій парі', 'skipped'),
+                                  ('Завершити підхід з рештою робіт', 'finish')]]))
 
 
 

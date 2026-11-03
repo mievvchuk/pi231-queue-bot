@@ -195,6 +195,16 @@ async def student_action(request):
     data = await body(request)
     session = session_for(request)
     sid = session['id']
+    if action == 'attendance':
+        from queue_bot.services import attendance
+        token = data.get('token')
+        if not isinstance(token, str):
+            raise BotError('Оновіть чергу.')
+        row = conn.execute('SELECT r.session_id FROM lesson_attendance a JOIN lesson_runs r ON r.id = a.run_id WHERE a.token = ?', (token,)).fetchone()
+        if not row or row['session_id'] != sid:
+            raise BotError('Ця кнопка застаріла.')
+        attendance.respond(conn, uid, token, data.get('response'), minutes=data.get('minutes'))
+        return web.json_response({'message': 'Відповідь збережено.'})
     if action == 'join':
         labs = lab_catalog.labs_for_session(session)
         numbers = lab_catalog.validate_numbers(session, data.get('labs')) if labs else None
@@ -205,6 +215,10 @@ async def student_action(request):
         place, _ = queues.join_queue(conn, uid, sid, position, lab_numbers=numbers, planned_minutes=minutes)
         return web.json_response({'message': f'Ви записалися. Ваше місце: {place}.', 'position': place, 'queue_id': sid})
     session, entry = current_entry(request, data)
+    if action == 'finish-turn':
+        queues.finish_own_entry(conn, uid, sid, passed=False)
+        await notify_next(request, sid, entry['position'])
+        return web.json_response({'message': 'Підхід завершено. Решта робіт збережена, ви в кінці черги.'})
     if action == 'not-passed':
         if session['queue_type'] == 'consultation' or 'Курсова' in names(ctx['subjects'], session)[0]:
             raise BotError('Для консультації скористайтеся завершенням запису.')
@@ -243,7 +257,7 @@ async def student_action(request):
             remaining = []
         if not remaining:
             await notify_next(request, sid, entry['position'])
-        return web.json_response({'message': 'Здачу позначено. Місце збережено для решти робіт.' if remaining else 'Готово! Запис завершено.'})
+        return web.json_response({'message': 'Здачу позначено. Продовжуйте або натисніть «Завершити підхід», щоб перейти з рештою робіт у кінець.' if remaining else 'Готово! Запис завершено.'})
     if action == 'leave':
         queues.leave_queue(conn, uid, sid)
         await notify_next(request, sid, entry['position'])
@@ -305,6 +319,14 @@ async def admin_queue(request):
     require_admin(request)
     data = await body(request)
     action = data.get('action')
+    if action in ('start-lesson', 'stop-lesson'):
+        from queue_bot.services import attendance
+        conn, uid, sid = request[REQ_CONTEXT]['conn'], request[REQ_UID], path_id(request)
+        if action == 'start-lesson':
+            attendance.start(conn, uid, sid, minutes=data.get('minutes', 90))
+        else:
+            attendance.stop(conn, uid, sid)
+        return web.json_response({'message': 'Здачу запущено. На відповіді є 10 хвилин.' if action == 'start-lesson' else 'Здачу зупинено. Пріоритет збережено.'})
     if action == 'add_students':
         names_list = data.get('names')
         if not isinstance(names_list, list) or not 1 <= len(names_list) <= 100:
@@ -333,7 +355,10 @@ async def admin_entry(request):
         raise BotError('Запис не знайдено.')
     queues._check_revision(entry, eid, integer(data.get('revision'), minimum=0))
     action = data.get('action')
-    if action == 'move':
+    if action == 'attendance':
+        from queue_bot.services import attendance
+        attendance.correct(conn, uid, eid, data.get('response'), run_id=integer(data.get('run_id')))
+    elif action == 'move':
         queues.move_entry(conn, uid, eid, integer(data.get('position')))
     elif action == 'rename':
         from .student_api import text

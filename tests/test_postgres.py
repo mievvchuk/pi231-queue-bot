@@ -10,6 +10,22 @@ from queue_bot.services import admins, queues, restrictions, users
 from queue_bot.services import swap_requests
 
 
+@pytest.mark.asyncio
+async def test_postgres_lesson_migration_deadlines_and_priority(pg_conn, monkeypatch):
+    from unittest.mock import AsyncMock
+    from queue_bot.services import attendance
+    from queue_bot.services.lesson_notifier import deliver
+    monkeypatch.setattr(attendance, 'now_seconds', lambda: 10000)
+    sid = queues.create_session(pg_conn, 100, 1, 1)
+    queues.join_queue(pg_conn, 1, sid)
+    attendance.start(pg_conn, 100, sid)
+    await deliver(AsyncMock(), pg_conn, [])
+    assert attendance.view(pg_conn, sid, 1)['own']['deadline'] == 10600
+    attendance.tick(pg_conn, now=10600)
+    assert attendance.view(pg_conn, sid, 1)['own']['state'] == 'skipped'
+    assert queues.get_user_position(pg_conn, 1, sid) == 1
+
+
 @pytest.fixture
 def pg_conn():
     url = os.getenv('TEST_DATABASE_URL')

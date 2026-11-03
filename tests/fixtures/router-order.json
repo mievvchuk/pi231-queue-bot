@@ -1,6 +1,19 @@
 [
   {
     "message": [
+      "begin_lesson",
+      "stop_lesson",
+      "custom_late_time"
+    ],
+    "callback_query": [
+      "start_lesson",
+      "attendance_answer",
+      "finish_turn",
+      "correct_attendance"
+    ]
+  },
+  {
+    "message": [
       "student_mode",
       "admin_mode",
       "admin_panel",

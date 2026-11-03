@@ -794,6 +794,10 @@ async def notify_admins_user_registered(bot, conn, user_row, username: str | Non
 
 async def notify_next_students(bot, conn, subjects: list[dict], session_id: int, removed_position: int | None = None) -> None:
     """Сповіщає студентів, які стали №1 або №2 у черзі після зміни порядку або здачі."""
+    from queue_bot.services import attendance
+    if attendance.active_run(conn, session_id):
+        attendance.tick(conn)
+        return
     if removed_position is not None and removed_position > 2:
         return
 
