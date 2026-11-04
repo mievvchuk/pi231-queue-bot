@@ -66,6 +66,30 @@ def suppress_current(conn, sid, now):
                 (key_for(sid, local.date(), number),))
 
 
+def close_finished_signups(conn, now):
+    """Finish each automatic signup once, including after a stop or downtime.
+
+    Called inside attendance.tick's transaction, independently of timetable JSON.
+    """
+    markers = conn.execute("SELECT key, value FROM bot_state WHERE key LIKE 'lesson_schedule:%:signup' AND value != 'closed'").fetchall()
+    for marker in markers:
+        _, sid, day, number, _ = marker['key'].split(':')
+        sid = int(sid)
+        # Compatibility with the original 'opened' marker: new markers persist
+        # the actual end so future bell-time changes cannot alter an active run.
+        end = (slot_times(datetime.fromisoformat(day).date(), {'number': int(number)})[1]
+               if marker['value'] == 'opened' else int(marker['value']))
+        if now < end:
+            continue
+        attendance._lock(conn, sid)
+        # A new/manual run may already have started during catch-up. Closing an
+        # older pair must never shut signup for that newer active run.
+        if not attendance.active_run(conn, sid, now=now):
+            conn.execute("UPDATE queue_sessions SET status = 'closed' WHERE id = ? AND status = 'open'", (sid,))
+        conn.execute("UPDATE bot_state SET value = 'closed' WHERE key = ?", (marker['key'],))
+        log.info('Scheduled signup finished: queue=%s pair=%s date=%s', sid, number, day)
+
+
 def sync_schedule(conn, subjects, *, now=None, schedule_data=None):
     now = attendance.now_seconds() if now is None else now
     local = datetime.fromtimestamp(now, schedule.UK_TZ)
@@ -108,7 +132,7 @@ def sync_schedule(conn, subjects, *, now=None, schedule_data=None):
             signup_key = key + ':signup'
             if not conn.execute('SELECT key FROM bot_state WHERE key = ?', (signup_key,)).fetchone():
                 conn.execute("UPDATE queue_sessions SET status = 'open' WHERE id = ? AND status = 'closed'", (sid,))
-                conn.execute("INSERT INTO bot_state(key, value) VALUES (?, 'opened')", (signup_key,))
+                conn.execute('INSERT INTO bot_state(key, value) VALUES (?, ?)', (signup_key, str(end)))
                 log.info('Scheduled signup opened: queue=%s pair=%s date=%s', sid, lesson['number'], local.date())
             if saved:
                 continue

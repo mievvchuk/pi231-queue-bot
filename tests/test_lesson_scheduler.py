@@ -54,6 +54,7 @@ async def test_starts_at_0835_kyiv_once_and_stops_at_end(conn, queue):
     assert bot.send_message.await_count == 1
     check(conn, '2026-11-03T09:50:00')
     assert attendance.active_run(conn, queue, now=at('2026-11-03T09:50:00')) is None
+    assert queues.get_session(conn, queue)['status'] == 'closed'
     assert queues.get_user_position(conn, 1, queue) == 1
 
 
@@ -229,6 +230,83 @@ def test_upgrade_opens_signup_without_resetting_existing_approach(conn, queue):
     check(conn, '2026-11-03T08:35:00')
     assert queues.get_session(conn, queue)['status'] == 'open'
     assert dict(attendance.members(conn, rid)[0]) == before
+
+
+@pytest.mark.asyncio
+async def test_end_closes_signup_preserves_partial_results_and_pending_approach(conn, queue, monkeypatch):
+    from queue_bot.services.errors import BotError
+    queues.leave_queue(conn, 1, queue)
+    queues.join_queue(conn, 1, queue, lab_numbers=[1, 2], planned_minutes=20)
+    check(conn, '2026-11-03T08:35:00')
+    now = at('2026-11-03T08:36:00')
+    monkeypatch.setattr(attendance, 'now_seconds', lambda: now)
+    row = attendance.view(conn, queue, 1)['own']
+    attendance.respond(conn, 1, row['token'], 'present')
+    row = attendance.view(conn, queue, 1)['own']
+    attendance.respond(conn, 1, row['token'], 'ready', minutes=120)
+    entry = queues.get_entries(conn, queue)[0]
+    queues.record_own_passed_lab_numbers(conn, 1, queue, [1], entry_id=entry['id'], expected_revision=entry['entry_revision'])
+    before = dict(queues.get_entry(conn, entry['id']))
+    token = attendance.view(conn, queue, 1)['own']['token']
+    check(conn, '2026-11-03T09:49:59')
+    assert queues.get_session(conn, queue)['status'] == 'open'
+    check(conn, '2026-11-03T09:50:00')
+    assert queues.get_session(conn, queue)['status'] == 'closed'
+    assert dict(queues.get_entry(conn, entry['id'])) == before
+    assert before['selected_labs'] == '[2]' and before['passed_labs'] == '[1]'
+    with pytest.raises(BotError):
+        attendance.respond(conn, 1, token, 'extend', minutes=10, now=at('2026-11-03T09:50:00'))
+    bot = AsyncMock()
+    await deliver(bot, conn, SUBJECTS, now=at('2026-11-03T09:50:00'))
+    bot.send_message.assert_not_awaited()
+    check(conn, '2026-11-10T08:35:00')
+    assert queues.get_session(conn, queue)['status'] == 'open'
+    assert dict(queues.get_entry(conn, entry['id'])) == before
+    run = attendance.active_run(conn, queue, now=at('2026-11-10T08:35:00'))
+    assert attendance.members(conn, run['id'])[0]['state'] == 'pending'
+
+
+def test_stopped_lesson_still_closes_signup_at_end_after_restart(conn, queue, db_path, monkeypatch):
+    check(conn, '2026-11-03T08:35:00')
+    monkeypatch.setattr(attendance, 'now_seconds', lambda: at('2026-11-03T08:40:00'))
+    attendance.stop(conn, 100, queue)
+    assert queues.get_session(conn, queue)['status'] == 'open'
+    reopened = connect(db_path)
+    try:
+        # Direct tick also handles closure when reading timetable JSON fails.
+        attendance.tick(reopened, now=at('2026-11-03T09:50:00'))
+        assert queues.get_session(reopened, queue)['status'] == 'closed'
+        assert queues.get_user_position(reopened, 1, queue) == 1
+        # An explicit reopening afterwards is not undone by the old pair again.
+        queues.set_signup_open(reopened, 100, queue, True)
+        attendance.tick(reopened, now=at('2026-11-03T09:51:00'))
+        assert queues.get_session(reopened, queue)['status'] == 'open'
+    finally:
+        reopened.close()
+
+
+def test_overdue_closure_does_not_close_newer_pair_after_downtime(conn, queue):
+    data = {'tuesday':[DATA['tuesday'][0], {**DATA['tuesday'][0], 'pair':2}]}
+    check(conn, '2026-11-03T08:35:00', data)
+    check(conn, '2026-11-03T10:05:00', data)
+    assert queues.get_session(conn, queue)['status'] == 'open'
+    run = attendance.active_run(conn, queue, now=at('2026-11-03T10:05:00'))
+    assert run and run['ends_at'] == at('2026-11-03T11:20:00')
+    check(conn, '2026-11-03T11:20:00', data)
+    assert queues.get_session(conn, queue)['status'] == 'closed'
+
+
+def test_legacy_signup_marker_and_manual_run_close_without_archiving(conn, queue):
+    from queue_bot.services.lesson_scheduler import key_for
+    key = key_for(queue, datetime(2026, 11, 3).date(), 1) + ':signup'
+    conn.execute("INSERT INTO bot_state(key, value) VALUES (?, 'opened')", (key,))
+    attendance.tick(conn, now=at('2026-11-03T09:50:00'))
+    assert queues.get_session(conn, queue)['status'] == 'closed'
+    queues.set_signup_open(conn, 100, queue, True)
+    attendance.start(conn, 100, queue, minutes=10, now=at('2026-11-03T10:00:00'))
+    attendance.tick(conn, now=at('2026-11-03T10:10:00'))
+    assert queues.get_session(conn, queue)['status'] == 'closed'
+    assert queues.get_user_position(conn, 1, queue) == 1
 
 
 @pytest.mark.asyncio
