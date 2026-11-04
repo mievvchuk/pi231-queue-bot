@@ -166,12 +166,12 @@ async def open_mini_app(message, conn):
 
 @router.message(F.text == 'Електронний журнал', StateFilter('*'))
 async def open_journal(message, conn):
-    from queue_bot.handlers.common import journal_menu_button
+    from queue_bot.handlers.common import JOURNAL_TEXT, journal_web_app
     from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
     if not users.get_user(conn, message.from_user.id):
         raise BotError('Спочатку зареєструйтесь у боті: /start')
-    button = journal_menu_button()
-    if not button.web_app:
+    target = journal_web_app()
+    if not target:
         raise BotError('Електронний журнал ще не підключений. Власнику потрібно налаштувати адресу Mini App.')
     await message.answer('Ваш електронний журнал', reply_markup=InlineKeyboardMarkup(
-        inline_keyboard=[[InlineKeyboardButton(text=button.text, web_app=button.web_app)]]))
+        inline_keyboard=[[InlineKeyboardButton(text=JOURNAL_TEXT, web_app=target)]]))

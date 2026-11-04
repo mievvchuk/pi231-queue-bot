@@ -1152,7 +1152,7 @@ small {
 .journal-grade.grade-low { color: #fff; background: #000; }
 .journal-tables { display: grid; gap: 24px; min-width: 0; }
 .journal-subject { min-width: 0; }
-.journal-table-scroll { overflow: auto; max-height: 70vh; border: 1px solid var(--line, #8885); border-radius: 14px; background: var(--surface-solid, var(--surface, #fff)); }
+.journal-table-scroll { overflow-x: auto; overflow-y: hidden; overscroll-behavior-x: contain; -webkit-overflow-scrolling: touch; border: 1px solid var(--line, #8885); border-radius: 14px; background: var(--surface-solid, var(--surface, #fff)); }
 .journal-table { border-collapse: separate; border-spacing: 0; width: max-content; min-width: 100%; font-variant-numeric: tabular-nums; }
 .journal-table th, .journal-table td { padding: 4px; border-right: 1px solid var(--line, #8885); border-bottom: 1px solid var(--line, #8885); text-align: center; }
 .journal-table thead th { position: sticky; top: 0; z-index: 3; background: var(--surface-solid, var(--surface, #fff)); height: 44px; min-width: 54px; font-size: 12px; }
@@ -1166,7 +1166,6 @@ small {
 @media (max-width: 600px) {
   .journal-table .journal-name { width: 112px; min-width: 112px; max-width: 112px; font-size: 12px; padding: 6px 8px; }
   .journal-table thead th { min-width: 48px; }
-  .journal-table-scroll { max-height: 62vh; }
 }
 .journal-input { width: 44px; min-height: 42px; padding: 4px; border: 1px solid var(--line, #8885); border-radius: 8px; background: transparent; color: inherit; font: inherit; font-size: 20px; font-weight: 800; text-align: center; font-variant-numeric: tabular-nums; }
 .journal-input:focus { outline: 2px solid var(--accent, #647a1e); outline-offset: 1px; }
