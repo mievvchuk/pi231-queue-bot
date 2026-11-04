@@ -244,6 +244,20 @@ def require_turn(conn, entry):
             raise BotError('Час на відповідь після нагадування минув. Оновіть чергу.')
 
 
+def require_completion(conn, entry):
+    """Allow reporting real results outside a call without claiming a turn.
+
+    An expired serving turn still needs a refresh before submitting, so an old
+    confirmation cannot race the timeout which changes the entry revision.
+    """
+    run = active_run(conn, entry['session_id'])
+    if run:
+        row = conn.execute('SELECT state FROM lesson_attendance WHERE run_id = ? AND entry_id = ? AND user_id = ?',
+                           (run['id'], entry['id'], entry['user_id'])).fetchone()
+        if row and row['state'] == 'serving':
+            require_turn(conn, entry)
+
+
 def end_turn(conn, entry):
     # Called inside the same transaction as moving/closing a queue entry.
     conn.execute("UPDATE lesson_attendance SET state = 'present', deadline = NULL, turn_due = NULL, warned = 0, revision = revision + 1, token = ? WHERE entry_id = ? AND user_id = ? AND state IN ('called', 'serving') AND run_id IN (SELECT id FROM lesson_runs WHERE active = 1)",
