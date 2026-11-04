@@ -38,21 +38,21 @@ def payload(**values):
 
 
 @pytest.mark.asyncio
-async def test_journal_student_submission_review_edit_resets_approval_and_audit(client, conn):
+async def test_journal_student_submission_edit_and_admin_edit_without_approval(client, conn):
     url = '/api/miniapp/journal'
     assert (await client.post(url,headers=headers(1),json=payload())).status == 200
     data = await (await client.get(url+'?period=2026-2027:1',headers=headers(1))).json()
     row = data['records'][0]
-    assert row['grade'] == 5 and row['status'] == 'pending' and row['can_edit'] is True
+    assert row['grade'] == 5 and row['can_edit'] is True and 'status' not in row
     review = {'action':'review','record_id':row['id'],'revision':0,'status':'approved'}
-    assert (await client.post(url+'?mode=admin',headers=headers(100),json=review)).status == 200
     assert (await client.post(url+'?mode=admin',headers=headers(100),json=review)).status == 400
-    current = journal.view(conn,1,SUBJECTS,period='2026-2027:1')['records'][0]
-    assert current['status'] == 'approved'
-    edited = payload(record_id=row['id'],revision=current['revision'],grade=4)
+    target = row['user_id']
+    by_admin = payload(user_id=target,record_id=row['id'],revision=0,grade=3)
+    assert (await client.post(url+'?mode=admin',headers=headers(100),json=by_admin)).status == 200
+    edited = payload(record_id=row['id'],revision=1,grade=4)
     assert (await client.post(url,headers=headers(1),json=edited)).status == 200
     latest = journal.view(conn,1,SUBJECTS,period='2026-2027:1')['records'][0]
-    assert latest['status'] == 'pending' and latest['revision'] == 2
+    assert latest['grade'] == 4 and latest['revision'] == 2
     assert conn.execute('SELECT COUNT(*) FROM journal_cell_events').fetchone()[0] == 3
 
 
@@ -70,8 +70,6 @@ async def test_journal_privacy_forged_identity_and_admin_mode(client, conn):
     assert (await client.get(url+'?scope=group',headers=headers(100))).status == 403
     assert (await client.post(url,headers=headers(1),json=payload(user_id=target))).status == 403
     assert (await client.post(url,headers=headers(2),json=payload(record_id=row['id'],revision=0))).status == 403
-    review = {'action':'review','record_id':row['id'],'revision':0,'status':'approved'}
-    assert (await client.post(url,headers=headers(1),json=review)).status == 403
     group = await (await client.get(url+'?scope=group&mode=admin&period=2026-2027:1',headers=headers(100))).json()
     assert len(group['records']) == 1 and len(group['students']) == 3
     assert (await client.post(url+'?mode=admin',headers=headers(100),json=payload(user_id=target))).status == 200
@@ -85,20 +83,17 @@ def test_journal_rejects_invalid_grades_without_writes(conn, make_user, grade):
     assert conn.execute('SELECT COUNT(*) FROM journal_cells').fetchone()[0] == 0
 
 
-def test_rejection_requires_reason_duplicate_and_stale_edits_are_safe(conn, make_user):
+def test_duplicate_and_stale_edits_are_safe(conn, make_user):
     make_user(1,'Петренко Іван')
     rid = journal.submit(conn,1,SUBJECTS,payload())
     with pytest.raises(BotError):
         journal.submit(conn,1,SUBJECTS,payload())
-    data = {'record_id':rid,'revision':0,'status':'rejected'}
-    with pytest.raises(BotError):
-        journal.review(conn,100,data)
-    journal.review(conn,100,{**data,'note':'Уточни номер лабораторної'})
+    journal.submit(conn,1,SUBJECTS,payload(record_id=rid,revision=0,grade=3))
     with pytest.raises(BotError):
         journal.submit(conn,1,SUBJECTS,payload(record_id=rid,revision=0,grade=2))
     journal.submit(conn,1,SUBJECTS,payload(record_id=rid,revision=1,grade=2,number=2,kind='attestation'))
     updated = journal.view(conn,1,SUBJECTS,period='2026-2027:1')['records'][0]
-    assert updated['status'] == 'pending' and updated['number'] == 2
+    assert updated['grade'] == 2 and updated['number'] == 2
 
 
 def test_dates_are_explicit_owner_only_and_journal_covers_schedule_subjects(conn, make_user):
@@ -125,7 +120,7 @@ def test_periods_are_separate_and_queue_completion_does_not_approve_grades(conn,
     sid = queues.create_session(conn,100,1,1)
     queues.join_queue(conn,1,sid)
     queues.finish_own_entry(conn,1,sid,passed=True)
-    assert journal.view(conn,1,SUBJECTS,period='2026-2027:1')['records'][0]['status'] == 'pending'
+    assert journal.view(conn,1,SUBJECTS,period='2026-2027:1')['records'][0]['grade'] == 5
     assert journal.view(conn,1,SUBJECTS,period='2026-2027:2')['records'][0]['grade'] == 3
 
 

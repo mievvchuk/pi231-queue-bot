@@ -50,17 +50,15 @@ def test_each_grade_is_independent_and_only_the_owners_grade_is_editable(conn,ma
     second = journal.submit(conn,1,SUBJECTS,values(part=2,grade=2))
     fifth = journal.submit(conn,1,SUBJECTS,values(part=5,grade=4))
     assert len({first,second,fifth}) == 3
-    journal.review(conn,100,{'record_id':second,'revision':0,'status':'approved'})
     public = journal.view(conn,2,SUBJECTS,period='2026-2027:1')
     assert [r['part'] for r in public['records']] == [1,2,5]
     assert all(r['can_edit'] is False for r in public['records'])
     assert all('note' not in r and 'review_note' not in r for r in public['records'])
-    assert next(r for r in public['records'] if r['id']==second)['status'] == 'approved'
     with pytest.raises(PermissionDenied):
-        journal.submit(conn,2,SUBJECTS,values(part=2,record_id=second,revision=1))
-    journal.submit(conn,1,SUBJECTS,values(part=2,record_id=second,revision=1,grade=3))
+        journal.submit(conn,2,SUBJECTS,values(part=2,record_id=second,revision=0))
+    journal.submit(conn,1,SUBJECTS,values(part=2,record_id=second,revision=0,grade=3))
     own = journal.view(conn,1,SUBJECTS,period='2026-2027:1')
-    assert next(r for r in own['records'] if r['id']==second)['status'] == 'pending'
+    assert next(r for r in own['records'] if r['id']==second)['grade'] == 3
     assert next(r for r in own['records'] if r['id']==first)['note'] == 'Особиста примітка'
     assert next(r for r in own['records'] if r['id']==fifth)['grade'] == 4
 
@@ -87,7 +85,7 @@ def test_v1_records_and_audit_migrate_without_overwriting_later_edits(tmp_path):
     try:
         result=journal.view(conn,1,SUBJECTS,period='2026-2027:1')
         assert result['records'][0]['id']=='legacy:7'
-        assert result['records'][0]['part']==1 and result['records'][0]['status']=='approved'
+        assert result['records'][0]['part']==1
         journal.submit(conn,1,SUBJECTS,values(record_id=7,revision=0,number=2,grade=5))
         new=journal.submit(conn,1,SUBJECTS,values(grade=3))
         conn.executescript(GRID_COPY)
@@ -120,12 +118,12 @@ def test_attestation_split(name,first,second):
 
 def test_summary_averages_only_filled_cells():
     subject = layout('Програмування в Інтернет')
-    cell = lambda number, grade, status='pending', kind='lab': {'kind':kind,'number':number,'grade':grade,'status':status}
+    cell = lambda number, grade, kind='lab': {'kind':kind,'number':number,'grade':grade}
     assert summary(subject, []) == {k:{'average':None,'filled':0,'total':t} for k,t in (('1',12),('2',9),('all',21))}
-    result = summary(subject, [cell(1,5), cell(1,4,'approved'), cell(2,4), cell(5,3), cell(6,2,'rejected'), cell(1,1,kind='attestation'), cell(99,5)])
+    result = summary(subject, [cell(1,5), cell(1,4), cell(2,4), cell(5,3), cell(6,2), cell(1,1,kind='attestation'), cell(99,5)])
     assert result['1'] == {'average':4.33,'filled':3,'total':12}
-    assert result['2'] == {'average':3.0,'filled':1,'total':9}
-    assert result['all']['average'] == 4.0
+    assert result['2'] == {'average':2.5,'filled':2,'total':9}
+    assert result['all']['average'] == 3.6
 
 
 def test_view_returns_averages_per_student(conn,make_user):
