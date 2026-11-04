@@ -76,7 +76,7 @@ async def show_controls(message, conn, sid, uid):
     entry = next((r for r in queues.get_entries(conn, sid) if r['telegram_id'] == uid), None)
     from queue_bot.services import lab_catalog
     session = queues.get_session(conn, sid)
-    if entry and lab_catalog.labs_for_session(session) and (not data or data['own'] and data['own']['state'] == 'serving'):
+    if entry and lab_catalog.labs_for_session(session):
         from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
         await message.answer('Позначайте здані роботи кнопкою «Здав». Коли більше не здаєте зараз, завершіть підхід: решта робіт перейде в кінець черги.',
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
