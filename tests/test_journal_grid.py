@@ -5,7 +5,7 @@ import pytest
 
 from queue_bot.services import journal, users
 from queue_bot.services.errors import BotError, PermissionDenied
-from queue_bot.services.journal_layout import layout
+from queue_bot.services.journal_layout import layout, summary
 from queue_bot.storage import database
 from queue_bot.storage.journal_grid_schema import GRID_COPY
 
@@ -24,7 +24,10 @@ def values(**extra):
     ('Машинне навчання',[3]*9),
     ('Програмування в Інтернет',[3]*7),
     ('Архітектура та проєкт ПЗ',[5]*3),
-    ('Філософія',[1]),
+    ('Філософія',[1]*6),
+    ('Фізичне виховання',[1]*4),
+    ('Проєкт інтерфейсів користувача ПС',[1]*23),
+    ('Курсова робота з КПЗ',[1]),
 ])
 def test_exact_subject_columns(name,counts):
     assert [work['parts'] for work in layout(name)['labs']] == counts
@@ -95,3 +98,44 @@ def test_v1_records_and_audit_migrate_without_overwriting_later_edits(tmp_path):
         result=journal.view(conn,1,SUBJECTS,period='2026-2027:1')
         assert next(r for r in result['records'] if r['id']=='legacy:7')['number']==2
     finally: conn.close()
+
+
+@pytest.mark.parametrize('name,first,second',[
+    ('Програмування в Інтернет',[1,2,3,4],[5,6,7]),
+    ('Людино-машинна взаємодія',[1,2,3,4],[5,6,7,8,9,10]),
+    ('Машинне навчання',[1,2,3],[4,5,6,7,8,9]),
+    ('Архітектура та проєкт ПЗ',[1],[2,3]),
+    ('Конструювання програмного забезпечення',list(range(1,8)),[8,9,10,11]),
+    ('Філософія',[1,2,3],[4,5,6]),
+    ('Фізичне виховання',[1,2],[3,4]),
+    ('Проєкт інтерфейсів користувача',list(range(1,8))+[51,52,53,54],list(range(8,15))+[55,56,57,58,59]),
+])
+def test_attestation_split(name,first,second):
+    labs = layout(name)['labs']
+    assert [w['number'] for w in labs if w['attestation']==1] == first
+    assert [w['number'] for w in labs if w['attestation']==2] == second
+    pik = layout('Проєкт інтерфейсів користувача')['labs']
+    assert [w['title'] for w in pik][13:16] == ['ЛР 14','Тест 1','Тест 2']
+
+
+def test_summary_averages_only_filled_cells():
+    subject = layout('Програмування в Інтернет')
+    cell = lambda number, grade, status='pending', kind='lab': {'kind':kind,'number':number,'grade':grade,'status':status}
+    assert summary(subject, []) == {k:{'average':None,'filled':0,'total':t} for k,t in (('1',12),('2',9),('all',21))}
+    result = summary(subject, [cell(1,5), cell(1,4,'approved'), cell(2,4), cell(5,3), cell(6,2,'rejected'), cell(1,1,kind='attestation'), cell(99,5)])
+    assert result['1'] == {'average':4.33,'filled':3,'total':12}
+    assert result['2'] == {'average':3.0,'filled':1,'total':9}
+    assert result['all']['average'] == 4.0
+
+
+def test_view_returns_averages_per_student(conn,make_user):
+    make_user(1,'Петренко Іван');make_user(2,'Коваль Андрій')
+    journal.submit(conn,1,SUBJECTS,values(part=1,grade=5))
+    journal.submit(conn,1,SUBJECTS,values(part=2,grade=4))
+    journal.submit(conn,1,SUBJECTS,values(number=8,part=1,grade=3))
+    result = journal.view(conn,2,SUBJECTS,period='2026-2027:1')
+    own_id, other_id = users.get_user(conn,1)['id'], users.get_user(conn,2)['id']
+    mine = result['averages'][str(own_id)][KEY]
+    assert (mine['1']['average'], mine['1']['filled'], mine['1']['total']) == (4.5, 2, 11)
+    assert (mine['2']['average'], mine['2']['total']) == (3.0, 4)
+    assert result['averages'][str(other_id)][KEY]['all']['average'] is None

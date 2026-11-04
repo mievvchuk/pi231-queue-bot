@@ -17,7 +17,7 @@ async def handle(request):
     action = data.get('action', 'submit')
     if action == 'submit':
         journal.submit(ctx['conn'], uid, ctx['subjects'], data, admin_mode=request[api.REQ_ADMIN])
-        message = 'Запис надіслано на підтвердження адміністратору.'
+        message = 'Оцінку збережено.'
     elif action == 'review':
         api.require_admin(request)
         journal.review(ctx['conn'], uid, data)
