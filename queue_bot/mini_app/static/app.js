@@ -1082,7 +1082,537 @@
                   }),
               )
           : null;
-      co…4501 tokens truncated…ВЧАЛЬНИЙ ДЕНЬ"),
+      const entry = el(
+        action ? "button" : "div",
+        {
+          class: "entry " + (row.is_me ? "self" : ""),
+          ...(action ? { type: "button", onclick: action } : {}),
+        },
+        el(
+          "span",
+          { class: "position" },
+          row.position,
+        ),
+        el('span',{class:'entry-avatar','aria-hidden':true},row.vacant ? '+' : row.name.split(' ').filter(Boolean).map(n=>n[0]).slice(0,2).join('')),
+        el(
+          "div",
+          { class: "entry-info" },
+          el(
+            "strong",
+            {},
+            row.name,
+            row.is_me ? el("span", { class: "you" }, "ти") : null,
+          ),
+          q.lesson?.states[String(row.id)] ? small(q.lesson.states[String(row.id)]) : null,
+          row.swap_wish
+            ? badge(row.swap_wish === "higher" ? "Хоче вище ↑" : "Хоче нижче ↓")
+            : null,
+          q.labs.length
+            ? el("small", {}, labText(row) || "Лабораторні не вказані")
+            : null,
+          isAdmin() && row.telegram_id > 0
+            ? el("small", { class: "id-label" }, "ID: " + row.telegram_id)
+            : null,
+        ),
+        action ? icon(isAdmin() ? "admin" : "arrow") : null,
+      );
+      return heading ? [heading, entry] : [entry];
+    });
+    const extra = el('details',{class:'queue-extra'},el('summary',{},'Інші дії'),otherActions);
+    if(design) return design.queuePage(q,own,entries,controls,dock,extra);
+    return el(
+      "main",
+      {class:'queue-detail'+(isAdmin()?' admin-detail':'')},
+      back,
+      el(
+        "div",
+        { class: "detail-title" },
+        el('span',{class:'status '+q.status},q.status==='open'?'Постійна черга':'Архівна черга'),
+        el("h1", {}, q.subject),
+        el("p", { class: "muted" }, q.teacher),
+      ),
+      own
+        ? el(
+            "div",
+            { class: "own-banner" },
+            el(
+              "div",
+              {},
+              el("strong", {}, "#" + own.position),
+            ),
+            el(
+              "div",
+              {},
+              el("b", {}, q.lesson ? (q.lesson.own?.state === 'serving' ? 'Зараз ти здаєш'
+                : q.lesson.own?.state === 'called' ? 'Підтвердь готовність'
+                : q.lesson.states[String(own.id)] || 'Твоє збережене місце')
+                : own.position === 1 ? "Твоя черга" : "Твоє місце"),
+              el(
+                "p",
+                {},
+                consultation(q) ? 'Консультація' : labText(own) || 'Лабораторні не вказані',
+              ),
+            ),
+          )
+        : null,
+      el(
+        "div",
+        { class: "section-heading" },
+        el("h2", {}, "Учасники"),
+        badge(q.count),
+      ),
+      q.lesson ? small('Номери — збережені місця. Порядок виклику — зверху вниз серед присутніх.') : null,
+      el("section", { class: "entry-list" }, entries),
+      !entries.length
+        ? empty(
+            "Ти можеш бути першим",
+            "Запишися, коли будеш готовий до здачі.",
+          )
+        : null,
+      controls,
+      own ? el('div',{class:'queue-secondary-actions'},extra) : null,
+      dock,
+      own && !isAdmin() && q.count > 1
+        ? el(
+            "p",
+            { class: "footnote" },
+            "Натисни на іншого учасника, щоб запропонувати обмін місцями.",
+          )
+        : null,
+    );
+  }
+  function closeSheet() {
+    const panel=document.getElementById("sheet");
+    panel?.querySelectorAll?.('video')?.forEach(video=>video.pause());
+    panel?.remove();
+  }
+  function sheet(title, description) {
+    closeSheet();
+    const overlay = el("div", { id: "sheet", class: "sheet-overlay" }),
+      panel = el(
+        "section",
+        {
+          class: "sheet",
+          role: "dialog",
+          "aria-modal": "true",
+          "aria-label": title,
+        },
+        el("div", { class: "sheet-handle" }),
+      ),
+      close = btn(
+        icon("close"),
+        () => {
+          if (!S.busy) closeSheet();
+        },
+        "icon-button",
+      );
+    close.setAttribute("aria-label", "Закрити");
+    panel.append(
+      el("div", { class: "section-heading" }, el("h2", {}, title), close),
+      el("p", { class: "muted" }, description),
+    );
+    overlay.append(panel);
+    overlay.addEventListener("click", (event) => {
+      if (event.target === overlay && !S.busy) closeSheet();
+    });
+    document.body.append(overlay);
+    requestAnimationFrame(() => panel.querySelector("input,button")?.focus());
+    return panel;
+  }
+  function confirmSheet(title, description, fn) {
+    const panel = sheet(title, description);
+    panel.append(
+      btn("Підтвердити", fn, "button primary"),
+      btn("Скасувати", closeSheet, "button secondary"),
+    );
+  }
+  function choices(labs, selected = []) {
+    return el(
+      "div",
+      { class: "lab-grid" },
+      labs.map((lab) =>
+        el(
+          "label",
+          { class: "lab-choice" },
+          el("input", {
+            type: "checkbox",
+            value: lab.number,
+            checked: selected.includes(lab.number),
+          }),
+          el(
+            "span",
+            {},
+            el("b", {}, "№" + lab.number),
+            el("small", {}, lab.title || "Лабораторна"),
+            el("em", {}, "до " + lab.max_minutes + " хв"),
+          ),
+        ),
+      ),
+    );
+  }
+  function selectedIn(node) {
+    return [...node.querySelectorAll("input[type=checkbox]:checked")].map((n) =>
+      Number(n.value),
+    );
+  }
+  function labForm(q, own) {
+    if(design && !own) return design.joinWizard(q);
+    const panel = sheet(
+        own ? "Твої лабораторні" : "Запис на здачу",
+        q.labs.length
+          ? "Обери роботи й зазнач приблизний час. Місце займеться після підтвердження."
+          : "Це запис без лабораторних та часових лімітів.",
+      ),
+      form = el("form");
+    let grid, minutes, cap;
+    if (q.labs.length) {
+      grid = choices(
+        q.labs.filter((lab) => !own?.passed_labs?.includes(lab.number)),
+        own?.labs || [],
+      );
+      form.append(grid);
+      minutes = el("input", {
+        type: "number",
+        min: 5,
+        step: 1,
+        required: true,
+        inputmode: "numeric",
+        value: own?.planned_minutes || 10,
+        "aria-label": "Час здачі у хвилинах",
+      });
+      cap = el("p", { class: "notice" });
+      const update = () => {
+        const selected = selectedIn(grid),
+          maximum = q.labs
+            .filter((l) => selected.includes(l.number))
+            .reduce((sum, l) => sum + l.max_minutes, 0);
+        cap.textContent = selected.length
+          ? "Можна вказати від 5 до " + maximum + " хв."
+          : "Обери щонайменше одну лабораторну.";
+        minutes.max = maximum;
+      };
+      grid.addEventListener("change", update);
+      update();
+      form.append(
+        el("label", { class: "field" }, "Твій час здачі, хв", minutes),
+        cap,
+      );
+    }
+    let place;
+    if (!own && q.can_pick_position) {
+      place = el("input", {
+        type: "number",
+        min: 1,
+        step: 1,
+        max: 1000,
+        inputmode: "numeric",
+        placeholder: "У кінець черги",
+      });
+      form.append(
+        el("label", { class: "field" }, "Місце (необов’язково)", place),
+      );
+    }
+    form.append(
+      el(
+        "button",
+        { type: "submit", class: "button primary" },
+        own ? "Зберегти зміни" : "Підтвердити запис",
+      ),
+    );
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      const labs = grid ? selectedIn(grid) : [];
+      if (q.labs.length && !labs.length) {
+        toast("Обери хоча б одну лабораторну.", true);
+        return;
+      }
+      mutate("/queues/" + q.id + (own ? "/edit" : "/join"), {
+        ...(own ? reference(own) : {}),
+        ...(q.labs.length ? { labs, minutes: Number(minutes.value) } : {}),
+        ...(!own && place?.value ? { position: Number(place.value) } : {}),
+      });
+    });
+    panel.append(form);
+  }
+  function completionForm(q, own) {
+    const panel = sheet(
+        "Що вдалося здати?",
+        "Познач фактично здані роботи. З рештою ти залишишся на своєму місці.",
+      ),
+      grid = choices(q.labs.filter((l) => own.labs.includes(l.number)));
+    panel.append(
+      grid,
+      btn(
+        "Здав усі вибрані раніше",
+        () =>
+          mutate("/queues/" + q.id + "/complete", {
+            ...reference(own),
+            labs: own.labs,
+          }),
+        "button secondary",
+      ),
+      btn(
+        "Підтвердити здачу",
+        () => {
+          const labs = selectedIn(grid);
+          if (!labs.length) {
+            toast("Познач здані лабораторні.", true);
+            return;
+          }
+          mutate("/queues/" + q.id + "/complete", { ...reference(own), labs });
+        },
+        "button primary",
+      ),
+    );
+  }
+  async function loadSchedule(value) {
+    if (S.busy) return;
+    const epoch = ++S.epoch;
+    S.scheduleView = "day";
+    S.scheduleDate = value || S.scheduleDate || S.data.today;
+    S.scheduleLoading = true;
+    S.scheduleError = null;
+    S.loading = true;
+    render();
+    try {
+      const data = await api(
+        "/schedule?date=" + encodeURIComponent(S.scheduleDate),
+      );
+      if (epoch === S.epoch) {
+        S.schedule = data;
+        S.fatal = null;
+      }
+    } catch (error) {
+      if (epoch === S.epoch) {
+        if (error.status === 401 || error.status === 403)
+          S.fatal = error.message;
+        else S.scheduleError = error.message;
+      }
+    } finally {
+      if (epoch === S.epoch) {
+        S.scheduleLoading = false;
+        S.loading = false;
+        render();
+      }
+    }
+  }
+  function refreshSchedule() {
+    return S.scheduleView === "week"
+      ? loadWeek(S.scheduleDate)
+      : loadSchedule();
+  }
+  async function loadWeek(value) {
+    if (S.busy) return;
+    const epoch = ++S.epoch;
+    const monday = new Date(
+      (value || S.scheduleDate || S.data.today) + "T12:00:00Z",
+    );
+    monday.setUTCDate(monday.getUTCDate() - ((monday.getUTCDay() + 6) % 7));
+    S.scheduleView = "week";
+    S.scheduleDate = value || S.scheduleDate || S.data.today;
+    S.scheduleLoading = true;
+    S.loading = true;
+    S.scheduleError = null;
+    render();
+    try {
+      const days = await Promise.all(
+        Array.from({ length: 7 }, (_, index) => {
+          const date = new Date(monday);
+          date.setUTCDate(date.getUTCDate() + index);
+          return api("/schedule?date=" + date.toISOString().slice(0, 10));
+        }),
+      );
+      if (epoch === S.epoch) {
+        S.weekSchedule = days;
+        S.fatal = null;
+      }
+    } catch (error) {
+      if (epoch === S.epoch) {
+        if (error.status === 401 || error.status === 403)
+          S.fatal = error.message;
+        else S.scheduleError = error.message;
+      }
+    } finally {
+      if (epoch === S.epoch) {
+        S.scheduleLoading = false;
+        S.loading = false;
+        render();
+      }
+    }
+  }
+  function lessonCard(slot) {
+    if(design) return design.lessonCard(slot);
+    const lessons = slot.lessons || [slot];
+    return el(
+      "article",
+      { class: "lesson" + (lessons.length ? "" : " lesson-empty") },
+      el(
+        "div",
+        { class: "lesson-number" },
+        slot.number,
+        el("small", {}, "пара"),
+      ),
+      el(
+        "div",
+        { class: "lesson-body" },
+        slot.startTime && slot.endTime
+          ? el(
+              "small",
+              { class: "lesson-time" },
+              slot.startTime + "–" + slot.endTime,
+            )
+          : null,
+        lessons.length
+          ? lessons.map((lesson) =>
+              el(
+                "div",
+                { class: "lesson-content" },
+                lesson.is_replacement ? badge("Заміна", "warning") : null,
+                el("h3", {}, lesson.subject),
+                lesson.teachers_raw?.length
+                  ? lesson.teachers_raw.map((t) =>
+                      el(
+                        "p",
+                        { class: "muted" },
+                        t.name + (t.room ? " · ауд. " + t.room : ""),
+                      ),
+                    )
+                  : el(
+                      "p",
+                      { class: "muted" },
+                      [lesson.teacher, lesson.room && "ауд. " + lesson.room]
+                        .filter(Boolean)
+                        .join(" · "),
+                    ),
+              ),
+            )
+          : el("p", { class: "muted empty-lesson-label" }, "Заняття немає"),
+      ),
+    );
+  }
+  function dayTimeline(day) {
+    // Slots come from the server's bell schedule; actual lessons stay separate.
+    return el(
+      "div",
+      { class: "timeline" },
+      (day.slots || day.lessons).map(lessonCard),
+    );
+  }
+  function weekView() {
+    return el(
+      "div",
+      { class: "week-schedule" },
+      (S.weekSchedule || []).map((day) =>
+        el(
+          "section",
+          {},
+          sectionTitle(
+            day.day,
+            new Date(day.date + "T12:00:00Z").toLocaleDateString("uk-UA", {
+              day: "numeric",
+              month: "long",
+              timeZone: "Europe/Kyiv",
+            }),
+          ),
+          day.source_day
+            ? el(
+                "p",
+                { class: "notice" },
+                "За розкладом: " +
+                  day.source_day +
+                  (day.working_day_archived ? " · Завершено" : ""),
+              )
+            : null,
+          !day.lessons.length
+            ? el("p", { class: "notice" }, "Занять немає.")
+            : null,
+          dayTimeline(day),
+        ),
+      ),
+    );
+  }
+  function scheduleState() {
+    if (S.scheduleLoading)
+      return el(
+        "div",
+        {
+          class: "schedule-loading",
+          role: "status",
+          "aria-label": "Завантаження розкладу",
+        },
+        [1, 2, 3, 4, 5].map(() =>
+          el(
+            "div",
+            { class: "lesson-skeleton" },
+            el("i"),
+            el("span", {}, el("b"), el("b"), el("b")),
+          ),
+        ),
+      );
+    return el(
+      "div",
+      { class: "schedule-state", role: "alert" },
+      empty("Не вдалося завантажити розклад", S.scheduleError),
+      btn("Спробувати знову", () => loadSchedule(), "button primary"),
+    );
+  }
+  function tomorrow() {
+    const next = new Date(S.data.today + "T12:00:00Z");
+    next.setUTCDate(next.getUTCDate() + 1);
+    return next.toISOString().slice(0, 10);
+  }
+  function schedulePage() {
+    const data =
+        S.scheduleView === "day" &&
+        S.schedule?.date === S.scheduleDate &&
+        !S.scheduleLoading &&
+        !S.scheduleError
+          ? S.schedule
+          : null,
+      input = el("input", {
+        type: "date",
+        value: S.scheduleDate || S.data.today,
+        onchange: (event) => loadSchedule(event.target.value),
+        "aria-label": "Дата розкладу",
+      });
+    const segmentChoices = [
+      {
+        label: "Сьогодні",
+        selected: S.scheduleView === "day" && S.scheduleDate === S.data.today,
+        select: () => loadSchedule(S.data.today),
+      },
+      {
+        label: "Завтра",
+        selected: S.scheduleView === "day" && S.scheduleDate === tomorrow(),
+        select: () => loadSchedule(tomorrow()),
+      },
+      {
+        label: "Тиждень",
+        selected: S.scheduleView === "week",
+        select: () => loadWeek(),
+      },
+    ];
+    let segmentControl;
+    const segmentButtons = segmentChoices.map((choice, index) =>
+      btn(
+        choice.label,
+        () => segmentControl?.activate(index),
+        choice.selected ? "selected" : "",
+      ),
+    );
+    const segmentContainer = el("div", { class: "segments" }, segmentButtons);
+    segmentControl = attachLiquidLens(segmentContainer, {
+      buttons: segmentButtons,
+      selectedIndex: segmentChoices.findIndex((choice) => choice.selected),
+      onSelect: (index) => segmentChoices[index].select(),
+    });
+    return el(
+      "main",
+      {},
+      el(
+        "div",
+        { class: "page-title" },
+        small("ТВІЙ НАВЧАЛЬНИЙ ДЕНЬ"),
         el("h1", {}, "Розклад"),
       ),
       el("label", { class: "date-control" }, icon("schedule"), input),
