@@ -22,7 +22,13 @@ class Element {
   setAttribute(key, value) {
     this.attrs[key] = value;
     if(key==='value') this.value=value;
+    if(key.startsWith('data-')){this.dataset||={};this.dataset[key.slice(5)]=value;}
   }
+  remove() {}
+  querySelectorAll(selector) {
+    return allNodes(this).filter(n=>selector==='[data-page]'?n.attrs['data-page']!==undefined:selector.startsWith('.')?String(n.className||n.attrs.class||'').split(' ').includes(selector.slice(1)):n.tag===selector);
+  }
+  querySelector(selector) { return this.querySelectorAll(selector)[0]||null; }
   addEventListener(type, callback) {
     this.listeners ||= {};
     this.listeners[type] = callback;
@@ -76,7 +82,7 @@ function setup(enableDesign = false, featureStub = null) {
   // Export the existing closure only in this VM; production contains no test hooks.
   vm.runInContext(
     source.slice(0, source.indexOf('  document.addEventListener("keydown"')) +
-      "\nthis.appTest = {S, openInitialFeature, loadSchedule, loadWeek, navigate, adminPage, topbar, profilePage, loadAvatars, homePage, morePage, bottomnav, queuePage, queuesPage, rerender:()=>render(), setRender: fn => {render=fn;}, loginFailureMessage, attachLiquidLens: typeof attachLiquidLens === 'function' ? attachLiquidLens : null, installPressOptics: typeof installPressOptics === 'function' ? installPressOptics : null};\n})();",
+      "\nthis.appTest = {S, design, openInitialFeature, loadSchedule, loadWeek, navigate, adminPage, topbar, profilePage, loadAvatars, homePage, morePage, bottomnav, queuePage, queuesPage, rerender:()=>render(), setRender: fn => {render=fn;}, loginFailureMessage, attachLiquidLens: typeof attachLiquidLens === 'function' ? attachLiquidLens : null, installPressOptics: typeof installPressOptics === 'function' ? installPressOptics : null};\n})();",
     context,
   );
   const app = context.appTest;
@@ -391,6 +397,22 @@ test("Liquid lens prevents a synthetic click from navigating twice after pointer
 });
 
 const allNodes = node => node instanceof Element ? [node,...node.children.flatMap(allNodes)] : [];
+
+test('both sidebar modes expose the journal and student bottom tabs retain Profile',()=>{
+  const opened=[];
+  const {app}=setup(true,{open:key=>opened.push(key)});
+  app.S.mode='student';
+  let shell=app.design.navigation();
+  const journal=shell.querySelectorAll('[data-page]').find(n=>n.dataset.page==='journal');
+  assert.ok(journal);
+  journal.listeners.click();
+  assert.deepEqual(opened,['journal']);
+  const bottom=shell.querySelector('.bottom-nav');
+  assert.ok(bottom.querySelectorAll('[data-page]').some(n=>n.dataset.page==='profile'));
+  app.S.mode='admin';
+  shell=app.design.navigation();
+  assert.ok(shell.querySelectorAll('[data-page]').some(n=>n.dataset.page==='journal'));
+});
 
 for(const design of [false,true]) test('permanent queues have no signup toggles or whole-queue finish actions, design='+design,()=>{
   const {app}=setup(design);

@@ -1150,3 +1150,22 @@ small {
 .journal-grade { display: inline-flex; align-items: center; justify-content: center; min-width: 48px; min-height: 48px; padding: 8px; border-radius: 12px; font-size: 26px; font-weight: 800; font-variant-numeric: tabular-nums; }
 .journal-grade.grade-five { color: #c62828; background: #ffebee; }
 .journal-grade.grade-low { color: #fff; background: #000; }
+.journal-tables { display: grid; gap: 24px; min-width: 0; }
+.journal-subject { min-width: 0; }
+.journal-table-scroll { overflow: auto; max-height: 70vh; border: 1px solid var(--line, #8885); border-radius: 14px; background: var(--surface-solid, var(--surface, #fff)); }
+.journal-table { border-collapse: separate; border-spacing: 0; width: max-content; min-width: 100%; font-variant-numeric: tabular-nums; }
+.journal-table th, .journal-table td { padding: 4px; border-right: 1px solid var(--line, #8885); border-bottom: 1px solid var(--line, #8885); text-align: center; }
+.journal-table thead th { position: sticky; top: 0; z-index: 3; background: var(--surface-solid, var(--surface, #fff)); height: 44px; min-width: 54px; font-size: 12px; }
+.journal-table thead tr:nth-child(2) th { top: 44px; height: 32px; }
+.journal-table .journal-name { position: sticky; left: 0; width: 200px; min-width: 200px; max-width: 200px; z-index: 2; background: var(--surface-solid, var(--surface, #fff)); text-align: left; white-space: normal; overflow-wrap: anywhere; padding: 8px 12px; }
+.journal-table thead .journal-name { z-index: 5; }
+.journal-table thead small { display: block; font-size: 10px; font-weight: 400; }
+.journal-cell { display: inline-flex; position: relative; align-items: center; justify-content: center; min-height: 44px; min-width: 48px; border: 1px solid transparent; border-radius: 10px; background: transparent; color: inherit; padding: 0; }
+button.journal-cell { cursor: pointer; }
+button.journal-cell:focus-visible { outline: 2px solid var(--accent, #647a1e); outline-offset: 1px; }
+.journal-cell.cell-pending { border-style: dashed; border-color: var(--accent, #647a1e); }
+.journal-cell.cell-rejected { border-color: #c62828; }
+.journal-status-mark { position: absolute; top: -3px; right: 0; font-weight: 800; padding: 0 3px; background: var(--surface-solid, var(--surface, #fff)); border-radius: 3px; }
+.journal-cell .journal-grade { min-width: 42px; min-height: 42px; padding: 4px; font-size: 22px; border-radius: 8px; }
+.journal-own-row > .journal-name { box-shadow: inset 3px 0 var(--accent, #647a1e); }
+@media (max-width: 600px) { .journal-table .journal-name { width: 150px; min-width: 150px; max-width: 150px; font-size: 12px; } }
