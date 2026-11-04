@@ -9,6 +9,7 @@ from queue_bot.services.subjects import find_subject, find_teacher
 from queue_bot.storage.database import transaction
 
 log = logging.getLogger(__name__)
+START_DELAY_SECONDS = 5 * 60
 
 
 def normalized(value):
@@ -92,11 +93,24 @@ def sync_schedule(conn, subjects, *, now=None, schedule_data=None):
                 if scheduled and not matching:
                     conn.execute('UPDATE lesson_runs SET active = 0 WHERE id = ?', (run['id'],))
                     run = None
-            if not matching or not any(e['user_id'] is not None for e in queues.get_entries(conn, sid)):
+            if not matching:
                 continue
             lesson, begin, end = matching[0]
+            if now < begin + START_DELAY_SECONDS:
+                continue
             key = key_for(sid, local.date(), lesson['number'])
-            if conn.execute('SELECT key FROM bot_state WHERE key = ?', (key,)).fetchone():
+            saved = conn.execute('SELECT value FROM bot_state WHERE key = ?', (key,)).fetchone()
+            if saved and saved['value'] == 'stopped':
+                continue
+            # Open signup even for an empty queue so students can join. Keep a
+            # separate marker for upgrades of already-running lessons and never
+            # undo an administrator's subsequent manual closure on every tick.
+            signup_key = key + ':signup'
+            if not conn.execute('SELECT key FROM bot_state WHERE key = ?', (signup_key,)).fetchone():
+                conn.execute("UPDATE queue_sessions SET status = 'open' WHERE id = ? AND status = 'closed'", (sid,))
+                conn.execute("INSERT INTO bot_state(key, value) VALUES (?, 'opened')", (signup_key,))
+                log.info('Scheduled signup opened: queue=%s pair=%s date=%s', sid, lesson['number'], local.date())
+            if saved:
                 continue
             if run is None:
                 conn.execute('UPDATE lesson_runs SET active = 0 WHERE session_id = ? AND active = 1', (sid,))

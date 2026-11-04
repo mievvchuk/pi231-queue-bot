@@ -22,7 +22,7 @@ class TurnTime(StatesGroup):
 def lesson_summary(conn, sid, uid):
     data = attendance.view(conn, sid, uid)
     if not data:
-        return '\n\nЗдача почнеться автоматично за розкладом відповідної пари.'
+        return '\n\nЗапис і здача почнуться автоматично через 5 хвилин після початку відповідної пари за розкладом.'
     lines = ['\n\nЗдача на парі активна. На відповіді — 10 хвилин.']
     if data['current_name']:
         lines.append('Викликано / зараз здає: ' + html.escape(data['current_name']))
