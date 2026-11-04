@@ -95,3 +95,33 @@ async def test_not_ready_from_bot_is_reordered_and_shown_in_mini_app(client, con
     assert a.view(conn, sid, 2)['own']['state'] == 'called'
     assert a.view(conn, sid, 1)['own']['state'] == 'present'
     assert original == [(r['id'], r['position'], r['passed_labs']) for r in queues.get_entries(conn, sid)]
+
+
+@pytest.mark.asyncio
+async def test_out_of_order_completion_in_mini_app_and_bot_preserves_other_students_turn(client, conn):
+    from queue_bot.handlers.completions import begin_completion
+    sid = queues.create_session(conn, 100, 1, 1)
+    for uid in (1, 2):
+        queues.join_queue(conn, uid, sid, lab_numbers=[1, 2], planned_minutes=15)
+    a.start(conn, 100, sid)
+    for action in ('present','ready'):
+        a.respond(conn, 1, a.view(conn, sid, 1)['own']['token'], action)
+    before = a.view(conn, sid, 1)['own']
+    url = f'/api/miniapp/queues/{sid}'
+    detail = await (await client.get(url, headers=headers(2))).json()
+    entry = next(e for e in detail['entries'] if e['is_me'])
+    reference = {'entry_id':entry['id'],'revision':entry['entry_revision'],'labs':[1]}
+    assert (await client.post(url+'/complete', headers=headers(1), json=reference)).status == 400
+    assert (await client.post(url+'/complete', headers=headers(2), json=reference)).status == 200
+    assert (await client.post(url+'/complete', headers=headers(2), json=reference)).status == 400
+    assert a.view(conn, sid, 1)['own'] == before
+    message = AsyncMock()
+    message.from_user.id = 2
+    state = AsyncMock()
+    state.get_data.return_value = {'session_id':sid,'passed_entry_id':entry['id'],
+                                  'passed_revision':queues.get_entry(conn, entry['id'])['entry_revision']}
+    # One remaining lab is confirmed through the existing Telegram flow.
+    await begin_completion(message, state, conn, sid, subjects=[])
+    assert queues.get_entry(conn, entry['id'])['status'] == 'completed'
+    assert queues.get_entry(conn, entry['id'])['passed_labs'] == '[1, 2]'
+    assert a.view(conn, sid, 1)['own'] == before
