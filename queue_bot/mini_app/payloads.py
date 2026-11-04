@@ -42,12 +42,10 @@ def queue_view(conn, subjects, session, uid, *, detail=False, admin=False):
     if detail:
         result['entries'] = [entry_view(row, uid, admin) for row in attendance.display_entries(rows, lesson)]
         result['labs'] = list(lab_catalog.labs_for_session(session))
-        result['can_pick_position'] = queues.has_free_slots(conn, session['id']) or not queues.are_first_10_occupied(conn, session['id'])
-        # Reflect existing queue rules: vacant placeholders can be taken at any
-        # position, while new selectable positions are limited to the first ten.
+        result['can_pick_position'] = session['status'] != 'archived'
         by_position = {row['position']: row for row in rows}
         last = max(by_position, default=0)
-        limit = max(last, 10 if not queues.are_first_10_occupied(conn, session['id']) else last)
+        limit = 20
         result['join_slots'] = [dict(number=number, state=(
             'yours' if number in by_position and by_position[number]['telegram_id'] == uid else
             'busy' if number in by_position and by_position[number]['user_id'] is not None else 'free'))

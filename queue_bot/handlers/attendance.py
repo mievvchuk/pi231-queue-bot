@@ -125,7 +125,7 @@ async def queue_action(callback, state, conn, subjects):
             from queue_bot.services import lab_catalog
             await callback.message.answer('Інші дії для цієї черги', reply_markup=get_queue_actions_reply_menu(
                 bool(entry), is_open=session['status'] != 'archived',
-                can_pick_number=not queues.are_first_10_occupied(conn, sid) or queues.has_free_slots(conn, sid),
+                can_pick_number=True,
                 swap_wish=entry['swap_wish'] if entry else None,
                 labs_available=bool(lab_catalog.labs_for_session(session)),
                 consultation=session['queue_type'] == 'consultation' or session['subject_id'] == 7))

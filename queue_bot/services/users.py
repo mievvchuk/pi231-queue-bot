@@ -35,12 +35,12 @@ def validate_full_name(text: str) -> str:
 
 def get_user(conn: sqlite3.Connection, telegram_id: int):
     return conn.execute(
-        "SELECT * FROM users WHERE telegram_id = ?", (telegram_id,)
+        "SELECT * FROM users WHERE telegram_id = ? AND deleted_at IS NULL", (telegram_id,)
     ).fetchone()
 
 
 def get_user_by_id(conn, user_id: int):
-    row = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+    row = conn.execute("SELECT * FROM users WHERE id = ? AND deleted_at IS NULL", (user_id,)).fetchone()
     return dict(row) if row else None
 
 
@@ -54,9 +54,17 @@ def register_user(conn: sqlite3.Connection, telegram_id: int, full_name: str):
         raise BotError("Ви вже зареєстровані.")
     name = validate_full_name(full_name)
 
+    retired = conn.execute('SELECT id FROM users WHERE telegram_id = ? AND deleted_at IS NOT NULL',
+                           (telegram_id,)).fetchone()
+    if retired:
+        if conn.execute('SELECT 1 FROM users WHERE LOWER(full_name) = LOWER(?) AND deleted_at IS NULL', (name,)).fetchone():
+            raise BotError('Користувач з таким ПІБ уже є у списку. Зверніться до адміністратора.')
+        conn.execute('UPDATE users SET deleted_at = NULL, full_name = ? WHERE id = ?', (name, retired['id']))
+        return get_user(conn, telegram_id)
+
     # Якщо староста вже додав цього студента вручну — прив'язуємо його реальний telegram_id
     placeholder = conn.execute(
-        "SELECT * FROM users WHERE LOWER(full_name) = LOWER(?) AND telegram_id < 0", (name,)
+        "SELECT * FROM users WHERE deleted_at IS NULL AND LOWER(full_name) = LOWER(?) AND telegram_id < 0", (name,)
     ).fetchone()
 
     if placeholder:
@@ -69,7 +77,7 @@ def register_user(conn: sqlite3.Connection, telegram_id: int, full_name: str):
 
     # Перевіряємо, чи це ім'я не зайняте іншим зареєстрованим користувачем
     already_taken = conn.execute(
-        "SELECT 1 FROM users WHERE LOWER(full_name) = LOWER(?) AND telegram_id > 0", (name,)
+        "SELECT 1 FROM users WHERE deleted_at IS NULL AND LOWER(full_name) = LOWER(?) AND telegram_id > 0", (name,)
     ).fetchone()
     if already_taken:
         raise BotError("Користувач з таким ПІБ уже зареєстрований. Якщо це помилка, зверніться до старости.")
@@ -90,7 +98,7 @@ def admin_rename_user(conn, user_id: int, new_name: str):
     """Староста змінює ПІБ студенту."""
     name = validate_full_name(new_name)
     conn.execute("UPDATE users SET full_name = ? WHERE id = ?", (name, user_id))
-    return conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+    return conn.execute("SELECT * FROM users WHERE id = ? AND deleted_at IS NULL", (user_id,)).fetchone()
 
 
 def toggle_block_user(conn, user_id: int) -> bool:
@@ -107,26 +115,26 @@ def list_blocked_users(conn):
     """Повертає список заблокованих студентів."""
     from queue_bot.services.restrictions import expire_due_restrictions
     expire_due_restrictions(conn)
-    return sort_users(conn.execute("SELECT * FROM users WHERE is_blocked").fetchall())
+    return sort_users(conn.execute("SELECT * FROM users WHERE is_blocked AND deleted_at IS NULL").fetchall())
 
 
 def get_or_create_user_by_name(conn, full_name: str):
     """Шукає або створює користувача за ПІБ (якщо додає староста вручну)."""
     name = validate_full_name(full_name)
-    row = conn.execute("SELECT * FROM users WHERE LOWER(full_name) = LOWER(?)", (name,)).fetchone()
+    row = conn.execute("SELECT * FROM users WHERE deleted_at IS NULL AND LOWER(full_name) = LOWER(?)", (name,)).fetchone()
     if row:
         return row
     min_id = conn.execute("SELECT COALESCE(MIN(telegram_id), 0) FROM users WHERE telegram_id < 0").fetchone()[0]
     fake_tg_id = min_id - 1
     conn.execute("INSERT INTO users (telegram_id, full_name) VALUES (?, ?)", (fake_tg_id, name))
-    return conn.execute("SELECT * FROM users WHERE telegram_id = ?", (fake_tg_id,)).fetchone()
+    return conn.execute("SELECT * FROM users WHERE telegram_id = ? AND deleted_at IS NULL", (fake_tg_id,)).fetchone()
 
 
 # ---------- CRUD розділу «Користувачі» (з перевіркою прав та аудитом) ----------
 
 def list_users(conn) -> list:
     """Return the complete roster in Ukrainian alphabetical order."""
-    return sort_users(conn.execute('SELECT * FROM users').fetchall())
+    return sort_users(conn.execute('SELECT * FROM users WHERE deleted_at IS NULL').fetchall())
 
 
 def search_users(conn, query: str) -> list:
@@ -135,7 +143,7 @@ def search_users(conn, query: str) -> list:
     if not clean:
         return []
     return sort_users(conn.execute(
-        "SELECT * FROM users WHERE LOWER(full_name) LIKE ?",
+        "SELECT * FROM users WHERE deleted_at IS NULL AND LOWER(full_name) LIKE ?",
         (f"%{clean}%",),
     ).fetchall())
 
@@ -146,7 +154,7 @@ def admin_create_placeholder(conn, actor_id: int, full_name: str):
     name = validate_full_name(full_name)
 
     existing = conn.execute(
-        "SELECT 1 FROM users WHERE LOWER(full_name) = LOWER(?)", (name,)
+        "SELECT 1 FROM users WHERE deleted_at IS NULL AND LOWER(full_name) = LOWER(?)", (name,)
     ).fetchone()
     if existing:
         raise BotError("Користувач з таким ПІБ уже існує.")
@@ -157,7 +165,7 @@ def admin_create_placeholder(conn, actor_id: int, full_name: str):
         ).fetchone()[0]
         fake_tg_id = min_id - 1
         conn.execute("INSERT INTO users (telegram_id, full_name) VALUES (?, ?)", (fake_tg_id, name))
-        new_user = conn.execute("SELECT * FROM users WHERE telegram_id = ?", (fake_tg_id,)).fetchone()
+        new_user = conn.execute("SELECT * FROM users WHERE telegram_id = ? AND deleted_at IS NULL", (fake_tg_id,)).fetchone()
         admins.log_action(conn, actor_id, "admin_create_user", f"{new_user['id']}: {name}")
         return new_user
 
@@ -171,7 +179,7 @@ def admin_update_full_name(conn, actor_id: int, user_id: int, new_name: str):
 
     name = validate_full_name(new_name)
     existing = conn.execute(
-        "SELECT 1 FROM users WHERE LOWER(full_name) = LOWER(?) AND id != ?", (name, user_id)
+        "SELECT 1 FROM users WHERE deleted_at IS NULL AND LOWER(full_name) = LOWER(?) AND id != ?", (name, user_id)
     ).fetchone()
     if existing:
         raise BotError("Користувач з таким ПІБ уже існує.")
@@ -183,27 +191,25 @@ def admin_update_full_name(conn, actor_id: int, user_id: int, new_name: str):
 
 
 def admin_delete_user(conn, actor_id: int, user_id: int) -> None:
-    """Видаляє лише невикористаного користувача або placeholder без записів у чергах."""
+    """Remove an inactive account from the roster without destroying its history."""
     admins.require_admin(conn, actor_id)
-    user = get_user_by_id(conn, user_id)
-    if not user:
-        raise BotError("Користувача не знайдено.")
-
-    if admins.is_admin(conn, user["telegram_id"]):
-        raise BotError("Неможливо видалити адміністратора. Спочатку зніміть з нього права адміністратора.")
-
-    has_entries = conn.execute(
-        "SELECT 1 FROM queue_entries WHERE user_id = ? LIMIT 1", (user_id,)
-    ).fetchone()
-    if has_entries:
-        raise BotError(
-            "Неможливо видалити користувача, який має активні або історичні записи в чергах.\n"
-            "Ви можете заблокувати його замість видалення."
-        )
-
     with transaction(conn):
-        conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
-        admins.log_action(conn, actor_id, "admin_delete_user", f"{user_id}: {user['full_name']}")
+        from queue_bot.storage.database import PGConnectionWrapper
+        lock = ' FOR UPDATE' if isinstance(conn, PGConnectionWrapper) else ''
+        user = conn.execute('SELECT * FROM users WHERE id = ? AND deleted_at IS NULL' + lock,
+                            (user_id,)).fetchone()
+        if not user:
+            raise BotError('Користувача не знайдено.')
+        if admins.is_admin(conn, user['telegram_id']):
+            raise BotError('Неможливо видалити адміністратора. Спочатку зніміть з нього права адміністратора.')
+        active = conn.execute("""SELECT 1 FROM queue_entries e JOIN queue_sessions s ON s.id = e.session_id
+            WHERE e.user_id = ? AND e.status = 'active' AND s.status IN ('open', 'closed') LIMIT 1""",
+            (user_id,)).fetchone()
+        if active:
+            raise BotError('Користувач має активні записи в чергах. Спочатку приберіть його з цих черг.')
+        conn.execute('UPDATE users SET deleted_at = CURRENT_TIMESTAMP WHERE id = ?', (user_id,))
+        conn.execute('DELETE FROM browser_sessions WHERE uid = ?', (user['telegram_id'],))
+        admins.log_action(conn, actor_id, 'admin_delete_user', f"{user_id}: {user['full_name']}")
 
 
 def admin_toggle_block_user(conn, actor_id: int, user_id: int) -> bool:

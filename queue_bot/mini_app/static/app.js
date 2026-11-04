@@ -814,8 +814,8 @@
     );
   }
   function morePage() {
-    const links=[['profile','profile','Профіль і мої обміни','Акаунт, записи та запити на обмін'],['polls','polls','Опитування','Голосування та результати'],['help','help','Допомога','Як працюють черги'],['bugs','bugs','Звернення','Повідомити про проблему']];
-    if(S.data.me.is_admin) links.unshift(['admin','admin','Керування групою','Черги, студенти, заміни та звіти']);
+    const links=[['journal','mortarboard','Електронний журнал','Лабораторні, оцінки та атестації'],['profile','profile','Профіль і мої обміни','Акаунт, записи та запити на обмін'],['polls','polls','Опитування','Голосування та результати'],['help','help','Допомога','Як працюють черги'],['bugs','bugs','Звернення','Повідомити про проблему']];
+    if(S.data.me.is_admin) links.unshift(['admin','admin','Керування групою','Черги, студенти та розклад']);
     return el('main',{},el('div',{class:'page-title'},el('h1',{},'Ще'),small('Усе інше — в одному місці.')),
       el('div',{class:'more-list'},links.map(([key,glyph,title,description])=>btn([icon(glyph),el('span',{},el('strong',{},title),small(description)),icon('arrow')],()=>{
         if(key==='admin'){ S.mode='admin'; navigate('admin'); }
@@ -1288,7 +1288,7 @@
         type: "number",
         min: 1,
         step: 1,
-        max: 1000,
+        max: 100,
         inputmode: "numeric",
         placeholder: "У кінець черги",
       });

@@ -126,6 +126,46 @@ const deferred = () => {
   return { resolve, reject, promise };
 };
 
+const journalData = (group=false) => ({period:'2026-2027:1',periods:['2026-2027:1'],group,can_review:group,can_set_dates:group,
+  subjects:[{key:'кпз',name:'КПЗ'}],students:group?[{id:1,name:'Петренко Іван'}]:[],dates:[],
+  records:[5,2,3].map((grade,i)=>({id:i+1,user_id:1,subject_key:'кпз',subject_name:'КПЗ',student_name:'Петренко Іван',kind:'lab',number:i+1,grade,status:'pending',revision:0,note:''}))});
+
+test('journal renders grades, filters and an explicit pending status',async()=>{
+  const data=journalData();
+  const {features}=setup(async()=>data);
+  await features.open('journal');
+  const page=features.page('journal');
+  const grades=descendants(page).filter(n=>String(n.attrs.class||'').includes('journal-grade'));
+  assert.equal(grades.length,3);
+  assert.match(grades[0].attrs.class,/grade-five/);
+  assert.match(grades[1].attrs.class,/grade-low/);
+  assert.doesNotMatch(grades[2].attrs.class,/grade-low|grade-five/);
+  assert.match(page.textContent,/Чекає підтвердження/);
+  assert.match(page.textContent,/Дати ще не вказані/);
+  assert.ok(!descendants(page).some(n=>n.tag==='button'&&n.textContent==='Підтвердити'));
+  const css=fs.readFileSync(path.join(__dirname,'../queue_bot/mini_app/static/app.css'),'utf8');
+  assert.match(css,/grade-low\s*\{[^}]*color:\s*#fff;[^}]*background:\s*#000;/);
+});
+
+test('journal admin approval submits the exact displayed revision and keeps the group period',async()=>{
+  const calls=[];
+  const data=journalData(true);
+  const {features,S,panels}=setup(async(path,body)=>{calls.push([path,body]);return body?{message:'Збережено'}:data;});
+  S.mode='admin';
+  await features.open('journal',false,'?period=2026-2027:1&scope=group');
+  const page=features.page('journal');
+  const button=descendants(page).find(n=>n.tag==='button'&&n.textContent==='Підтвердити');
+  assert.ok(button);
+  button.events.click();
+  const form=descendants(panels.at(-1)).find(n=>n.tag==='form');
+  await form.events.submit({preventDefault(){}});
+  assert.equal(calls[1][0],'/journal');
+  assert.equal(calls[1][1].revision,0);
+  assert.equal(calls[1][1].record_id,1);
+  assert.equal(calls[1][1].status,'approved');
+  assert.match(calls[2][0],/period=2026-2027%3A1&scope=group/);
+});
+
 test("an old feature response cannot overwrite the newly opened feature", async () => {
   const pending = deferred();
   const { features, S } = setup((path) =>

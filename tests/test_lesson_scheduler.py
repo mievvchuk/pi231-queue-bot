@@ -237,7 +237,7 @@ async def test_end_keeps_signup_and_preserves_partial_results_and_pending_approa
     attendance.respond(conn, 1, row['token'], 'present')
     row = attendance.view(conn, queue, 1)['own']
     attendance.respond(conn, 1, row['token'], 'ready', minutes=120)
-    entry = queues.get_entries(conn, queue)[0]
+    entry = queues._own_active_entry(conn, 1, queue)
     queues.record_own_passed_lab_numbers(conn, 1, queue, [1], entry_id=entry['id'], expected_revision=entry['entry_revision'])
     before = dict(queues.get_entry(conn, entry['id']))
     token = attendance.view(conn, queue, 1)['own']['token']
