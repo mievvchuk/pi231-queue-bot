@@ -292,6 +292,8 @@ def correct(conn, actor, entry_id, action, *, run_id=None):
 def tick(conn, *, now=None):
     now = now_seconds() if now is None else now
     with transaction(conn):
+        from queue_bot.services.lesson_scheduler import close_finished_signups
+        close_finished_signups(conn, now)
         for row in conn.execute('SELECT * FROM lesson_runs WHERE active = 1').fetchall():
             _lock(conn, row['session_id'])
             run = conn.execute('SELECT * FROM lesson_runs WHERE id = ? AND active = 1', (row['id'],)).fetchone()
@@ -299,6 +301,8 @@ def tick(conn, *, now=None):
                 continue
             session = queues.get_session(conn, run['session_id'])
             if run['ends_at'] <= now or not session or session['status'] == 'archived':
+                if run['ends_at'] <= now and session and session['status'] == 'open':
+                    conn.execute("UPDATE queue_sessions SET status = 'closed' WHERE id = ?", (run['session_id'],))
                 conn.execute('UPDATE lesson_runs SET active = 0 WHERE id = ?', (run['id'],))
             else:
                 _advance(conn, run, now)
