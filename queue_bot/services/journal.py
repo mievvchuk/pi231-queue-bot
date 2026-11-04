@@ -8,7 +8,7 @@ from datetime import date
 from queue_bot.services import admins, users, schedule
 from queue_bot.services.errors import BotError, PermissionDenied
 from queue_bot.services.lesson_scheduler import subject_name
-from queue_bot.services.journal_layout import layout
+from queue_bot.services.journal_layout import layout, summary
 from queue_bot.storage.database import transaction, PGConnectionWrapper
 
 
@@ -211,8 +211,11 @@ def view(conn, uid, subjects, *, group=False, period=None):
         if record['subject_key'] not in known:
             subject_rows.append({'key': record['subject_key'], 'name': record['subject_name'], **layout(record['subject_name'])})
             known.add(record['subject_key'])
-    return {'period': period, 'periods': sorted(periods, reverse=True), 'subjects': subject_rows,
+    students = users.list_users(conn)
+    averages = {str(student['id']): {subject['key']: summary(subject, [r for r in records if r['user_id'] == student['id'] and r['subject_key'] == subject['key']])
+                                     for subject in subject_rows} for student in students}
+    return {'period': period, 'periods': sorted(periods, reverse=True), 'subjects': subject_rows, 'averages': averages,
             'records': records, 'group': group, 'can_review': group, 'viewer_id': actor['id'],
             'can_set_dates': group and admins.is_owner(conn, uid),
-            'students': [{'id': row['id'], 'name': row['full_name']} for row in users.list_users(conn)],
+            'students': [{'id': row['id'], 'name': row['full_name']} for row in students],
             'dates': [dict(row) for row in conn.execute('SELECT subject_key, number, due_date FROM journal_dates WHERE period = ?', (period,)).fetchall()]}
