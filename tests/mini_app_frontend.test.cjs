@@ -21,8 +21,12 @@ class Element {
   }
   setAttribute(key, value) {
     this.attrs[key] = value;
+    if(key==='value') this.value=value;
   }
-  addEventListener() {}
+  addEventListener(type, callback) {
+    this.listeners ||= {};
+    this.listeners[type] = callback;
+  }
   removeAttribute(key) {
     delete this.attrs[key];
   }
@@ -61,12 +65,17 @@ function setup(enableDesign = false) {
     path.join(__dirname, "../queue_bot/mini_app/static/app.js"),
     "utf8",
   );
-  if (enableDesign) vm.runInContext(fs.readFileSync(
-    path.join(__dirname, '../queue_bot/mini_app/static/design.js'), 'utf8'), context);
+  if (enableDesign) {
+    vm.runInContext(fs.readFileSync(
+      path.join(__dirname, '../queue_bot/mini_app/static/design.js'), 'utf8'), context);
+    const createDesign=context.window.createPI231Design;
+    // Let interaction tests render just their page instead of the whole shell.
+    context.window.createPI231Design=hooks=>createDesign({...hooks,render:()=>context.appTest.rerender()});
+  }
   // Export the existing closure only in this VM; production contains no test hooks.
   vm.runInContext(
     source.slice(0, source.indexOf('  document.addEventListener("keydown"')) +
-      "\nthis.appTest = {S, loadSchedule, loadWeek, navigate, adminPage, topbar, profilePage, loadAvatars, homePage, morePage, bottomnav, queuePage, loginFailureMessage, attachLiquidLens: typeof attachLiquidLens === 'function' ? attachLiquidLens : null, installPressOptics: typeof installPressOptics === 'function' ? installPressOptics : null};\n})();",
+      "\nthis.appTest = {S, loadSchedule, loadWeek, navigate, adminPage, topbar, profilePage, loadAvatars, homePage, morePage, bottomnav, queuePage, queuesPage, rerender:()=>render(), setRender: fn => {render=fn;}, loginFailureMessage, attachLiquidLens: typeof attachLiquidLens === 'function' ? attachLiquidLens : null, installPressOptics: typeof installPressOptics === 'function' ? installPressOptics : null};\n})();",
     context,
   );
   const app = context.appTest;
@@ -468,4 +477,53 @@ test('serving student sees their reminder and a separate response deadline in Ky
   app.S.queue.lesson.own.deadline=Date.parse('2026-11-03T07:10:00Z')/1000;
   page=app.queuePage();
   assert.ok(page.textContent.includes('продовжіть час до 09:10'));
+});
+
+for(const design of [false,true]) test('queue search combines type and personal filters without losing the input, design='+design,()=>{
+  const {app,root}=setup(design);
+  app.S.data.queues=[
+    {id:1,subject:'КПЗ',teacher:'Щуцький',type:'lesson',status:'open',count:5,my_position:2},
+    {id:2,subject:'КПЗ',teacher:'Щуцький',type:'consultation',status:'closed',count:3,my_position:null},
+    {id:3,subject:'ЛМВ',teacher:'Кондратюк',type:'lesson',status:'open',count:2,my_position:null},
+    {id:4,subject:'Курсова',teacher:'Кондратюк',type:'coursework',status:'open',count:1,my_position:null},
+  ];
+  const original=JSON.stringify(app.S.data.queues);
+  let renders=0;
+  const render=()=>{renders++;root.replaceChildren(app.queuesPage());};
+  app.setRender(render);render();
+  const list=()=>allNodes(root).find(n=>['subject-list','queue-list'].includes(n.className));
+  const input=()=>allNodes(root).find(n=>n.tag==='input'&&n.attrs.type==='search');
+  const results=()=>list().children.filter(n=>n.tag==='button');
+  const typeButton=label=>allNodes(root).find(n=>n.tag==='button'&&n.textContent===label);
+  const scopeButton=label=>allNodes(allNodes(root).find(n=>(n.className||'').split(' ').includes('queue-filters')))
+    .find(n=>n.tag==='button'&&n.textContent.trim().startsWith(label));
+  const search=value=>{const field=input(),before=renders;field.value=value;field.listeners.input();assert.equal(input(),field);assert.equal(renders,before);};
+  assert.equal(results().length,4);
+  search('  кПз  ');
+  assert.equal(results().length,2);
+  typeButton('Консультації').listeners.click();
+  assert.equal(input().value,'  кПз  ');
+  assert.equal(typeButton('Консультації').attrs['aria-pressed'],'true');
+  assert.equal(results().length,1);
+  assert.ok(list().textContent.includes('Консультація'));
+  scopeButton('Мої').listeners.click();
+  assert.equal(results().length,0);
+  assert.ok(list().textContent.includes('Нічого не знайдено'));
+  assert.ok(root.textContent.includes('Знайдено: 0'));
+  typeButton('Звичайні пари').listeners.click();
+  assert.equal(results().length,1);
+  assert.equal(app.S.queueFilter,'mine');
+  search(' КОНДРАТЮК ');
+  assert.equal(results().length,0);
+  scopeButton('Усі').listeners.click();
+  assert.equal(results().length,1);
+  assert.ok(list().textContent.includes('ЛМВ'));
+  assert.ok(!list().textContent.includes('Курсова'));
+  typeButton('Усі типи').listeners.click();
+  assert.equal(results().length,2);
+  search('');
+  assert.equal(results().length,4);
+  search('невідомий предмет');
+  assert.equal(results().length,0);
+  assert.equal(JSON.stringify(app.S.data.queues),original);
 });

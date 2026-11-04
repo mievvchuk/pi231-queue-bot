@@ -180,3 +180,5 @@ button:active:not(:disabled) { transform:scale(.97); }
 @media(min-width:1200px){.report-stats{grid-template-columns:repeat(5,minmax(0,1fr))}}
 
 .guide-speed{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin:16px 0;font-size:14px}.guide-speed select{width:auto;max-width:100%;min-width:180px}
+.queue-type-filters{display:flex;flex-wrap:wrap;gap:4px;max-width:100%;align-self:flex-start}
+.queue-type-filters button{flex:1 1 auto;min-width:0;min-height:40px;white-space:normal;padding:8px 14px}
