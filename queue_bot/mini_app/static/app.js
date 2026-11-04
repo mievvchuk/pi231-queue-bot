@@ -1000,6 +1000,8 @@
           "Запис закрито. Уже записані студенти можуть завершувати здачу.",
         ),
       );
+    if (!q.lesson && q.type === 'lesson' && q.status !== 'archived') controls.append(
+      small('Запис і здача почнуться автоматично через 5 хвилин після початку відповідної пари за розкладом.'));
     if (q.lesson) {
       const ownState = q.lesson.own;
       const summary = el('section', {class:'card action-stack'},
