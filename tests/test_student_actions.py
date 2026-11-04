@@ -17,7 +17,7 @@ def test_join_at_end_position_and_invalid_position(conn, make_user, filled):
     with pytest.raises(BotError):
         queues.join_queue(conn, 10, filled, position=0)
     with pytest.raises(BotError):
-        queues.join_queue(conn, 10, filled, position=11)
+        queues.join_queue(conn, 10, filled, position=101)
     assert queues.join_queue(conn, 10, filled, position=6) == (6, 6)
 
 
@@ -107,7 +107,7 @@ def test_first_10_positions_and_overflow_flow(conn, make_user):
     make_user(20, "Тест Двадцятий")
     with pytest.raises(BotError) as exc_info:
         queues.join_queue(conn, 20, s_id, position=5)
-    assert "Перші 10 місць уже зайняті" in str(exc_info.value)
+    assert "зайняте" in str(exc_info.value)
 
     # 7. Запис без вказання номера ставить у кінець (на 11-те місце)
     pos, total = queues.join_queue(conn, 20, s_id)

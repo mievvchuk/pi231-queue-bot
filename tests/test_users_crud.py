@@ -135,7 +135,7 @@ def test_delete_user_with_queue_entries_prohibited(conn):
 
     with pytest.raises(BotError) as exc:
         users.admin_delete_user(conn, ADMIN_ID, user["id"])
-    assert "активні або історичні записи" in str(exc.value)
+    assert "активні записи" in str(exc.value)
 
 
 def test_delete_unused_placeholder(conn):

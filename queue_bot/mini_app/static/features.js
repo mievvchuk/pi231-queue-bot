@@ -20,6 +20,7 @@ window.createPI231Features = function (H) {
     bugs: "Повідомити про помилку",
     polls: "Опитування",
     help: "Допомога",
+    journal: "Електронний журнал",
     "admin-history": "Історія черг",
     "admin-group": "Група",
     "admin-subjects": "Предмети й викладачі",
@@ -230,7 +231,7 @@ window.createPI231Features = function (H) {
         data = await api(
           key.startsWith("admin-") || key === "owner"
             ? adminPath(key) + query
-            : "/" + key,
+            : "/" + key + query,
         );
       if (current(token, epoch, key)) {
         state.data = data;
@@ -1472,6 +1473,62 @@ window.createPI231Features = function (H) {
       btn("Повідомити про помилку", () => open("bugs"), "button secondary"),
     ];
   }
+  function journalPage(data) {
+    const query = (group=data.group,period=data.period) => '?period='+encodeURIComponent(period)+(group?'&scope=group':'');
+    const reload = () => open('journal', true, query());
+    const save = async (values, ctx) => {
+      await send('/journal', values, ctx, false);
+      if(current(ctx.token,ctx.epoch,ctx.key))await reload();
+    };
+    const period = select(rows(data.periods).map(p=>[p,p.replace(':',' · семестр ')]),data.period);
+    period.addEventListener('change',()=>open('journal',false,query(data.group,period.value)));
+    const subjectFilter=select([['','Усі предмети'],...rows(data.subjects).map(s=>[s.key,s.name])]);
+    const studentFilter=data.group?select([['','Усі студенти'],...rows(data.students).map(s=>[String(s.id),s.name])]):null;
+    const statusFilter=select([['','Усі записи'],['pending','Чекають підтвердження'],['approved','Підтверджено'],['rejected','На виправлення']]);
+    const records=el('div',{class:'journal-records'});
+    const grade = value => el('span',{class:'journal-grade'+(Number(value)===5?' grade-five':Number(value)<3?' grade-low':''),'aria-label':'Оцінка '+value+' із 5'},String(value));
+    const editRecord = record => {
+      const subject=select(rows(data.subjects).map(s=>[s.key,s.name]),record?.subject_key);
+      const kind=select([['lab','Лабораторна'],['attestation','Атестація']],record?.kind||'lab');
+      const number=input({type:'number',min:1,max:100,step:1,value:record?.number||1});
+      const score=input({type:'number',min:0,max:5,step:0.1,value:record?.grade??'',placeholder:'Від 0 до 5'});
+      const note=text({required:false,maxlength:500,value:record?.note||''});
+      note.value=record?.note||'';
+      const student=data.group?select(rows(data.students).map(s=>[String(s.id),s.name]),record?String(record.user_id):undefined):null;
+      if(record&&student)student.disabled=true;
+      sheet(record?'Редагувати запис':'Додати результат','Оцінка до 5. Після збереження запис чекає підтвердження адміністратора.').append(
+        form([student?field('Студент',student):null,field('Предмет',subject),field('Тип',kind),field('Номер',number),field('Оцінка',score),field('Примітка',note)].filter(Boolean),'Надіслати на підтвердження',ctx=>save({action:'submit',period:data.period,subject_key:subject.value,kind:kind.value,number:Number(number.value),grade:Number(score.value),note:note.value,...(student?{user_id:Number(student.value)}:{}),...(record?{record_id:record.id,revision:record.revision}:{})},ctx)));
+    };
+    const reviewRecord = (record,status) => {
+      const note=text({required:status==='rejected',maxlength:500});
+      sheet(status==='approved'?'Підтвердити оцінку?':'Повернути на виправлення',record.student_name+' · '+record.subject_name+' · '+record.grade+' із 5').append(form([field('Коментар адміністратора',note)],status==='approved'?'Підтвердити':'Повернути',ctx=>save({action:'review',record_id:record.id,revision:record.revision,status,note:note.value},ctx)));
+    };
+    const draw = () => {
+      const visible=rows(data.records).filter(r=>(!subjectFilter.value||r.subject_key===subjectFilter.value)&&(!studentFilter?.value||String(r.user_id)===studentFilter.value)&&(!statusFilter.value||r.status===statusFilter.value));
+      const labels={pending:'Чекає підтвердження',approved:'Підтверджено',rejected:'Повернуто на виправлення'};
+      records.replaceChildren(...(visible.length?visible.map(r=>card(
+        el('div',{class:'journal-record-title'},grade(r.grade),el('div',{},el('h3',{},r.subject_name),small((r.kind==='lab'?'Лабораторна':'Атестація')+' №'+r.number))),
+        data.group?el('strong',{},r.student_name):null,badge(labels[r.status],r.status==='approved'?'success':''),
+        r.note?el('p',{},r.note):null,r.review_note?el('p',{},'Коментар: '+r.review_note):null,
+        btn('Редагувати',()=>editRecord(r),'button secondary'),
+        data.can_review&&r.status==='pending'?el('div',{class:'button-row'},btn('Підтвердити',()=>reviewRecord(r,'approved'),'button primary'),btn('На виправлення',()=>reviewRecord(r,'rejected'),'button secondary')):null
+      )):[small('За цими фільтрами записів немає. Додай результат або зміни фільтр.')]));
+    };
+    subjectFilter.addEventListener('change',draw);studentFilter?.addEventListener('change',draw);statusFilter.addEventListener('change',draw);draw();
+    const dates=card(el('h2',{},'Атестації'),...rows(data.dates).filter(d=>d.due_date).map(d=>el('p',{},(rows(data.subjects).find(s=>s.key===d.subject_key)?.name||d.subject_key)+' · атестація №'+d.number+' · '+d.due_date)),!rows(data.dates).some(d=>d.due_date)?small('Дати ще не вказані. Власник додасть їх пізніше.'):null);
+    if(data.can_set_dates)dates.append(btn('Вказати дату',()=>{
+      const subject=select(rows(data.subjects).map(s=>[s.key,s.name]));
+      const number=input({type:'number',min:1,max:100,step:1,value:1});
+      const due=input({type:'date',required:false});
+      sheet('Дата атестації','Порожня дата прибирає попередню дату для вибраного предмета й номера.').append(form([field('Предмет',subject),field('Номер атестації',number),field('Дата',due)],'Зберегти дату',ctx=>save({action:'date',period:data.period,subject_key:subject.value,number:Number(number.value),due_date:due.value},ctx)));
+    },'button secondary'));
+    return [card(small('Особистий журнал. Студент вносить результат, адміністратор підтверджує. Після редагування потрібне нове підтвердження.'),
+      field('Навчальний період',period),
+      S.data?.me?.is_admin?btn(data.group?'Мій журнал':'Журнал групи',()=>{if(!data.group)S.mode='admin';open('journal',false,query(!data.group));},'button secondary'):null,
+      btn('Додати результат',()=>editRecord(null),'button primary')),
+      card(field('Предмет',subjectFilter),studentFilter?field('Студент',studentFilter):null,field('Перевірка',statusFilter)),dates,records];
+  }
+
   function page(key) {
     const main = el(
       "main",
@@ -1528,6 +1585,7 @@ window.createPI231Features = function (H) {
       proposals: proposalsPage,
       bugs: bugsPage,
       help: helpPage,
+      journal: journalPage,
       polls: pollsPage,
       "admin-history": historyPage,
       "admin-group": groupPage,

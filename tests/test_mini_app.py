@@ -131,7 +131,7 @@ async def test_join_grid_uses_real_vacancies_and_rechecks_conflicting_choice(cli
     path = f'/api/miniapp/queues/{sid}'
     view = await (await client.get(path, headers=headers())).json()
     assert view['append_position'] == 4
-    assert view['join_slots'] == [dict(number=n, state='busy' if n == 3 else 'free') for n in range(1, 11)]
+    assert view['join_slots'] == [dict(number=n, state='busy' if n == 3 else 'free') for n in range(1, 21)]
     # Another actor fills the selected vacancy after the grid was loaded.
     queues.join_queue(conn, 100, sid, 2, lab_numbers=[1], planned_minutes=10)
     payload = {'position': 2, 'labs': [1], 'minutes': 10}
@@ -146,15 +146,16 @@ async def test_join_grid_uses_real_vacancies_and_rechecks_conflicting_choice(cli
 
 
 @pytest.mark.asyncio
-async def test_full_first_ten_only_offer_tail_or_existing_vacancies(client, conn, make_user):
+async def test_full_first_ten_also_offer_later_free_positions(client, conn, make_user):
     sid = queues.create_session(conn, 100, 1, 1)
     for uid in range(10, 21):
         make_user(uid, 'Студент Тест' + chr(1040 + uid))
         queues.join_queue(conn, uid, sid, lab_numbers=[1], planned_minutes=10)
     path = f'/api/miniapp/queues/{sid}'
     view = await (await client.get(path, headers=headers())).json()
-    assert len(view['join_slots']) == 11
-    assert all(s['state'] == 'busy' for s in view['join_slots'])
+    assert len(view['join_slots']) == 20
+    assert all(s['state'] == 'busy' for s in view['join_slots'][:11])
+    assert view['join_slots'][13] == {'number':14, 'state':'free'}
     assert view['append_position'] == 12
     queues.leave_queue(conn, 10, sid)
     view = await (await client.get(path, headers=headers())).json()

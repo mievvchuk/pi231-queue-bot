@@ -155,7 +155,7 @@ def format_user_card(user) -> str:
 
 async def send_user_rows(message, users_list, title, back_text):
     user_buttons = [f"👤 #{u['id']} {u['full_name']}" for u in users_list]
-    row_pairs = [user_buttons[i:i + 2] for i in range(0, len(user_buttons), 2)]
+    row_pairs = [[label] for label in user_buttons]
     markup = make_reply_keyboard(row_pairs + [[back_text]])
     lines = [title, ''] + [f"{index}. {html.escape(user['full_name'])}" for index, user in enumerate(users_list, 1)]
     # Send every name immediately, without page controls. Split only if a long

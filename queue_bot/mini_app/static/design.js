@@ -108,7 +108,7 @@ window.createPI231Design = function (H) {
     panel.append(progress,body,actions);
     const max=()=>q.labs.filter(l=>labs.includes(l.number)).reduce((sum,l)=>sum+l.max_minutes,0);
     const row=(label,value,cls='')=>el('div',{class:cls},el('span',{},label),el('strong',{},value));
-    const refresh=async()=>{q=await api('/queues/'+q.id);if(position!=null&&!q.join_slots?.some(s=>s.number===position&&s.state==='free'))position=null;};
+    const refresh=async()=>{q=await api('/queues/'+q.id);if(position!=null&&q.entries?.some(s=>s.position===position&&!s.vacant))position=null;};
     const submit=async()=>{
       if(S.busy)return;
       S.busy=true; draw();
@@ -135,6 +135,10 @@ window.createPI231Design = function (H) {
         body.append(el('h3',{},'Скільки часу плануєш?'),el('p',{},'Для вибраних лабораторних доступно від 5 до '+max()+' хвилин.'),el('div',{class:'time-picker'},el('button',{type:'button','aria-label':'Зменшити час',disabled:minutes<=5,onclick:()=>{minutes=Math.max(5,minutes-5);draw();}},glyph('dash-lg')),el('div',{},el('strong',{},minutes),el('span',{},'хвилин')),el('button',{type:'button','aria-label':'Збільшити час',disabled:minutes>=max(),onclick:()=>{minutes=Math.min(max(),minutes+5);draw();}},glyph('plus-lg'))),el('div',{class:'time-presets'},[5,10,15,20,25,30,40,60,80].filter(n=>n<=max()).map(n=>btn(n+' хв',()=>{minutes=n;draw();},minutes===n?'active':''))),el('div',{class:'demo-note'},glyph('lightbulb'),el('span',{},'Обирай реалістичний час — це допомагає планувати здачу.')));
       } else if(step===3){
         const slots=q.join_slots||[];
+        const custom=el('input',{type:'number',min:1,max:100,step:1,inputmode:'numeric',placeholder:'Наприклад 14','aria-label':'Вільний номер від 1 до 100'});
+        if(!append&&position)custom.value=position;
+        custom.addEventListener('change',()=>{const n=Number(custom.value);if(!Number.isInteger(n)||n<1||n>100){message='Вкажи номер від 1 до 100.';draw();return;}if(q.entries?.some(s=>s.position===n&&!s.vacant)){message='Це місце вже зайняте.';draw();return;}position=n;append=false;message='';draw();});
+        body.append(el('label',{class:'field'},'Вільний номер від 1 до 100',custom),small('На схемі — перші 20 місць. Будь-який інший номер можна ввести вище.'));
         body.append(el('div',{class:'section-heading'},el('div',{},el('h3',{},'Обери вільне місце'),el('p',{},q.status==='open'?'Місця перевіряються сервером перед записом.':'Запис у цю чергу закрито.')),el('button',{type:'button',class:'icon-button','aria-label':'Оновити місця',onclick:async()=>{try{await refresh();message='';draw();}catch(error){message=error.message;draw();}}},glyph('arrow-clockwise'))),
           el('div',{class:'slot-legend'},[['free','Вільне'],['busy','Зайняте'],['chosen','Обране'],['yours','Власне']].map(([cls,label])=>el('span',{},el('i',{class:cls},cls==='yours'?'Ти':null),label))),
           el('div',{class:'slots'},slots.map(s=>el('button',{type:'button',class:s.state+(position===s.number&&!append?' selected':''),disabled:s.state!=='free'||q.status!=='open','aria-label':'Місце '+s.number+', '+(s.state==='free'?'вільне':s.state==='yours'?'твоє':'зайняте'),'aria-pressed':String(position===s.number&&!append),onclick:()=>{position=s.number;append=false;draw();}},el('strong',{},s.number),el('small',{},s.state==='busy'?'Зайнято':s.state==='yours'?'Ти':position===s.number&&!append?'✓ Обрано':'Вільно')))),

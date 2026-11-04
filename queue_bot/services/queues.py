@@ -116,7 +116,11 @@ def _close_entry(conn, entry, new_status: str) -> None:
     )
     from queue_bot.services.attendance import end_turn
     end_turn(conn, entry)
-    _set_order(conn, entry["session_id"], _ordered_ids(conn, entry["session_id"]))
+    if new_status == 'removed':
+        conn.execute('INSERT INTO queue_entries(session_id, user_id, position) VALUES (?, NULL, ?)',
+                     (entry['session_id'], entry['position']))
+    else:
+        _set_order(conn, entry["session_id"], _ordered_ids(conn, entry["session_id"]))
 
 
 # ---------- Дії студента ----------
@@ -162,7 +166,14 @@ def join_queue(conn: sqlite3.Connection, telegram_id: int, session_id: int,
     return place, len(get_entries(conn, session_id))
 
 
+def _require_roster_user(conn, user_id):
+    lock = ' FOR UPDATE' if isinstance(conn, PGConnectionWrapper) else ''
+    if not conn.execute('SELECT id FROM users WHERE id = ? AND deleted_at IS NULL' + lock, (user_id,)).fetchone():
+        raise BotError('Користувача немає у списку групи. Зареєструйтесь знову через /start.')
+
+
 def _place_user(conn, session_id: int, user_id: int) -> None:
+    _require_roster_user(conn, user_id)
     # Завжди додаємо студента в кінець черги (навіть якщо всередині є вільні місця)
     last = conn.execute(
         "SELECT COALESCE(MAX(position), 0) FROM queue_entries "
@@ -199,31 +210,16 @@ def has_free_slots(conn: sqlite3.Connection, session_id: int) -> bool:
 
 
 def _place_user_at(conn, session_id: int, user_id: int, position: int, allow_shift: bool = False) -> None:
-    """Вставляє студента на вибране місце.
-    Якщо allow_shift=False (для студентів):
-      - Можна зайняти будь-яке існуюче вільне місце (в т.ч. > 10).
-      - Нові місця можна обирати лише від 1 до 10.
-      - Якщо номер уже зайнятий студентом — викидає помилку (заборонено займати вже зайняті номери).
-      - Якщо перші 10 місць уже повністю зайняті — викидає помилку (запис лише в кінець).
-    Якщо allow_shift=True (для старости):
-      - Дозволені номери від 1 до 100, при зайнятості наступні зсуваються вниз."""
-    if not 1 <= position <= 100:
-        if allow_shift:
-            raise BotError("Оберіть номер від 1 до 100.")
-        raise BotError("Оберіть вільний номер від 1 до 10. Після 10-го місця запис ведеться в кінець черги.")
+    """Students may take any free position from 1 to 100; only admins may shift."""
+    _require_roster_user(conn, user_id)
+    if type(position) is not int or not 1 <= position <= 100:
+        raise BotError('Оберіть вільний номер від 1 до 100.')
 
     entries = get_entries(conn, session_id)
     # Якщо вибране місце вже існує і воно пусте (зарезервоване / вільне)
     if position <= len(entries) and entries[position - 1]["user_id"] is None:
         _take_slot(conn, entries[position - 1]["id"], user_id)
         return
-
-    # Якщо звичайний студент намагається зайняти новий слот > 10 або коли перші 10 зайняті
-    if not allow_shift:
-        if position > 10:
-            raise BotError("Оберіть вільний номер від 1 до 10 або займіть наявне вільне місце в черзі.")
-        if are_first_10_occupied(conn, session_id):
-            raise BotError("Перші 10 місць уже зайняті. Запис ведеться в кінець черги.")
 
     # Якщо вибране місце вже зайняте студентом
     if position <= len(entries):
@@ -384,15 +380,10 @@ def record_own_passed_labs(conn, telegram_id: int, session_id: int, passed_count
 
 
 def leave_queue(conn: sqlite3.Connection, telegram_id: int, session_id: int) -> None:
-    """Студент покидає чергу.
-    Якщо після нього в черзі є інші активні записи, його місце стає вільним слотом (user_id = NULL),
-    щоб не збивати номери наступних студентів.
-    Якщо це був останній запис у черзі — він видаляється, а хвостові вільні місця очищаються.
-    Дія студента завжди фіксується в історії як 'left'."""
+    """Leave an empty numbered slot, including when the last student leaves."""
     with transaction(conn):
         entry = _own_active_entry(conn, telegram_id, session_id)
         entry_session_id = entry["session_id"]
-        pos = entry["position"]
 
         # Фіксуємо вихід в історії
         conn.execute(
@@ -403,28 +394,14 @@ def leave_queue(conn: sqlite3.Connection, telegram_id: int, session_id: int) -> 
              entry['selected_labs'], entry['passed_labs']),
         )
 
-        # Перевіряємо, чи є в черзі активні записи після цієї позиції
-        has_subsequent = conn.execute(
-            """SELECT 1 FROM queue_entries
-               WHERE session_id = ? AND status = 'active' AND position > ?
-               LIMIT 1""",
-            (entry_session_id, pos),
-        ).fetchone() is not None
-
-        if has_subsequent:
-            # Залишаємо вільне місце на поточній позиції, щоб не збивати номери наступних
-            conn.execute(
-                """UPDATE queue_entries
-                   SET user_id = NULL, lab_count = NULL, planned_minutes = NULL, labs_passed = 0,
-                       selected_labs = NULL, passed_labs = '[]', entry_revision = entry_revision + 1,
-                       ready_to_swap = FALSE, swap_wish = NULL
-                   WHERE id = ?""",
-                (entry["id"],),
-            )
-        else:
-            # Останній запис у черзі — видаляємо його з активних
-            conn.execute("DELETE FROM queue_entries WHERE id = ?", (entry["id"],))
-            _trim_trailing_empty_slots(conn, entry_session_id)
+        from queue_bot.services.attendance import end_turn
+        end_turn(conn, entry)
+        conn.execute(
+            """UPDATE queue_entries
+               SET user_id = NULL, lab_count = NULL, planned_minutes = NULL, labs_passed = 0,
+                   selected_labs = NULL, passed_labs = '[]', entry_revision = entry_revision + 1,
+                   ready_to_swap = FALSE, swap_wish = NULL
+               WHERE id = ?""", (entry['id'],))
 
 
 def create_queue(conn: sqlite3.Connection, telegram_id: int, subject_id: int,
@@ -437,7 +414,7 @@ def create_queue(conn: sqlite3.Connection, telegram_id: int, subject_id: int,
             end_t = get_maintenance_end_time(conn)
             raise BotError(f"🛠 Зараз тривають технічні роботи (орієнтовно до {end_t}). Відкриття нових черг тимчасово заблоковано.")
 
-        if conn.execute("SELECT 1 FROM users WHERE telegram_id = ?", (telegram_id,)).fetchone() is None:
+        if conn.execute("SELECT 1 FROM users WHERE telegram_id = ? AND deleted_at IS NULL", (telegram_id,)).fetchone() is None:
             raise BotError("Спочатку зареєструйтесь: /start")
         return _insert_session(conn, subject_id, teacher_id, lesson_title.strip(), queue_type=queue_type)
 

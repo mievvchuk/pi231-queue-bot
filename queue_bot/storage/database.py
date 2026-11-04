@@ -220,6 +220,9 @@ from queue_bot.storage.lesson_schema import LESSON_SCHEMA
 MIGRATIONS.append(BROWSER_SESSIONS_SCHEMA)
 MIGRATIONS.append(LESSON_SCHEMA)
 MIGRATIONS.append('ALTER TABLE lesson_attendance ADD COLUMN turn_due BIGINT;')
+MIGRATIONS.append('ALTER TABLE users ADD COLUMN deleted_at TEXT;')
+from queue_bot.storage.journal_schema import JOURNAL_SCHEMA
+MIGRATIONS.append(JOURNAL_SCHEMA)
 
 PG_SCHEMA = BROWSER_SESSIONS_SCHEMA + """
 CREATE TABLE IF NOT EXISTS working_saturdays (
@@ -371,6 +374,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS ux_pending_swap_pair ON swap_requests(session_
 
 
 PG_SCHEMA += LESSON_SCHEMA.replace('INTEGER PRIMARY KEY AUTOINCREMENT', 'SERIAL PRIMARY KEY')
+PG_SCHEMA += JOURNAL_SCHEMA.replace('INTEGER PRIMARY KEY AUTOINCREMENT', 'SERIAL PRIMARY KEY')
 
 
 class PGRow(dict):
@@ -441,6 +445,7 @@ class PGConnectionWrapper:
         with self.raw.cursor() as cur:
             cur.execute(PG_SCHEMA)
             cur.execute('ALTER TABLE lesson_attendance ADD COLUMN IF NOT EXISTS turn_due BIGINT;')
+            cur.execute('ALTER TABLE users ADD COLUMN IF NOT EXISTS deleted_at TEXT;')
             cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_blocked BOOLEAN NOT NULL DEFAULT FALSE;")
             cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS banned_until TEXT DEFAULT NULL;")
             cur.execute("ALTER TABLE queue_entries ADD COLUMN IF NOT EXISTS lab_count INTEGER DEFAULT NULL CHECK (lab_count IS NULL OR lab_count BETWEEN 1 AND 20);")

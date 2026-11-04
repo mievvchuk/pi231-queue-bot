@@ -377,7 +377,7 @@ async def admin_users(request):
     restrictions.expire_due_restrictions(request[REQ_CONTEXT]['conn'])
     conn = request[REQ_CONTEXT]['conn']
     protected = admins.get_owner_ids(conn) | {row['telegram_id'] for row in admins.list_admins(conn)}
-    rows = users.sort_users(conn.execute('SELECT id, telegram_id, full_name, is_blocked, banned_until FROM users').fetchall())
+    rows = users.sort_users(conn.execute('SELECT id, telegram_id, full_name, is_blocked, banned_until FROM users WHERE deleted_at IS NULL').fetchall())
     return web.json_response({'users': [{**dict(row), 'protected': row['telegram_id'] in protected} for row in rows]})
 
 
@@ -397,7 +397,8 @@ async def admin_user(request):
 
 def setup(app):
     prefix = '/api/miniapp'
-    from . import student_api, admin_api, avatars
+    from . import student_api, admin_api, avatars, journal_api
+    journal_api.setup(app)
     student_api.setup(app)
     admin_api.setup(app)
     avatars.setup(app)

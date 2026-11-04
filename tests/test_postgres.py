@@ -10,6 +10,35 @@ from queue_bot.services import admins, queues, restrictions, users
 from queue_bot.services import swap_requests
 
 
+def test_postgres_free_slots_retirement_and_journal_survive_schema_restart(pg_conn):
+    from queue_bot.services import journal
+    conn = pg_conn
+    sid = queues.create_session(conn,100,1,1)
+    queues.join_queue(conn,1,sid,position=14)
+    uid = users.get_user(conn,1)['id']
+    values = {'period':'2026-2027:1','subject_key':'програмування','kind':'lab','number':1,'grade':5}
+    subjects = [{'id':1,'name':'Програмування','teachers':[]}]
+    rid = journal.submit(conn,1,subjects,values)
+    journal.review(conn,100,{'record_id':rid,'revision':0,'status':'approved'})
+    journal.submit(conn,1,subjects,{**values,'record_id':rid,'revision':1,'grade':4.2})
+    journal.review(conn,100,{'record_id':rid,'revision':2,'status':'approved'})
+    journal.set_date(conn,100,subjects,{**values,'due_date':'2026-12-01'})
+    queues.leave_queue(conn,1,sid)
+    users.admin_delete_user(conn,100,uid)
+    conn._init_schema()
+    assert users.get_user(conn,1) is None
+    assert queues.get_entries(conn,sid)[13]['user_id'] is None
+    assert queues.get_history(conn,sid)[0]['status'] == 'left'
+    assert conn.execute('SELECT COUNT(*) FROM journal_events').fetchone()[0] == 4
+    users.register_user(conn,1,'Петренко Іван')
+    data = journal.view(conn,1,subjects,period='2026-2027:1')
+    assert data['records'][0]['status'] == 'approved'
+    assert data['records'][0]['grade'] == 4.2
+    assert data['dates'][0]['due_date'] == '2026-12-01'
+    queues.join_queue(conn,1,sid,position=14)
+    assert queues.get_user_position(conn,1,sid) == 14
+
+
 @pytest.mark.asyncio
 async def test_postgres_turn_reminder_releases_without_marking_passed(pg_conn, monkeypatch):
     from unittest.mock import AsyncMock

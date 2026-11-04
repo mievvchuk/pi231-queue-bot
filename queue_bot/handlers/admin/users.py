@@ -222,8 +222,8 @@ async def admin_ask_delete_user(message: Message, state: FSMContext, conn):
     await state.set_state(AdminUserState.confirming_delete)
     await message.answer(
         f"🗑 <b>Видалити користувача?</b>\n\n"
-        f"Ви впевнені, що хочете безповоротно видалити <b>{html.escape(user['full_name'])}</b>?\n\n"
-        f"⚠️ Користувача можна видалити лише якщо він не має записів чи історії в чергах.",
+        f"Видалити зі списку групи <b>{html.escape(user['full_name'])}</b>?\n\n"
+        f"Активних записів у чергах бути не повинно. Історія здач залишиться збереженою.",
         reply_markup=make_reply_keyboard([["⚠️ Підтвердити видалення"], ["↩️ Скасувати"]]),
     )
 

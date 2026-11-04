@@ -199,11 +199,11 @@ async def test_full_first_ten_still_waits_for_numbered_selection(conn, app, make
         make_user(uid, surname + ' Іван')
     for uid in range(2, 12):
         queues.join_queue(conn, uid, app[2])
-    await send(app, '🔢 Обрати місце', '1,2')
+    await send(app, '🔢 Обрати місце', '14', '1,2')
     assert queues.get_user_position(conn, 1, app[2]) is None
     await send(app, '30')
     row = queues.get_entries(conn, app[2])[-1]
-    assert row['position'] == 11 and json.loads(row['selected_labs']) == [1, 2]
+    assert row['position'] == 14 and json.loads(row['selected_labs']) == [1, 2]
 
 
 @pytest.mark.asyncio

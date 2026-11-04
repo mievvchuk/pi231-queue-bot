@@ -84,7 +84,7 @@ async def test_group_timed_ban_removes_active_entries_and_protects_admins(admin_
     user_id = users.get_user(conn, 1)['id']
     assert (await post(admin_client, 'group', {'action': 'ban', 'user_id': user_id, 'days': True})).status == 400
     assert (await post(admin_client, 'group', {'action': 'ban', 'user_id': user_id, 'days': 2})).status == 200
-    assert not queues.get_entries(conn, sid)
+    assert all(row['user_id'] is None for row in queues.get_entries(conn, sid))
     assert users.get_user(conn, 1)['banned_until']
     assert (await post(admin_client, 'group', {'action': 'block', 'user_id': users.get_user(conn, 100)['id']})).status == 400
 

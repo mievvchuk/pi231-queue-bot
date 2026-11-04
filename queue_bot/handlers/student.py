@@ -546,7 +546,7 @@ async def show_queue_actions(message: Message, state: FSMContext, conn):
     session = get_session_or_fail(conn, session_id)
     is_in_queue = queues.get_user_position(conn, message.from_user.id, session_id) is not None
     is_open = session["status"] != "archived"
-    can_pick = not queues.are_first_10_occupied(conn, session_id) or queues.has_free_slots(conn, session_id)
+    can_pick = True
     swap_wish = queues.get_swap_wish(conn, message.from_user.id, session_id) if is_in_queue else None
     ready_to_swap = queues.is_ready_to_swap(conn, message.from_user.id, session_id) if is_in_queue else False
     markup = get_queue_actions_reply_menu(
@@ -745,17 +745,9 @@ async def ask_specific_number(message: Message, state: FSMContext, conn, subject
     session = get_session_or_fail(conn, session_id)
     if session["status"] == "archived":
         raise BotError("Запис у цю чергу закрито.")
-    if queues.are_first_10_occupied(conn, session_id) and not queues.has_free_slots(conn, session_id):
-        await message.answer('ℹ️ Перші 10 місць уже зайняті. Записуємо в кінець черги.')
-        await begin_lab_count(message, state, conn, session_id, subjects=subjects)
-        return
     await state.set_state(StudentFlow.pick_position)
     await state.update_data(session_id=session_id)
-    prompt = (
-        "🔢 <b>Вибір місця</b>\n\nВведіть номер вільного місця (наприклад 3 чи 7):"
-        if queues.has_free_slots(conn, session_id)
-        else "🔢 <b>Вибір місця</b>\n\nВведіть бажаний вільний номер від 1 до 10 (наприклад 3 чи 7):"
-    )
+    prompt = 'Введіть будь-який вільний номер від 1 до 100, наприклад 14. Зайняті місця змінювати не можна.'
     await message.answer(
         prompt,
         reply_markup=make_reply_keyboard([["🔙 Назад до черги"]]),
@@ -782,7 +774,7 @@ async def handle_join_number(message: Message, state: FSMContext, conn, subjects
         return
     pos = int(message.text.strip())
     if not 1 <= pos <= 100:
-        await message.answer('Оберіть вільне місце від 1 до 10 або наявне вільне місце в черзі.')
+        await message.answer('Оберіть вільне місце від 1 до 100.')
         return
     try:
         await begin_lab_count(message, state, conn, session_id, position=pos, subjects=subjects)
