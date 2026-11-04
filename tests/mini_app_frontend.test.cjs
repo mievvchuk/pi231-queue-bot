@@ -411,7 +411,7 @@ test('queue actions are directly visible with icons rather than a details dropdo
   assert.ok(allNodes(retry).some(n=>n.tag==='svg'));
 });
 
-test('active lesson exposes ten-minute confirmation and keeps completion for the serving student',()=>{
+test('active lesson exposes readiness and actual completion even before a serving turn',()=>{
   const {app}=setup();
   app.S.queue={id:1,subject:'КПЗ',status:'open',count:1,labs:[{number:1}],
     entries:[{id:1,name:'Тест Студент',position:5,is_me:true,labs:[1]}],
@@ -423,7 +423,8 @@ test('active lesson exposes ten-minute confirmation and keeps completion for the
   assert.ok(buttons.some(n=>n.textContent.includes('Готовий здавати')));
   assert.ok(buttons.some(n=>n.textContent.includes('Не готовий, пропустити мене')));
   assert.ok(!buttons.some(n=>n.textContent.includes('Не здав — у кінець')));
-  assert.ok(!buttons.some(n=>n.textContent.includes('Завершити підхід з рештою робіт')));
+  assert.ok(buttons.some(n=>n.textContent.includes('Завершити підхід з рештою робіт')));
+  assert.ok(buttons.some(n=>n.textContent.includes('Здав')));
   app.S.queue.lesson.own.state='serving';
   const serving=app.queuePage();
   assert.ok(serving.textContent.includes('Завершити підхід з рештою робіт'));
