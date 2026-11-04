@@ -38,18 +38,65 @@ async def test_both_deadlines_are_ten_minutes_and_skip_never_reorders(conn, less
     assert own(conn, sid, 1)['deadline'] == clock[0] + 600
     answer(conn, sid, 2, 'present')
     await deliver(bot, conn, [])
-    assert own(conn, sid, 2)['state'] == 'called'
-    assert own(conn, sid, 2)['deadline'] == clock[0] + 600
+    assert own(conn, sid, 2)['state'] == 'present'
+    assert own(conn, sid, 2)['deadline'] is None
     clock[0] += 599
     a.tick(conn)
     assert own(conn, sid, 1)['state'] == 'pending'
-    assert own(conn, sid, 2)['state'] == 'called'
+    assert own(conn, sid, 2)['state'] == 'present'
     clock[0] += 1
     a.tick(conn)
-    assert own(conn, sid, 1)['state'] == own(conn, sid, 2)['state'] == 'skipped'
+    assert own(conn, sid, 1)['state'] == 'skipped'
+    assert own(conn, sid, 2)['state'] == 'called'
+    await deliver(bot, conn, [])
+    assert own(conn, sid, 2)['deadline'] == clock[0] + 600
+    clock[0] += 600
+    a.tick(conn)
+    assert own(conn, sid, 2)['state'] == 'skipped'
     assert before == [(e['id'], e['position']) for e in queues.get_entries(conn, sid)]
     answer(conn, sid, 1, 'present')
     assert own(conn, sid, 1)['state'] == 'called'
+
+
+@pytest.mark.parametrize('order', [(4, 3, 2, 1), (2, 4, 1, 3), (3, 1, 4, 2)])
+def test_presence_response_order_does_not_change_call_order(conn, lesson, order):
+    sid, _ = lesson
+    for uid in order:
+        answer(conn, sid, uid, 'present')
+        states = [own(conn, sid, i)['state'] for i in (1, 2, 3, 4)]
+        assert states.count('called') == int(1 in order[:order.index(uid) + 1])
+        if 'called' in states:
+            assert states[0] == 'called'
+    for uid in (1, 2, 3, 4):
+        assert own(conn, sid, uid)['state'] == 'called'
+        answer(conn, sid, uid, 'ready')
+        queues.finish_own_entry(conn, uid, sid, passed=True)
+        a.tick(conn)
+
+
+@pytest.mark.parametrize('action', ['late', 'absent', 'skip'])
+def test_explicit_unavailability_releases_next_present_student(conn, lesson, action):
+    sid, _ = lesson
+    answer(conn, sid, 2, 'present')
+    assert own(conn, sid, 2)['state'] == 'present'
+    answer(conn, sid, 1, action, **({'minutes': 25} if action == 'late' else {}))
+    assert own(conn, sid, 2)['state'] == 'called'
+
+
+@pytest.mark.asyncio
+async def test_unanswered_late_reminder_does_not_hold_next_turn(conn, lesson):
+    sid, clock = lesson
+    answer(conn, sid, 1, 'late', minutes=5)
+    answer(conn, sid, 2, 'present')
+    answer(conn, sid, 2, 'ready')
+    answer(conn, sid, 3, 'present')
+    clock[0] += 300
+    a.tick(conn)
+    await deliver(AsyncMock(), conn, [])
+    assert own(conn, sid, 1)['state'] == 'pending'
+    queues.finish_own_entry(conn, 2, sid, passed=True)
+    a.tick(conn)
+    assert own(conn, sid, 3)['state'] == 'called'
 
 
 @pytest.mark.asyncio
