@@ -27,7 +27,8 @@
       "recover_back_without_state",
       "refresh_admin_queue",
       "back_to_queue",
-      "open_mini_app"
+      "open_mini_app",
+      "open_journal"
     ]
   },
   {

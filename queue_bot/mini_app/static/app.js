@@ -2168,6 +2168,19 @@
     labForm, avatarFace, consultation, labText, isAdmin, render, toast, appearanceSettings, setAppearance,
     mutate, load, logout, completionForm, adminEntryForm, confirmSheet, reference, download, installCard, browserSession, loginFailureMessage, initData, filteredQueues, queueTypes});
   window.matchMedia?.('(prefers-color-scheme: dark)')?.addEventListener?.('change',()=>{if(presentation.theme==='system')theme();});
+  async function openInitialFeature() {
+    if (S.fatal || !S.data?.me.is_registered) return;
+    const params = new URLSearchParams(location.search);
+    if (params.get('page') === 'journal') {
+      await openFeature('journal');
+      return;
+    }
+    const pid = params.get('poll');
+    if (pid && /^[1-9][0-9]*$/.test(pid)) {
+      await openFeature('polls');
+      features.openPoll(Number(pid));
+    }
+  }
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape" && !S.busy) {closeSheet();design?.closeMenu();}
   });
@@ -2221,13 +2234,7 @@
       browserSession.ready = true;
       render();
     }
-    if (initData || browserSession.authenticated) await load().then(async () => {
-      const pid = new URLSearchParams(location.search).get("poll");
-      if (pid && /^[1-9][0-9]*$/.test(pid) && S.data?.me.is_registered) {
-        await openFeature("polls");
-        features.openPoll(Number(pid));
-      }
-    });
+    if (initData || browserSession.authenticated) await load().then(openInitialFeature);
   }
   void startApp();
 })();

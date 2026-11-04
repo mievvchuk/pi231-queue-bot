@@ -328,7 +328,7 @@ def test_mini_app_is_not_duplicated_in_chat_keyboards(conn, monkeypatch):
     before = [b.text for row in get_reply_menu(conn, 100).keyboard for b in row]
     monkeypatch.setattr(config, 'MINI_APP_URL', 'https://example.invalid/app/')
     after = [b.text for row in get_reply_menu(conn, 100).keyboard for b in row]
-    assert after == before == ['Черги', '📅 Розклад', '❓ Допомога', '🐞 Повідомити про баг', '⚡ Режим адміна']
+    assert after == before == ['Черги', '📅 Розклад', 'Електронний журнал', '❓ Допомога', '🐞 Повідомити про баг', '⚡ Режим адміна']
     assert '📱 Мініапка' not in [b.text for row in get_student_more_menu(conn, 100).keyboard for b in row]
 
 
