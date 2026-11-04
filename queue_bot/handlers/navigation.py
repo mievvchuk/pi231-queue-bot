@@ -162,3 +162,16 @@ async def open_mini_app(message, conn):
         raise BotError('Мініапка ще не підключена. Поки користуйтесь кнопками бота.')
     # Old keyboards may still send this text; don't create another launch button.
     await message.answer('Мініапка відкривається кнопкою біля поля введення повідомлення.')
+
+
+@router.message(F.text == 'Електронний журнал', StateFilter('*'))
+async def open_journal(message, conn):
+    from queue_bot.handlers.common import journal_menu_button
+    from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+    if not users.get_user(conn, message.from_user.id):
+        raise BotError('Спочатку зареєструйтесь у боті: /start')
+    button = journal_menu_button()
+    if not button.web_app:
+        raise BotError('Електронний журнал ще не підключений. Власнику потрібно налаштувати адресу Mini App.')
+    await message.answer('Ваш електронний журнал', reply_markup=InlineKeyboardMarkup(
+        inline_keyboard=[[InlineKeyboardButton(text=button.text, web_app=button.web_app)]]))

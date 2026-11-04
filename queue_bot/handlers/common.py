@@ -13,6 +13,7 @@ from aiogram.types import (
     KeyboardButton,
     Message,
     ReplyKeyboardMarkup,
+    WebAppInfo,
 )
 
 from queue_bot.services import admins, queues
@@ -32,17 +33,23 @@ def make_keyboard(rows: list[list[tuple[str, str]]]) -> InlineKeyboardMarkup:
     )
 
 
-def make_reply_keyboard(rows: list[list[str]]) -> ReplyKeyboardMarkup:
+def make_reply_keyboard(rows: list[list[str | KeyboardButton]]) -> ReplyKeyboardMarkup:
     """Створює нижню клавіатуру зі списку рядків кнопок."""
     return ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text=t) for t in row] for row in rows],
+        keyboard=[[t if isinstance(t, KeyboardButton) else KeyboardButton(text=t) for t in row] for row in rows],
         resize_keyboard=True,
     )
 
 
+def journal_menu_button() -> KeyboardButton:
+    from queue_bot import config
+    target = WebAppInfo(url=f'{config.MINI_APP_URL}?page=journal') if config.MINI_APP_URL else None
+    return KeyboardButton(text='Електронний журнал', web_app=target)
+
+
 def get_reply_menu(conn, telegram_id: int) -> ReplyKeyboardMarkup:
-    """Three stable sections; secondary actions live in their own menu."""
-    rows = [['Черги', '📅 Розклад'], ['❓ Допомога', '🐞 Повідомити про баг']]
+    """Main navigation with a direct authenticated Mini App journal launch."""
+    rows = [['Черги', '📅 Розклад'], [journal_menu_button()], ['❓ Допомога', '🐞 Повідомити про баг']]
     if admins.is_admin(conn, telegram_id):
         rows.append(['⚡ Режим адміна'])
     return make_reply_keyboard(rows)
@@ -121,6 +128,7 @@ def get_admin_reply_menu(is_owner: bool = True) -> ReplyKeyboardMarkup:
     """Daily administration first; secondary tools are grouped separately."""
     return make_reply_keyboard([
         ['📋 Черги та студенти', '📅 Розклад і заміни'],
+        [journal_menu_button()],
         ['❓ Допомога', '🐞 Повідомити про баг'],
         ['👤 Режим студента'],
         ['Ще для адміна'],

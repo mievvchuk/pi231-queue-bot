@@ -39,7 +39,7 @@ class Element {
       .join(" ");
   }
 }
-function setup(enableDesign = false) {
+function setup(enableDesign = false, featureStub = null) {
   const root = new Element("root");
   const context = vm.createContext({
     Node: Element,
@@ -72,10 +72,11 @@ function setup(enableDesign = false) {
     // Let interaction tests render just their page instead of the whole shell.
     context.window.createPI231Design=hooks=>createDesign({...hooks,render:()=>context.appTest.rerender()});
   }
+  if (featureStub) context.window.createPI231Features = () => featureStub;
   // Export the existing closure only in this VM; production contains no test hooks.
   vm.runInContext(
     source.slice(0, source.indexOf('  document.addEventListener("keydown"')) +
-      "\nthis.appTest = {S, loadSchedule, loadWeek, navigate, adminPage, topbar, profilePage, loadAvatars, homePage, morePage, bottomnav, queuePage, queuesPage, rerender:()=>render(), setRender: fn => {render=fn;}, loginFailureMessage, attachLiquidLens: typeof attachLiquidLens === 'function' ? attachLiquidLens : null, installPressOptics: typeof installPressOptics === 'function' ? installPressOptics : null};\n})();",
+      "\nthis.appTest = {S, openInitialFeature, loadSchedule, loadWeek, navigate, adminPage, topbar, profilePage, loadAvatars, homePage, morePage, bottomnav, queuePage, queuesPage, rerender:()=>render(), setRender: fn => {render=fn;}, loginFailureMessage, attachLiquidLens: typeof attachLiquidLens === 'function' ? attachLiquidLens : null, installPressOptics: typeof installPressOptics === 'function' ? installPressOptics : null};\n})();",
     context,
   );
   const app = context.appTest;
@@ -92,6 +93,36 @@ const result = (data, status = 200) => ({
   ok: status === 200,
   status,
   json: async () => data,
+});
+
+test('journal launch link opens the exact feature after authenticated bootstrap',async()=>{
+  const calls=[];
+  const {app,context}=setup(false,{open:async key=>calls.push(key)});
+  context.location={search:'?page=journal'};
+  app.S.data.me.is_registered=true;
+  await app.openInitialFeature();
+  assert.deepEqual(calls,['journal']);
+  assert.equal(app.S.mode,'student');
+});
+
+test('launch links require registration, ignore arbitrary feature names and retain poll links',async()=>{
+  const calls=[];
+  const {app,context}=setup(false,{open:async key=>calls.push(key),openPoll:id=>calls.push(id)});
+  context.location={search:'?page=journal'};
+  app.S.data.me.is_registered=false;
+  await app.openInitialFeature();
+  assert.deepEqual(calls,[]);
+  app.S.data.me.is_registered=true;
+  app.S.fatal='Потрібно повторити вхід';
+  await app.openInitialFeature();
+  assert.deepEqual(calls,[]);
+  app.S.fatal=null;
+  context.location={search:'?page=owner'};
+  await app.openInitialFeature();
+  assert.deepEqual(calls,[]);
+  context.location={search:'?poll=12'};
+  await app.openInitialFeature();
+  assert.deepEqual(calls,['polls',12]);
 });
 const schedule = (date) => ({
   date,
