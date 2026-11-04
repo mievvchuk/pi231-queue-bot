@@ -96,7 +96,15 @@ def _advance(conn, run, now):
     rows = members(conn, run['id'])
     busy = next((r for r in rows if r['state'] in ('called', 'serving')), None)
     if busy is None:
-        first = next((r for r in rows if r['state'] == 'present'), None)
+        # Initial unanswered presence protects the existing queue order until
+        # its response deadline. A late-arrival reminder must not block others.
+        first = None
+        for row in rows:
+            if row['state'] == 'pending' and row['revision'] == 0:
+                break
+            if row['state'] == 'present':
+                first = row
+                break
         if first:
             # Delivery arms the 10-minute deadline, rather than time waiting in the outbox.
             busy = _change(conn, first, 'called')
