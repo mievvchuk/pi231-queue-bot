@@ -17,7 +17,9 @@ async def test_mini_app_and_bot_share_attendance_turn_and_partial_completion(cli
     admin_url = f'/api/miniapp/admin/queues/{sid}?mode=admin'
     assert (await client.post(admin_url, headers=headers(1), json={'action':'start-lesson'})).status == 403
     result = await client.post(admin_url, headers=headers(100), json={'action':'start-lesson','minutes':80})
-    assert result.status == 200
+    assert result.status == 400
+    assert a.view(conn, sid, 1) is None
+    a.start(conn, 100, sid, minutes=80)
     detail = await (await client.get(url, headers=headers(1))).json()
     assert detail['lesson']['response_minutes'] == 10
     assert 'telegram_id' not in str(detail['lesson'])
@@ -45,7 +47,10 @@ async def test_mini_app_and_bot_share_attendance_turn_and_partial_completion(cli
     assert result.status == 200
     assert queues.get_user_position(conn, 1, sid) == 2
     assert queues.get_entry(conn, entry['id'])['selected_labs'] == '[2]'
-    assert (await client.post(admin_url, headers=headers(100), json={'action':'stop-lesson'})).status == 200
+    assert (await client.post(admin_url, headers=headers(100), json={'action':'stop-lesson'})).status == 400
+    assert a.view(conn, sid, 1) is not None
+    run = a.active_run(conn, sid)
+    a.tick(conn, now=run['ends_at'])
     assert (await (await client.get(url, headers=headers(1))).json())['lesson'] is None
 
 

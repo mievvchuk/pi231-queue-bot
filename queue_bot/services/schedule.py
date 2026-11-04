@@ -238,7 +238,14 @@ def format_schedule_for_date(conn, schedule_data: dict, dt: date, group_name: st
         return f"{header}\n\n🏖 <i>Занять немає (вихідний або вільний день).</i>"
 
     lines = [header, ""]
+    present_numbers = {int(item['number']) for item in lessons}
+    missing = iter(sorted(set(range(1, max(present_numbers) + 1)) - present_numbers))
+    next_missing = next(missing, None)
     for l in lessons:
+        while next_missing is not None and next_missing < int(l['number']):
+            lines.append(f"{next_missing} пара — немає заняття")
+            lines.append("")
+            next_missing = next(missing, None)
         time_part = f" ({l['startTime']}–{l['endTime']})" if l.get("startTime") and l.get("endTime") else ""
         badge = " ⚠️ <b>[ЗАМІНА]</b>" if l.get("is_replacement") else ""
         lines.append(f"⏰ <b>{l['number']} пара</b>{time_part}{badge}")

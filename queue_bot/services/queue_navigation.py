@@ -2,8 +2,8 @@
 import json
 
 
-def remember(conn, telegram_id, session_id, source, page=1):
-    value = json.dumps({'source': source, 'page': max(1, int(page))})
+def remember(conn, telegram_id, session_id, source, page=1, *, query=''):
+    value = json.dumps({'source': source, 'page': max(1, int(page)), 'query': query})
     conn.execute('''INSERT INTO bot_state(key, value) VALUES (?, ?)
         ON CONFLICT(key) DO UPDATE SET value = excluded.value''',
         (f'queue_navigation:{telegram_id}:{session_id}', value))

@@ -586,7 +586,7 @@ def session_names(subjects: list[dict], session) -> tuple[str, str]:
 
 def queue_label(subjects: list[dict], session) -> str:
     subject, teacher = session_names(subjects, session)
-    lock = "" if session["status"] == "open" else " 🔒"
+    lock = " 🔒" if session["status"] == "archived" else ""
     q_type = session["queue_type"] if "queue_type" in session.keys() else "lesson"
     type_badge = " 💬 [Консультація]" if q_type == "consultation" else ""
     return f"{subject} — {teacher}{type_badge}{lock}"

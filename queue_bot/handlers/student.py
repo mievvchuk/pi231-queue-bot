@@ -152,10 +152,78 @@ async def view_all_queues(message: Message, state: FSMContext, conn, subjects):
         return
     await state.set_state(StudentFlow.browsing_queues)
     await state.update_data(category=None, page=1)
-    lessons, consults, coursework = categorize_sessions(sessions, subjects)
-    text = format_queue_categories_overview(len(lessons), len(consults), len(coursework))
-    markup = get_queue_categories_reply_menu(len(lessons), len(consults), len(coursework))
-    await message.answer(text, reply_markup=markup)
+    await state.update_data(queue_search=True, query='')
+    await message.answer(
+        'Пошук черги\nНапишіть назву предмета, її частину або скорочення, наприклад КПЗ. Можна також шукати за викладачем. Або натисніть «Показати всі черги».',
+        reply_markup=make_reply_keyboard([['Показати всі черги'], ['🏠 Головне меню']]))
+
+
+def search_sessions(sessions, subjects, query):
+    import unicodedata
+    def normalized(value):
+        return ''.join(c for c in unicodedata.normalize('NFKC', value).casefold() if c.isalnum())
+    needle = normalized(query)
+    result = []
+    for session in sessions:
+        subject, teacher = session_names(subjects, session)
+        initials = ''.join(word[0] for word in re.findall(r'[^\W\d_]+', subject, re.UNICODE))
+        if not needle or any(needle in normalized(value) for value in (subject, teacher, initials)):
+            result.append(session)
+    return sorted(result, key=lambda item: queue_label(subjects, item).casefold())
+
+
+async def show_queue_search(message, state, conn, subjects, query='', page=1):
+    sessions = search_sessions(queues.list_sessions(conn, ('open', 'closed')), subjects, query)
+    pages = max(1, (len(sessions) + 4) // 5)
+    page = max(1, min(page, pages))
+    await state.set_state(StudentFlow.browsing_queues)
+    await state.update_data(queue_search=True, query=query, page=page)
+    rows = [[InlineKeyboardButton(text=queue_label(subjects, item), callback_data=f'findq:{item["id"]}')]
+            for item in sessions[(page-1)*5:page*5]]
+    nav = []
+    if page > 1:
+        nav.append(InlineKeyboardButton(text='Попередні', callback_data=f'findpage:{page-1}'))
+    if page < pages:
+        nav.append(InlineKeyboardButton(text='Наступні', callback_data=f'findpage:{page+1}'))
+    if nav:
+        rows.append(nav)
+    title = ('Пошук: ' + html.escape(query)) if query else 'Усі черги'
+    text = f'{title}\nЗнайдено: {len(sessions)}. Сторінка {page} із {pages}.\nОберіть чергу під цим повідомленням або напишіть інший запит.' if sessions else 'Нічого не знайдено. Спробуйте частину назви предмета або прізвище викладача.'
+    await message.answer(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=rows) if rows else None)
+
+
+@router.callback_query(F.data.startswith('findpage:'))
+async def queue_search_page(callback, state, conn, subjects):
+    data = await state.get_data()
+    if not data.get('queue_search'):
+        await callback.answer('Відкрийте пошук черг знову.', show_alert=True)
+        return
+    try:
+        page = int(callback.data.split(':')[1])
+    except ValueError:
+        await callback.answer('Невідома сторінка.', show_alert=True)
+        return
+    await callback.answer()
+    await show_queue_search(callback.message, state, conn, subjects, data.get('query', ''), page)
+
+
+@router.callback_query(F.data.startswith('findq:'))
+async def queue_search_select(callback, state, conn, subjects):
+    try:
+        sid = int(callback.data.split(':')[1])
+    except ValueError:
+        await callback.answer('Чергу не знайдено.', show_alert=True)
+        return
+    session = queues.get_session(conn, sid)
+    if not session or session['status'] == 'archived':
+        await callback.answer('Ця черга більше недоступна.', show_alert=True)
+        return
+    data = await state.get_data()
+    queue_navigation.remember(conn, callback.from_user.id, sid, 'search', data.get('page', 1), query=data.get('query', ''))
+    await state.clear()
+    await state.update_data(session_id=sid)
+    await callback.answer()
+    await open_queue_screen(callback.message, conn, subjects, sid, telegram_id=callback.from_user.id)
 
 
 def is_category_button(message: Message) -> bool:
@@ -272,6 +340,9 @@ async def paginate_my_queues(message: Message, state: FSMContext, conn, subjects
 @router.message(F.text.in_({"🔄 Оновити список", "🔄 Оновити"}), StudentFlow.browsing_queues)
 async def refresh_all_queues_list(message: Message, state: FSMContext, conn, subjects):
     data = await state.get_data()
+    if data.get('queue_search'):
+        await show_queue_search(message, state, conn, subjects, data.get('query', ''), data.get('page', 1))
+        return
     category = data.get("category")
     sessions = queues.list_sessions(conn, ("open", "closed"))
     if not sessions:
@@ -399,6 +470,10 @@ async def back_to_queues_list(message: Message, state: FSMContext, conn, subject
     if message.text == '🔙 До моїх черг' or (message.text != '🔙 До категорій' and origin.get('source') == 'my'):
         await my_queues(message, state, conn, subjects, page=origin.get('page', 1))
         return
+    if origin.get('source') == 'search':
+        await view_all_queues(message, state, conn, subjects)
+        await show_queue_search(message, state, conn, subjects, origin.get('query', ''), origin.get('page', 1))
+        return
     await view_all_queues(message, state, conn, subjects)
 
 
@@ -421,6 +496,18 @@ async def select_queue_by_button(message: Message, state: FSMContext, conn, subj
     await state.clear()
     await state.update_data(session_id=session["id"])
     await open_queue_screen(message, conn, subjects, session["id"])
+
+
+async def queue_search_text_filter(message, state):
+    if not (await state.get_data()).get('queue_search') or not message.text:
+        return False
+    return message.text == 'Показати всі черги' or bool(re.match(r'^[\w]', message.text, re.UNICODE))
+
+
+@router.message(StudentFlow.browsing_queues, queue_search_text_filter)
+async def queue_search_text(message, state, conn, subjects):
+    query = '' if message.text == 'Показати всі черги' else message.text.strip()[:256]
+    await show_queue_search(message, state, conn, subjects, query)
 
 
 # ---------- Дії всередині черги ----------
