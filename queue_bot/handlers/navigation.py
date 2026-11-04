@@ -3,7 +3,7 @@ from aiogram import F, Router
 from aiogram.filters import StateFilter
 from aiogram.fsm.state import State, StatesGroup
 
-from queue_bot.handlers.common import get_reply_menu
+from queue_bot.handlers.common import get_reply_menu, get_student_queues_menu, get_student_more_menu
 from queue_bot.services import admins, queues, users
 from queue_bot.services.errors import BotError
 
@@ -26,6 +26,26 @@ async def student_home(message, state, conn, note=''):
     await state.update_data(ui_mode='student')
     await message.answer(f'{note}👤 <b>Режим студента</b>\nГоловне меню. Оберіть дію 👇',
                          reply_markup=get_reply_menu(conn, message.from_user.id))
+
+
+@router.message(F.text == 'Черги', StateFilter('*'))
+async def student_queues_section(message, state, conn):
+    if not users.get_user(conn, message.from_user.id):
+        raise BotError('Спочатку зареєструйтесь: /start')
+    await state.clear()
+    await state.update_data(ui_mode='student')
+    await message.answer('Черги\n«Мої черги» — ваші записи. «Усі черги» — перегляд і запис у чергу.',
+                         reply_markup=get_student_queues_menu())
+
+
+@router.message(F.text == 'Ще', StateFilter('*'))
+async def student_more_section(message, state, conn):
+    if not users.get_user(conn, message.from_user.id):
+        raise BotError('Спочатку зареєструйтесь: /start')
+    await state.clear()
+    await state.update_data(ui_mode='student')
+    await message.answer('Ще\nСтворення черги, допомога та інші можливості.',
+                         reply_markup=get_student_more_menu(conn, message.from_user.id))
 
 
 async def admin_home(message, state, conn):

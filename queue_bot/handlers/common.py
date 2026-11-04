@@ -42,18 +42,23 @@ def make_reply_keyboard(rows: list[list[str]]) -> ReplyKeyboardMarkup:
 
 
 def get_reply_menu(conn, telegram_id: int) -> ReplyKeyboardMarkup:
-    """Головне меню студента (без адмінських функцій; для адміна — кнопка переходу в Адмін-панель)."""
-    keyboard = [
-        [KeyboardButton(text="📋 Усі черги"), KeyboardButton(text="👥 Мої черги")],
-        [KeyboardButton(text="➕ Відкрити чергу"), KeyboardButton(text="📅 Розклад")],
-        [KeyboardButton(text="❓ Допомога"), KeyboardButton(text="🐞 Повідомити про баг")],
-    ]
+    """Three stable sections; secondary actions live in their own menu."""
+    return make_reply_keyboard([['Черги', '📅 Розклад'], ['Ще']])
+
+
+def get_student_queues_menu() -> ReplyKeyboardMarkup:
+    return make_reply_keyboard([['👥 Мої черги', '📋 Усі черги'], ['🏠 Головне меню']])
+
+
+def get_student_more_menu(conn, telegram_id: int) -> ReplyKeyboardMarkup:
+    rows = [['➕ Відкрити чергу'], ['❓ Допомога', '🐞 Повідомити про баг']]
     if admins.is_admin(conn, telegram_id):
-        keyboard.append([KeyboardButton(text="⚡ Адмін-панель")])
+        rows.append(['⚡ Адмін-панель'])
     from queue_bot import config
     if config.MINI_APP_URL:
-        keyboard.append([KeyboardButton(text='📱 Мініапка')])
-    return ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True)
+        rows.append(['📱 Мініапка'])
+    rows.append(['🏠 Головне меню'])
+    return make_reply_keyboard(rows)
 
 
 def get_schedule_reply_menu() -> ReplyKeyboardMarkup:

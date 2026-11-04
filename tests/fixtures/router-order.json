@@ -18,6 +18,8 @@
   },
   {
     "message": [
+      "student_queues_section",
+      "student_more_section",
       "student_mode",
       "admin_mode",
       "admin_panel",
