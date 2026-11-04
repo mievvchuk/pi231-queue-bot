@@ -534,7 +534,7 @@ window.createPI231Features = function (H) {
   }
   function historyPage(data) {
     const caption=el('p',{class:'history-timezone'},'Дата й час за Києвом');
-    const sessionMeta=session=>small([session?.teacher,historyTime(session?.date),statusText(session?.status)].filter(Boolean).join(' · '));
+    const sessionMeta=session=>small([session?.teacher,historyTime(session?.date),session?.status==='archived'?'Архів':'Постійна черга'].filter(Boolean).join(' · '));
     if (data.session_id != null) {
       const session=rows(data.sessions).find(item=>String(item.id)===String(data.session_id));
       const people=new Map();
@@ -569,76 +569,7 @@ window.createPI231Features = function (H) {
         ...group.sessions.sort((a,b)=>String(b.date||'').localeCompare(String(a.date||''))).map(item=>
           el('article',{class:'card request-card history-session'},sessionMeta(item),
             el('div',{class:'button-row'},btn('Учасники сесії',()=>open('admin-history',false,'?sid='+encodeURIComponent(item.id)),'button secondary'),
-              ['open','closed'].includes(item.status)?btn('Завершити сесію',()=>finishSession(item),'button secondary'):null))))))];
-  }
-  async function finishSession(session) {
-    const ctx = { key: S.feature, token: state.token, epoch: S.epoch };
-    try {
-      const detail = await api(
-        adminPath("admin-history") + "?sid=" + encodeURIComponent(session.id),
-      );
-      if (!current(ctx.token, ctx.epoch, ctx.key)) return;
-      const create = checkbox("Створити нову чергу");
-      const entries = rows(detail.entries)
-        .filter((entry) => entry.status === "active")
-        .map((entry, index) => {
-          const keep = checkbox(entry.full_name || entry.name || "Учасник");
-          const position = input({
-            type: "number",
-            min: 1,
-            max: 1000,
-            step: 1,
-            value: index + 1,
-          });
-          return {
-            entry,
-            keep,
-            position,
-            view: card(keep.view, field("Місце в новій черзі", position)),
-          };
-        });
-      edit(
-        "Завершення сесії",
-        [
-          create.view,
-          el(
-            "p",
-            { class: "notice" },
-            "Для перенесення обери нову чергу, учасників і їхні місця.",
-          ),
-          entries.map((entry) => entry.view),
-        ],
-        "Завершити",
-        (submitCtx) => {
-          const selected = entries.filter((entry) => entry.keep.node.checked);
-          if (selected.length && !create.node.checked)
-            throw new Error("Для перенесення потрібно створити нову чергу.");
-          const positions = selected.map((entry) =>
-            Number(entry.position.value),
-          );
-          if (new Set(positions).size !== positions.length)
-            throw new Error("Місця учасників не повинні повторюватися.");
-          return send(
-            adminPath("admin-history"),
-            {
-              action: "finish",
-              session_id: session.id,
-              create_new: create.node.checked,
-              carry: Object.fromEntries(
-                selected.map((entry) => [
-                  entry.entry.id,
-                  Number(entry.position.value),
-                ]),
-              ),
-            },
-            submitCtx,
-          );
-        },
-      );
-    } catch (err) {
-      if (!accessError(err, ctx) && current(ctx.token, ctx.epoch, ctx.key))
-        toast(err.message, true);
-    }
+              null))))))];
   }
   function groupPage(data) {
     const path = adminPath("admin-group"),

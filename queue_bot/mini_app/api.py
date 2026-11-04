@@ -345,10 +345,9 @@ async def admin_queue(request):
         conn, uid = request[REQ_CONTEXT]['conn'], request[REQ_UID]
         queues.add_students_by_admin(conn, uid, path_id(request), clean)
         return web.json_response({'message': f'Додано студентів: {len(clean)}.'})
-    if action not in ('open', 'close'):
-        raise BotError('Невідома дія адміністратора.')
-    queues.set_signup_open(request[REQ_CONTEXT]['conn'], request[REQ_UID], path_id(request), action == 'open')
-    return web.json_response({'message': 'Запис відкрито.' if action == 'open' else 'Запис закрито.'})
+    if action in ('open', 'close'):
+        raise BotError('Черга постійна: запис доступний завжди, відкривати чи закривати його не потрібно.')
+    raise BotError('Невідома дія адміністратора.')
 
 
 async def admin_entry(request):

@@ -110,31 +110,9 @@ async def admin_paginate_order_queues(message: Message, state: FSMContext, conn,
 
 
 
-async def admin_pick_close_queue(message: Message, state: FSMContext, conn, subjects):
-    await state.clear()
-    sessions = queues.list_sessions(conn, ("open", "closed"))
-    if not sessions:
-        await message.answer("Активних черг немає.", reply_markup=get_admin_queues_menu())
-        return
-    await state.set_state(AdminPanelState.select_queue_for_close)
-    await state.update_data(page=1)
-    page_sessions, cur_page, total_pages = paginate(sessions, 1, per_page=8)
-    rows = [[f"📋 {queue_label(subjects, s)}"] for s in page_sessions]
-    markup = get_paginated_reply_keyboard(rows, cur_page, total_pages, back_text="🔙 Назад")
-    await message.answer("🔒 Оберіть чергу для зміни статусу запису 👇", reply_markup=markup)
 
 
 
-async def admin_paginate_close_queues(message: Message, state: FSMContext, conn, subjects):
-    sessions = queues.list_sessions(conn, ("open", "closed"))
-    data = await state.get_data()
-    page = data.get("page", 1)
-    page = (page - 1) if message.text == "⬅️" else (page + 1)
-    await state.update_data(page=page)
-    page_sessions, cur_page, total_pages = paginate(sessions, page, per_page=8)
-    rows = [[f"📋 {queue_label(subjects, s)}"] for s in page_sessions]
-    markup = get_paginated_reply_keyboard(rows, cur_page, total_pages, back_text="🔙 Назад")
-    await message.answer("Оберіть чергу на кнопках внизу 👇", reply_markup=markup)
 
 
 
@@ -178,18 +156,6 @@ async def admin_selected_queue_order(message: Message, state: FSMContext, conn, 
 
 
 
-async def admin_selected_queue_close(message: Message, state: FSMContext, conn, subjects):
-    from .presentation import open_admin_queue_manager
-    session = find_session_by_label(conn, subjects, message.text)
-    if not session:
-        await message.answer("⚠️ Чергу не знайдено. Оберіть зі списку на кнопках внизу 👇")
-        return
-    make_open = session["status"] == "closed"
-    queues.set_signup_open(conn, message.from_user.id, session["id"], make_open)
-    note = "🟢 <b>Запис відкрито</b>" if make_open else "🔴 <b>Запис закрито</b>"
-    await state.clear()
-    await state.update_data(session_id=session["id"])
-    await open_admin_queue_manager(message, conn, subjects, session["id"], note=note, state=state)
 
 
 
@@ -264,17 +230,6 @@ async def receive_student_names(message: Message, state: FSMContext, conn, subje
 
 
 
-async def toggle_signup_in_manager(message: Message, state: FSMContext, conn, subjects):
-    from .presentation import get_open_session, open_admin_queue_manager
-    data = await state.get_data()
-    session_id = data.get("session_id")
-    if not session_id:
-        raise BotError("Чергу не обрано.")
-    session = get_open_session(conn, session_id)
-    make_open = session["status"] == "closed"
-    queues.set_signup_open(conn, message.from_user.id, session_id, make_open)
-    note = "🟢 <b>Запис відкрито</b>" if make_open else "🔴 <b>Запис закрито</b>"
-    await open_admin_queue_manager(message, conn, subjects, session_id, note=note, state=state)
 
 
 
@@ -522,43 +477,12 @@ async def student_remove_by_admin(message: Message, state: FSMContext, conn, sub
 
 
 
-async def ask_finish_queue(message: Message, state: FSMContext, conn, subjects):
-    from .presentation import get_open_session
-    data = await state.get_data()
-    session_id = data.get("session_id")
-    if not session_id:
-        raise BotError("Чергу не обрано.")
-    session = get_open_session(conn, session_id)
-    await state.set_state(AdminPanelState.confirm_finish_queue)
-    rows = [
-        ["📦 Завершити й архівувати"],
-        ["📦 Нова черга (порожня)"],
-        ["🔙 Назад до черги"],
-    ]
-    await message.answer(
-        f"Завершити заняття?\n{html.escape(queue_label(subjects, session))}\n\nОберіть дію нижче 👇",
-        reply_markup=make_reply_keyboard(rows),
-    )
 
 
 
-async def confirm_finish_archive(message: Message, state: FSMContext, conn):
-    data = await state.get_data()
-    session_id = data.get("session_id")
-    queues.finish_session(conn, message.from_user.id, session_id, create_new=False)
-    await state.clear()
-    await message.answer("✅ Чергу успішно архівовано.", reply_markup=get_admin_reply_menu())
 
 
 
-async def confirm_finish_new(message: Message, state: FSMContext, conn, subjects):
-    from .presentation import open_admin_queue_manager
-    data = await state.get_data()
-    session_id = data.get("session_id")
-    new_id = queues.finish_session(conn, message.from_user.id, session_id, create_new=True)
-    await state.clear()
-    await state.update_data(session_id=new_id)
-    await open_admin_queue_manager(message, conn, subjects, new_id, note=f"✅ Чергу архівовано. Нову чергу створено (№{new_id})!", state=state)
 
 
 

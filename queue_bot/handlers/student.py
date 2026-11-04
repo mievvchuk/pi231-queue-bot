@@ -354,7 +354,7 @@ async def open_coursework_group(message: Message, state: FSMContext, conn, subje
         _, teacher = session_names(subjects, s)
         entries = queues.get_entries(conn, s["id"])
         count = len(entries)
-        st_text = "🟢 відкрито" if s["status"] == "open" else "🔴 закрито"
+        st_text = "постійна черга" if s["status"] != "archived" else "архів"
         cw_lines.append(f"• 👨‍🏫 <b>{html.escape(teacher)}</b> — {st_text} (у черзі: <b>{count}</b>)")
     cw_lines.append("\nОберіть керівника на кнопках внизу 👇")
 
@@ -451,7 +451,7 @@ async def show_queue_actions(message: Message, state: FSMContext, conn):
         return
     session = get_session_or_fail(conn, session_id)
     is_in_queue = queues.get_user_position(conn, message.from_user.id, session_id) is not None
-    is_open = session["status"] == "open"
+    is_open = session["status"] != "archived"
     can_pick = not queues.are_first_10_occupied(conn, session_id) or queues.has_free_slots(conn, session_id)
     swap_wish = queues.get_swap_wish(conn, message.from_user.id, session_id) if is_in_queue else None
     ready_to_swap = queues.is_ready_to_swap(conn, message.from_user.id, session_id) if is_in_queue else False
@@ -638,7 +638,7 @@ async def join_queue_end(message: Message, state: FSMContext, conn, subjects):
     if not session_id:
         return
     session = get_session_or_fail(conn, session_id)
-    if session["status"] != "open":
+    if session["status"] == "archived":
         raise BotError("Запис у цю чергу закрито.")
     await begin_lab_count(message, state, conn, session_id, subjects=subjects)
 
@@ -649,7 +649,7 @@ async def ask_specific_number(message: Message, state: FSMContext, conn, subject
     if not session_id:
         return
     session = get_session_or_fail(conn, session_id)
-    if session["status"] != "open":
+    if session["status"] == "archived":
         raise BotError("Запис у цю чергу закрито.")
     if queues.are_first_10_occupied(conn, session_id) and not queues.has_free_slots(conn, session_id):
         await message.answer('ℹ️ Перші 10 місць уже зайняті. Записуємо в кінець черги.')
@@ -1372,7 +1372,7 @@ async def new_queue_subject_selected(message: Message, state: FSMContext, conn, 
         existing = queues.find_active_session_by_subject_teacher(conn, matched_sub["id"], teacher["id"], queue_type=q_type)
         if existing:
             await state.clear()
-            status_text = "відкрита для запису" if existing["status"] == "open" else "закрита для запису"
+            status_text = "постійна, запис доступний завжди"
             await open_queue_screen(
                 message, conn, subjects, existing["id"],
                 note=f"ℹ️ Черга на {type_label} для предмета <b>{matched_sub['name']}</b> ({teacher['name']}) вже створена ({status_text})!"
@@ -1449,7 +1449,7 @@ async def new_queue_teacher_selected(message: Message, state: FSMContext, conn, 
     existing = queues.find_active_session_by_subject_teacher(conn, matched_sub["id"], matched_teacher["id"], queue_type=q_type)
     if existing:
         await state.clear()
-        status_text = "відкрита для запису" if existing["status"] == "open" else "закрита для запису"
+        status_text = "постійна, запис доступний завжди"
         await open_queue_screen(
             message, conn, subjects, existing["id"],
             note=f"ℹ️ Черга на {type_label} для предмета <b>{matched_sub['name']}</b> ({matched_teacher['name']}) вже створена ({status_text})!"

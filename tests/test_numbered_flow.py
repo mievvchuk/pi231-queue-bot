@@ -143,12 +143,10 @@ async def test_invalid_numbers_edit_and_time_only_edit_keep_position(conn, app):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('change', ['close', 'archive', 'ban'])
+@pytest.mark.parametrize('change', ['archive', 'ban'])
 async def test_late_restriction_prevents_numbered_signup(conn, app, change):
     await send(app, '📝 Стати в кінець', '1,2')
-    if change == 'close':
-        queues.set_signup_open(conn, 100, app[2], False)
-    elif change == 'archive':
+    if change == 'archive':
         queues.finish_session(conn, 100, app[2])
     else:
         restrictions.set_restriction(conn, 100, users.get_user(conn, 1)['id'], days=1)

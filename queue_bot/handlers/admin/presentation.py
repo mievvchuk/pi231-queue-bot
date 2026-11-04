@@ -28,11 +28,9 @@ def get_open_session(conn, session_id: int):
 
 
 def get_admin_queue_menu(is_open: bool) -> ReplyKeyboardMarkup:
-    lock_text = "🔒 Закрити запис" if is_open else "🔓 Відкрити запис"
     rows = [
         ["Почати здачу на парі", "Зупинити здачу на парі"],
         ["➕ Додати студентів", "🔢 Керувати студентами"],
-        [lock_text, "📦 Завершити чергу"],
         ["👤 Режим студента", "🔄 Оновити"],
         ["🔙 Назад", "🔙 В адмін-панель"],
     ]

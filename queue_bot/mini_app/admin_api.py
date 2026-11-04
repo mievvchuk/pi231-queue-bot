@@ -182,18 +182,7 @@ async def manage(request):
     ctx, conn, uid = checked(request, owner)
     action = data.get('action')
     if section == 'history' and action == 'finish':
-        carry = data.get('carry', {})
-        if not isinstance(carry, dict) or len(carry) > 1000:
-            raise BotError('Некоректне перенесення.')
-        cleaned = {}
-        for key, value in carry.items():
-            try:
-                entry_id = api.integer(int(key))
-            except (ValueError, TypeError):
-                raise BotError('Некоректний запис для перенесення.')
-            cleaned[entry_id] = api.integer(value, maximum=1000)
-        new_id = queues.finish_session(conn, uid, api.integer(data.get('session_id')), boolean(data.get('create_new', False)), cleaned)
-        return response({'message': 'Чергу завершено.', 'session_id': new_id})
+        raise BotError('Черги постійні. Завершення та повторне створення черги прибрано.')
     if section == 'group':
         if action == 'add':
             users.admin_create_placeholder(conn, uid, text(data.get('full_name'), 61))

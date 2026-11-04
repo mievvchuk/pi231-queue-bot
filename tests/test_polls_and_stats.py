@@ -163,24 +163,26 @@ def test_global_statistics_and_full_csv(conn, make_user):
 def test_new_grouped_keyboards(conn):
     student_kb = get_reply_menu(conn, 999)
     student_texts = [btn.text for row in student_kb.keyboard for btn in row]
-    assert student_texts == ['Черги', '📅 Розклад', 'Ще']
+    assert student_texts == ['Черги', '📅 Розклад', '❓ Допомога', '🐞 Повідомити про баг']
     from queue_bot.handlers.common import get_student_more_menu, get_student_queues_menu
     queue_texts = [b.text for r in get_student_queues_menu().keyboard for b in r]
     assert '👥 Мої черги' in queue_texts and '📋 Усі черги' in queue_texts
     more_texts = [b.text for r in get_student_more_menu(conn, 999).keyboard for b in r]
-    assert {'➕ Відкрити чергу', '❓ Допомога', '🐞 Повідомити про баг'} <= set(more_texts)
+    assert {'❓ Допомога', '🐞 Повідомити про баг'} <= set(more_texts)
+    assert '➕ Створити чергу' in queue_texts
     assert '⚡ Адмін-панель' not in more_texts
-    assert '⚡ Адмін-панель' in [b.text for r in get_student_more_menu(conn, 100).keyboard for b in r]
+    assert '⚡ Режим адміна' in [b.text for r in get_reply_menu(conn, 100).keyboard for b in r]
     # Адмінські функції (опитування, заміни) не повинні бути в меню студента:
     assert "🗳 Опитування" not in student_texts
     assert "🔄 Заміни" not in student_texts
 
     admin_kb = get_admin_reply_menu()
     admin_texts = [btn.text for row in admin_kb.keyboard for btn in row]
-    assert admin_texts == ['📋 Черги та студенти', '📅 Розклад і заміни', 'Ще для адміна']
+    assert admin_texts == ['📋 Черги та студенти', '📅 Розклад і заміни', '❓ Допомога', '🐞 Повідомити про баг', '👤 Режим студента', 'Ще для адміна']
     from queue_bot.handlers.common import get_admin_more_menu
     more_admin = [b.text for row in get_admin_more_menu().keyboard for b in row]
-    assert {'🗳 Опитування', '👥 Список групи', '⚙️ Налаштування', '👤 Режим студента'} <= set(more_admin)
+    assert {'🗳 Опитування', '👥 Список групи', '⚙️ Налаштування'} <= set(more_admin)
+    assert '👤 Режим студента' not in more_admin
     assert '⚙️ Налаштування' not in [b.text for row in get_admin_more_menu(is_owner=False).keyboard for b in row]
 
     polls_kb = get_admin_polls_menu()

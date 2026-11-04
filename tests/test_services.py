@@ -86,11 +86,11 @@ def test_rejoin_after_leaving(conn, make_user, session):
 
 
 # 4. Закрита черга
-def test_closed_queue_rejects_join(conn, make_user, session):
+def test_legacy_closed_queue_accepts_permanent_signup(conn, make_user, session):
     make_user(1, "Петренко Іван")
     queues.set_signup_open(conn, ADMIN, session, False)
-    with pytest.raises(BotError, match="закрито"):
-        queues.join_queue(conn, 1, session)
+    queues.join_queue(conn, 1, session)
+    assert queues.get_user_position(conn, 1, session) == 1
 
 
 def test_one_unfinished_queue_per_teacher(conn, session):

@@ -44,7 +44,7 @@ async def student_more_section(message, state, conn):
         raise BotError('Спочатку зареєструйтесь: /start')
     await state.clear()
     await state.update_data(ui_mode='student')
-    await message.answer('Ще\nСтворення черги, допомога та інші можливості.',
+    await message.answer('Ще\nОсновні дії перенесено на головний екран.',
                          reply_markup=get_student_more_menu(conn, message.from_user.id))
 
 
@@ -91,7 +91,10 @@ async def student_mode(message, state, conn, subjects):
 
 @router.message(F.text.in_({'⚡ Режим адміна', '⚡ Керувати чергою (Адмін)'}), StateFilter('*'))
 async def admin_mode(message, state, conn, subjects):
-    await switch_admin(message, state, conn, subjects)
+    if (await state.get_data()).get('session_id'):
+        await switch_admin(message, state, conn, subjects)
+    else:
+        await admin_home(message, state, conn)
 
 
 @router.message(F.text.in_({'⚡ Адмін-панель', '🔙 В адмін-панель'}), StateFilter('*'))
