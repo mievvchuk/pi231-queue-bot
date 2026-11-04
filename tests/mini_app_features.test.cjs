@@ -172,16 +172,21 @@ test('journal admin approval submits the exact displayed revision and keeps the 
 
 test('journal builds grouped columns and every roster row before any grades exist',async()=>{
   const data=journalData();data.records=[];
-  data.subjects[0].labs=[{number:1,parts:5},{number:2,parts:1}];
+  data.subjects[0].labs=[{number:1,parts:5,attestation:1},{number:2,parts:1,attestation:2}];
+  data.averages={1:{'кпз':{'1':{average:4.5,filled:2,total:5},'2':{average:null,filled:0,total:1},all:{average:4.5,filled:2,total:6}}}};
   const calls=[];
   const {features,panels}=setup(async(path,body)=>{calls.push([path,body]);return body?{message:'Збережено'}:data;});
   await features.open('journal');
   const page=features.page('journal');
   const nodes=descendants(page);
   assert.ok(nodes.some(n=>n.tag==='th'&&n.attrs.colspan===5&&n.textContent==='ЛР 1'));
+  assert.deepEqual(nodes.filter(n=>n.tag==='th'&&n.attrs.scope==='colgroup').map(n=>n.textContent),['ЛР 1','Атестація 1','ЛР 2','Атестація 2']);
+  assert.deepEqual(nodes.filter(n=>n.tag==='td'&&String(n.attrs.class||'')==='journal-average').slice(0,2).map(n=>n.textContent),['4.50','—']);
+  assert.ok(nodes.some(n=>n.tag==='nav'&&String(n.attrs.class||'')==='journal-pager'));
+  assert.ok(!nodes.some(n=>n.tag==='select'&&nodes.some(o=>o.tag==='option'&&o.textContent==='Усі предмети')));
   assert.ok(nodes.some(n=>n.tag==='th'&&n.attrs.scope==='row'&&n.textContent==='Коваль Андрій'));
   const inputs=nodes.filter(n=>n.tag==='input'&&String(n.attrs.class||'').includes('journal-input'));
-  assert.equal(inputs.length,8);
+  assert.equal(inputs.length,6);
   assert.ok(!nodes.some(n=>String(n.attrs['aria-label']||'').startsWith('Коваль Андрій,')));
   const fifth=inputs.find(n=>String(n.attrs['aria-label']||'')==='ЛР 1, оцінка 5');
   fifth.value='4';
