@@ -1529,6 +1529,8 @@ window.createPI231Features = function (H) {
     const draw=()=>{
       const needle=search.value.trim().toLocaleLowerCase('uk-UA');
       const students=rows(data.students).filter(s=>!needle||s.name.toLocaleLowerCase('uk-UA').includes(needle));
+      // Own row first, so on a phone it is visible without scrolling the table.
+      if(!data.group)students.sort((a,b)=>(b.id===data.viewer_id)-(a.id===data.viewer_id));
       const sections=subjects.filter(s=>s.key===subjectFilter.value).map(subject=>{
         const groups=groupsFor(subject), columns=groups.flatMap(g=>Array.from({length:g.parts},(_,i)=>({...g,part:i+1})));
         const head=el('thead',{},el('tr',{},el('th',{rowspan:2,scope:'col',class:'journal-name'},'Прізвище та ім’я'),groups.map(g=>{
@@ -1558,12 +1560,14 @@ window.createPI231Features = function (H) {
       pager.replaceChildren(step('‹',index-1),
         ...subjects.map((s,i)=>el('button',{type:'button',class:'journal-pager-page'+(i===index?' active':''),title:s.name,'aria-label':s.name,'aria-current':i===index?'page':null,onclick:()=>pick(s.key)},String(i+1))),
         step('›',index+1));
-      summary.replaceChildren(el('h2',{},'Мої середні бали'),el('div',{class:'journal-summary'},subjects.filter(s=>mine()[s.key]).map(subject=>{
-        const a=mine()[subject.key];
-        return el('button',{type:'button',class:'journal-summary-row'+(subjectFilter.value===subject.key?' active':''),onclick:()=>pick(subject.key)},
-          el('strong',{},subject.name),el('span',{},'1 атест.: '+avgText(a['1'])),el('span',{},'2 атест.: '+avgText(a['2'])),
-          el('small',{},'Заповнено '+a.all.filled+' з '+a.all.total));
-      })));
+      const cellAvg=a=>el('span',{class:'journal-summary-value','aria-label':avgText(a)},a&&a.average!==null?a.average.toFixed(2):'—');
+      summary.replaceChildren(el('h2',{},'Мої середні бали'),el('div',{class:'journal-summary'},
+        el('div',{class:'journal-summary-head','aria-hidden':'true'},el('span',{},'Предмет'),el('span',{},'1 атест.'),el('span',{},'2 атест.')),
+        subjects.filter(s=>mine()[s.key]).map(subject=>{
+          const a=mine()[subject.key];
+          return el('button',{type:'button',class:'journal-summary-row'+(subjectFilter.value===subject.key?' active':''),onclick:()=>{pick(subject.key);tables.scrollIntoView?.({block:'start'});}},
+            el('span',{class:'journal-summary-name'},el('strong',{},subject.name),el('small',{},'Заповнено '+a.all.filled+' з '+a.all.total)),cellAvg(a['1']),cellAvg(a['2']));
+        })));
     };
     search.addEventListener('input',draw);draw();
     const dates=card(el('h2',{},'Дати атестацій'),!rows(data.dates).some(d=>d.due_date)?small('Дати ще не вказані. Власник додасть їх пізніше.'):small('Дати показані в заголовках атестацій у таблицях.'));
@@ -1573,7 +1577,7 @@ window.createPI231Features = function (H) {
     },'button secondary'));
     return [card(small(data.group?'Редагування групи: можна змінити оцінку будь-якого студента прямо в клітинці.':'Впиши оцінку прямо в клітинку свого рядка — вона збережеться сама.'),
       field('Навчальний період',period),field('Студент',search),
-      S.data?.me?.is_admin?btn(data.group?'Завершити редагування':'Редагувати оцінки групи',()=>{if(!data.group)S.mode='admin';open('journal',false,query(!data.group));},'button secondary'):null),summary,tables,pager,dates];
+      S.data?.me?.is_admin?btn(data.group?'Завершити редагування':'Редагувати оцінки групи',()=>{if(!data.group)S.mode='admin';open('journal',false,query(!data.group));},'button secondary'):null),tables,pager,summary,dates];
   }
 
 
