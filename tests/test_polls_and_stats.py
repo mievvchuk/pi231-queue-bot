@@ -164,12 +164,14 @@ def test_global_statistics_and_full_csv(conn, make_user):
 def test_new_grouped_keyboards(conn):
     student_kb = get_reply_menu(conn, 999)
     student_texts = [btn.text for row in student_kb.keyboard for btn in row]
-    assert "📋 Усі черги" in student_texts
-    assert "👥 Мої черги" in student_texts
-    assert "➕ Відкрити чергу" in student_texts
-    assert "📅 Розклад" in student_texts
-    assert "❓ Допомога" in student_texts
-    assert "🐞 Повідомити про баг" in student_texts
+    assert student_texts == ['Черги', '📅 Розклад', 'Ще']
+    from queue_bot.handlers.common import get_student_more_menu, get_student_queues_menu
+    queue_texts = [b.text for r in get_student_queues_menu().keyboard for b in r]
+    assert '👥 Мої черги' in queue_texts and '📋 Усі черги' in queue_texts
+    more_texts = [b.text for r in get_student_more_menu(conn, 999).keyboard for b in r]
+    assert {'➕ Відкрити чергу', '❓ Допомога', '🐞 Повідомити про баг'} <= set(more_texts)
+    assert '⚡ Адмін-панель' not in more_texts
+    assert '⚡ Адмін-панель' in [b.text for r in get_student_more_menu(conn, 100).keyboard for b in r]
     # Адмінські функції (опитування, заміни) не повинні бути в меню студента:
     assert "🗳 Опитування" not in student_texts
     assert "🔄 Заміни" not in student_texts
