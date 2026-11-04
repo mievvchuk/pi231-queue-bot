@@ -1,72 +1,243 @@
-# Telegram-бот електронної черги ПІ-231
+# PI-231 Queue Bot
 
-Бот керує тимчасовими чергами студентів на здачу лабораторних і практичних робіт.
-Стек: Python 3.11+, aiogram 3, SQLite, FSM, inline-кнопки.
+A Telegram bot and optional Telegram Mini App/PWA for managing student queues for laboratory work, practical assignments, and consultations in the PI-231 group. The application also provides class schedules, substitutions, polls, administrative workflows, and reports.
 
-## Запуск (Windows PowerShell)
+**Stack:** Python 3.11+, aiogram 3, aiohttp, PostgreSQL (production), SQLite (local development/tests), HTML/CSS/vanilla JavaScript (Mini App), and Node.js 22+ for frontend tests.
 
-```powershell
-python -m venv .venv
-.\.venv\Scripts\pip install -r requirements.txt
-Copy-Item .env.example .env      # впишіть BOT_TOKEN та INITIAL_ADMIN_IDS у .env
-.\.venv\Scripts\python bot.py
+> The bot's user interface and bundled group data are primarily in Ukrainian. This README documents the project in English.
+
+## Features
+
+### Students
+- Register with a full name through the Telegram bot or Mini App, view active queues, and join at the end or in an available reserved slot.
+- View their current position, queue participants, and personal entries; leave a queue or mark work as completed.
+- Select individual laboratory numbers for supported subjects and set an estimated completion time from **5 minutes up to the sum of their selected labs' maximum durations**.
+- Edit selected labs or planned time without losing their position. When multiple labs are selected, mark only the completed ones and keep the remaining work in the same queue.
+- Send direct position-swap requests, respond to requests, and indicate a preference to move up or down. Unanswered requests expire after 10 minutes.
+- View class schedules, week variants, substitutions, working Saturdays, polls, and personal information.
+- Report problems through the bot.
+
+### Administrators
+- Create and manage lesson or consultation queues; open/close registration, move participants, add students, complete or remove entries, and archive sessions.
+- Create a follow-up queue and transfer selected students to chosen positions while retaining session history.
+- Manage users, administrator access, subject/teacher data, schedules, restrictions, and bot settings.
+- Manage schedule substitutions, including optional AI-assisted extraction from one image or a two-image Telegram album, followed by administrator review before saving.
+- Manage working Saturdays and polls, review activity/statistics, and export group or subject reports as PDF.
+- Apply temporary or indefinite bans. Authorization is enforced in backend services, not merely by hiding UI controls.
+
+### Telegram Mini App and installable PWA
+- Optional web interface with **Home**, **Queues**, **Schedule**, and **More** sections, plus administrator screens where permitted.
+- Queue actions, lab selection, partial completions, swaps, schedule viewing, polls, profile, and registration.
+- Responsive light/dark interface with reduced-motion and reduced-transparency fallbacks; bundled assets require no frontend CDN.
+- Telegram Mini App authentication through validated `initData`. Optional browser/PWA sign-in uses Telegram Login (OIDC authorization code with PKCE).
+- Installable PWA manifest and service worker. Browser sign-in requires separate Telegram Login credentials; it is not enabled merely by setting a Mini App URL.
+
+The Mini App uses the **same application service and database** as the Telegram bot. It supplements rather than replaces the bot's existing controls. See [Mini App documentation](docs/MINI_APP.md) for feature details, sign-in configuration, and limitations.
+
+## How queues work
+
+A queue session belongs to a subject, teacher, and queue type. Its lifecycle is **open → closed → archived**. Only one unfinished session is allowed for a given subject/teacher/type combination. Active queue positions are maintained consistently; completed, withdrawn, removed, and transferred records remain available in history.
+
+For subjects with a lab catalog, students choose lab numbers and an individual time estimate before their place is confirmed. Consultation queues and subjects without a lab catalog do not require these fields. A single selected lab can be completed immediately; with multiple labs, students can report partial completion and retain their place for the remainder. Old or stale action buttons must not modify a newer entry.
+
+Admin actions are logged. Queue updates, swaps, transfers, and archival are handled in database transactions. Swap requests expire after **10 minutes** if unanswered.
+
+## Laboratory catalog
+
+The default catalog is [`data/lab_catalog.json`](data/lab_catalog.json). It can be overridden with `LAB_CATALOG_PATH`.
+
+| Subject | Lab numbers | Maximum time per lab |
+| --- | --- | --- |
+| Internet Programming | 1–7 | 40 min |
+| Human–Computer Interaction | 1–10 | 15 min |
+| Machine Learning | 1–7 | 30 min |
+| Software Architecture and Design | 1–3 | 20 min |
+| Software Construction | 1–11 | 25, 10, 10, 15, 10, 15, 20, 15, 15, 15, 15 min |
+
+Some labs have titles in the catalog; untitled ones are identified by number. These are **per-lab maximums**, not an automatically shared classroom time budget. Changing the catalog requires an application restart and does not automatically create subjects or queues.
+
+## Project structure
+
+```text
+bot.py                       Hosting-compatible application entry point
+queue_bot/
+  __main__.py                Alternative module entry point
+  application.py             Application lifecycle, Telegram polling, background tasks
+  config.py                  Environment configuration and validation
+  check_config.py            Offline configuration check
+  routing.py                 aiogram router/middleware registration
+  web.py                     HTTP health endpoints and Mini App static assets
+  handlers/
+    admin/                   Administrative Telegram UI and workflows
+    ...                      Student, schedule, polls, substitutions, bans, etc.
+  services/                  Business logic, authorization, reports, recognition
+  storage/database.py        PostgreSQL/SQLite adapters, schemas, migrations
+  mini_app/
+    api.py                   Mini App HTTP API
+    student_api.py           Student actions
+    admin_api.py             Administrative actions
+    poll_api.py              Poll operations
+    browser_auth.py          Optional browser login and sessions
+    static/                  HTML, JS, CSS, icons, manifest, service worker
+data/
+  subjects.json              Default subjects and teachers
+  schedule.json              Default timetable
+  lab_catalog.json           Laboratory numbers and time limits
+docs/
+  CONFIGURATION.md           Full environment/deployment guidance
+  MINI_APP.md                Mini App, PWA, and Telegram Login documentation
+tests/                       Python and Node.js tests
+scripts/                     Auxiliary UI checks and PWA icon tooling
+.github/workflows/tests.yml  CI checks
+CONTRIBUTING.md              Branching, PRs, and release process
+Procfile                     Web process: python bot.py
 ```
 
-Файл `.env` у git не потрапляє (`.gitignore`). Змінні середовища мають пріоритет над `.env`.
+## Requirements
 
-Змінні середовища:
+- **Python 3.11 or newer** and `pip`.
+- A Telegram bot token from [BotFather](https://t.me/BotFather) and the Telegram numeric ID of the owner.
+- A database connection string. **PostgreSQL is the intended production database**; the storage layer also supports a local SQLite file for development/tests.
+- **Node.js 22+** only if running JavaScript tests; Node.js is not required to serve the Mini App.
+- Optional: a public HTTPS URL for the Mini App and a supported recognition API key for image-based schedule substitutions.
 
-| Змінна | Призначення |
-|---|---|
-| `BOT_TOKEN` | токен бота (у коді не зберігається) |
-| `INITIAL_ADMIN_IDS` | ID початкових адмінів через кому; застосовується лише коли в базі немає адмінів |
-| `DB_PATH` | файл бази, за замовчуванням `queue_bot.db` |
-| `SUBJECTS_PATH` | файл предметів, за замовчуванням `subjects.json` |
+## Local setup
 
-Свій Telegram ID можна дізнатися, наприклад, у бота @userinfobot.
+1. Clone the repository and install Python dependencies:
 
-## Тести
+   ```bash
+   git clone https://github.com/mievvchuk/pi231-queue-bot.git
+   cd pi231-queue-bot
+   python -m venv .venv
+   ```
 
-```powershell
-.\.venv\Scripts\python -m pytest
+   Activate the virtual environment on macOS/Linux:
+
+   ```bash
+   source .venv/bin/activate
+   ```
+
+   Or on Windows PowerShell:
+
+   ```powershell
+   .\.venv\Scripts\Activate.ps1
+   ```
+
+   Install dependencies:
+
+   ```bash
+   python -m pip install -r requirements.txt
+   ```
+
+2. Copy `.env.example` to `.env` and provide at least the following values:
+
+   ```dotenv
+   BOT_TOKEN=your_telegram_bot_token
+   OWNER_ID=your_numeric_telegram_id
+   DATABASE_URL=postgresql://user:password@host:5432/database
+   ```
+
+   For a local SQLite development database, `DATABASE_URL` may instead be set to a local file path (for example `local-dev.db`). Never point development or test scripts at the live production database.
+
+3. Validate configuration and start the service:
+
+   ```bash
+   python -m queue_bot.check_config
+   python bot.py
+   ```
+
+The process runs Telegram long polling and an aiohttp web server. Visit `http://localhost:8080/health` for a basic healthcheck when using the default port. You can also start the package with `python -m queue_bot`.
+
+**Important:** Local `.env` is ignored by Git, and actual process environment variables take precedence. Configuration validation does not contact Telegram or the database, but startup does.
+
+## Environment variables
+
+See [`.env.example`](.env.example) and [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md) for the authoritative template, validation requirements, and deployment notes.
+
+| Variable | Purpose |
+| --- | --- |
+| `BOT_TOKEN` | **Required.** Telegram bot API token |
+| `DATABASE_URL` | **Required.** PostgreSQL URL for production or SQLite path for local use |
+| `OWNER_ID` | **Required.** Numeric Telegram ID of the owner |
+| `INITIAL_ADMIN_IDS` | Comma-separated initial admins, used only if the admin table is empty |
+| `GROUP_CHAT_ID` | Optional Telegram group chat ID; saved database settings take precedence |
+| `STUDENT_GROUP` | Group name (default: PI-231 in Ukrainian) |
+| `TZ` | IANA time zone (default: `Europe/Kyiv`) |
+| `NOTIFICATION_TIME` | Schedule notification time, `HH:MM` (default: `17:00`) |
+| `SUBJECTS_PATH`, `SCHEDULE_PATH` | Optional alternate JSON files for subjects and timetable |
+| `LAB_CATALOG_PATH` | Optional lab catalog JSON file |
+| `MINI_APP_URL` | Optional public HTTPS URL ending in `/app/` to expose Mini App launch controls |
+| `TELEGRAM_LOGIN_CLIENT_ID`, `TELEGRAM_LOGIN_CLIENT_SECRET` | Optional Telegram Login credentials for browser/PWA access; both required together with `MINI_APP_URL` |
+| `RECOGNITION_PROVIDER` | `disabled`, `auto`, `groq`, or `openai` |
+| `RECOGNITION_API_KEY` | Key for optional image recognition; `OPENAI_API_KEY` is supported as a fallback |
+| `GROQ_MODEL`, `OPENAI_MODEL` | Recognition model selection |
+| `GROQ_API_URL`, `OPENAI_API_URL` | Recognition API endpoints |
+| `RECOGNITION_TIMEOUT_SECONDS` | Recognition timeout (default: 45 seconds) |
+| `HTTP_HOST`, `PORT` | Web server binding (defaults: `0.0.0.0`, `8080`) |
+| `LOG_LEVEL` | Logging level (default: `INFO`) |
+| `POLLING_RETRY_SECONDS` | Telegram polling retry delay |
+| `POLLS_WATCH_INTERVAL` | Poll watcher interval |
+| `SCHEDULE_CHECK_INTERVAL` | Schedule notifier check interval |
+| `ENV_FILE` | Alternate environment file path, set before launching |
+| `TEST_DATABASE_URL` | **Test-only** separate PostgreSQL database for integration tests |
+
+Recognition is optional. In `auto` mode, the service selects Groq for `gsk_`-prefixed keys and OpenAI otherwise. Without a configured public Mini App URL, the existing Telegram bot controls remain usable.
+
+## Mini App and deployment
+
+The same aiohttp service serves:
+
+- `/` and `/health` — healthcheck.
+- `/app/` — Mini App and PWA frontend.
+- `/api/miniapp/` — authenticated API endpoints.
+- `/auth/telegram/...` — optional browser login endpoints.
+
+For a deployment on Render or another compatible host:
+
+1. Configure a Python web service with the command `python bot.py` (the included `Procfile` uses this command).
+2. Set `BOT_TOKEN`, `DATABASE_URL`, and `OWNER_ID` in the host's environment.
+3. Reuse the **existing production database connection** when updating a deployed instance, to preserve queues, users, and history. Back up the database before schema changes.
+4. If enabling the Mini App, set `MINI_APP_URL=https://your-service.example/app/` using the service's actual HTTPS domain.
+5. If enabling standalone browser/PWA sign-in, configure the Telegram Login Widget client ID and secret and the callback URL `https://your-service.example/auth/telegram/callback` in Telegram's configuration.
+
+The Mini App uses the same deployment, not a second backend. The app validates Telegram authorization on the server and checks access rights for each action. For details, see [`docs/MINI_APP.md`](docs/MINI_APP.md).
+
+## Testing
+
+Run the full Python suite:
+
+```bash
+python -m pytest -q
 ```
 
-Токен не потрібен: тестується бізнес-логіка на тимчасовій SQLite-базі.
+Run the Node.js frontend tests:
 
-## Структура
-
-```
-bot.py            запуск і підключення роутерів
-config.py         змінні середовища
-subjects.py       завантаження й перевірка subjects.json
-subjects.json     предмети й викладачі
-db.py             SQLite, міграції (PRAGMA user_version), транзакції
-services/         бізнес-логіка без Telegram: users, admins, queues
-handlers/         aiogram: start (реєстрація), student, admin, common
-tests/            pytest
+```bash
+node --test tests/mini_app_frontend.test.cjs tests/mini_app_features.test.cjs
 ```
 
-## Як це працює
+Additional browser/PWA and layout checks are available in `tests/` and `scripts/`. Most Python tests run against temporary SQLite databases and do **not** require a production bot token. PostgreSQL integration tests require a separately configured `TEST_DATABASE_URL`; never reuse `DATABASE_URL` from production.
 
-- **Ролі.** `student` і `admin`. Кожна адмін-операція в `services/` викликає `require_admin`,
-  тому перевірка відбувається на сервері, а не лише в меню. Початкові адміни з
-  `INITIAL_ADMIN_IDS` додаються, тільки якщо таблиця `admins` порожня. Останнього адміна видалити не можна.
-- **Черги.** Статуси `open` → `closed` → `archived`. Для пари «предмет + викладач» може бути лише
-  одна незавершена черга (частковий унікальний індекс).
-- **Позиції.** Єдина функція `_set_order` розставляє 1..N без пропусків. Унікальні індекси забороняють
-  дубль студента й дубль позиції; запис іде через `BEGIN IMMEDIATE`, тому одночасні запити безпечні.
-- **Здача та вихід.** Запис не видаляється, а отримує статус `completed`, `left`, `removed` або
-  `transferred`; історія зберігається, активні позиції перераховуються.
-- **Завершення заняття.** Архівування, створення нової черги й перенесення виконуються в одній
-  транзакції. Перенесені студенти ставляться на позиції, які вибрав адмін. Проміжні позиції стають
-  зарезервованими «вільними місцями», які автоматично займають нові студенти (тому в прикладі
-  «1. Новий, 2. Шевченко, 3. Новий, 4. Мельник» нумерація лишається послідовною).
-- **Журнал.** Адмін-дії пишуться в таблицю `admin_log`.
-- **Міграції.** Схема версіонується через `PRAGMA user_version`; існуюча база не видаляється.
-  Нові зміни додаються в кінець списку `MIGRATIONS` у `db.py`.
-- **Застарілі кнопки.** Невідомі або прострочені inline-кнопки отримують підказку натиснути `/start`.
+GitHub Actions runs the Python suite with a PostgreSQL 16 service, runs the two Node.js suites, and checks Python compilation. The workflow is triggered by pull requests and pushes to `master` or `develop`, with newer runs replacing superseded runs. The existence of CI configuration does not guarantee that hosted runners are available; check the repository's Actions page for runtime or account-level startup failures.
 
-## Обмеження
+## Data persistence and operational notes
 
-- FSM використовує `MemoryStorage`: після перезапуску бота незавершені діалоги (ввід ПІБ, перенесення)
-  потрібно почати знову. Усі дані черг і користувачів зберігаються в SQLite.
+- PostgreSQL is used for deployed persistent data; the storage layer includes SQLite support for local use and tests.
+- Database migrations are additive and retain existing user, queue, and historical records. SQLite migrations use `PRAGMA user_version`; PostgreSQL has its own migration path.
+- The bot uses in-memory FSM dialogue state. **Unfinished multi-step conversations are lost on process restart**, while persisted database records remain.
+- Pending two-photo Telegram album collection must be restarted after a process restart.
+- The timetable source can be overridden via `SCHEDULE_PATH`; modifying the repository's default JSON does not overwrite a separately configured live timetable.
+- Browser/PWA sessions last seven days from sign-in and are stored in the database (only a hash of the cookie token). They survive application restarts and deployments when the same persistent database is used. Logout revokes the session; clearing browser data or switching browsers requires another sign-in. Login attempts in progress still expire after ten minutes or a restart.
+- Keep bot tokens, database credentials, recognition keys, and Telegram Login secrets out of commits and PR descriptions.
+
+## Contributing
+
+The repository follows Gitflow:
+
+- `master`: stable deployment/releases.
+- `develop`: integration branch.
+- `feature/*` and `bugfix/*`: changes based on `develop`, merged through pull requests.
+- `release/*`: release preparation.
+- `hotfix/*`: urgent fixes branched from `master`.
+
+Read [`CONTRIBUTING.md`](CONTRIBUTING.md) for PR conventions, release checks, backup requirements, and access restrictions. Branch protections and deployment automation are not implied by the documentation; configure them separately in GitHub and the hosting platform.

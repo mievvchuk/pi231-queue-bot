@@ -1,11 +1,11 @@
 import pytest
 from aiogram import Dispatcher
 
-import config
-from handlers import admin, polls, start, student
-from handlers.common import Guard, format_queue
-from services import queues
-from subjects import load_subjects
+from queue_bot import config
+from queue_bot.handlers import admin, polls, start, student
+from queue_bot.handlers.common import Guard, format_queue
+from queue_bot.services import queues
+from queue_bot.services.subjects import load_subjects
 
 
 def test_subjects_json_is_valid():
@@ -35,9 +35,8 @@ def test_queue_text_marks_current_user(conn, make_user):
     queues.join_queue(conn, 2, session)
     text = format_queue(subjects, queues.get_session(conn, session),
                         queues.get_entries(conn, session), my_telegram_id=2)
-    assert "👉 2. Коваль Андрій (1 лаб.) орієнтовно 7-10хв — це ви" in text
-    assert "1. Петренко Іван (1 лаб.) орієнтовно 7-10хв" in text and "👉 1." not in text
-    assert "⏱ <b>Орієнтовна тривалість черги:</b> ~15-20 хв (усього 2 лаб.)" in text
+    assert "👉 2. Коваль Андрій — це ви" in text
+    assert "1. Петренко Іван" in text and "👉 1." not in text
 
 
 @pytest.mark.asyncio
@@ -82,7 +81,7 @@ async def test_group_chat_protection_blocks_keyboards_and_photos_but_allows_sche
     from unittest.mock import AsyncMock
     from aiogram.fsm.storage.memory import MemoryStorage
     from aiogram.types import Chat, Message, PhotoSize, Update, User
-    from handlers import schedule as schedule_handler
+    from queue_bot.handlers import schedule as schedule_handler
 
     subjects = load_subjects(config.SUBJECTS_PATH)
     for r in (

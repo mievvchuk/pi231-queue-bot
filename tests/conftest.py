@@ -1,7 +1,7 @@
 import pytest
 
-import db
-from services import admins, users
+from queue_bot.storage import database as db
+from queue_bot.services import admins, users
 
 
 @pytest.fixture

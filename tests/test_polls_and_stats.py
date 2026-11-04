@@ -4,16 +4,15 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-import config
-from handlers.common import (
+from queue_bot import config
+from queue_bot.handlers.common import (
     get_admin_polls_menu,
     get_admin_reply_menu,
-    get_admin_reports_menu,
     get_reply_menu,
 )
-from services import polls, queues
-from services.errors import BotError
-from subjects import load_subjects
+from queue_bot.services import polls, queues
+from queue_bot.services.errors import BotError
+from queue_bot.services.subjects import load_subjects
 
 UK_TZ = ZoneInfo(config.TIMEZONE)
 
@@ -164,25 +163,27 @@ def test_global_statistics_and_full_csv(conn, make_user):
 def test_new_grouped_keyboards(conn):
     student_kb = get_reply_menu(conn, 999)
     student_texts = [btn.text for row in student_kb.keyboard for btn in row]
-    assert "📋 Усі черги" in student_texts
-    assert "👥 Мої черги" in student_texts
-    assert "➕ Відкрити чергу" in student_texts
-    assert "📅 Розклад" in student_texts
-    assert "❓ Допомога" in student_texts
-    assert "🐞 Повідомити про баг" in student_texts
+    assert student_texts == ['Черги', '📅 Розклад', 'Електронний журнал', '❓ Допомога', '🐞 Повідомити про баг']
+    from queue_bot.handlers.common import get_student_more_menu, get_student_queues_menu
+    queue_texts = [b.text for r in get_student_queues_menu().keyboard for b in r]
+    assert '👥 Мої черги' in queue_texts and '📋 Усі черги' in queue_texts
+    more_texts = [b.text for r in get_student_more_menu(conn, 999).keyboard for b in r]
+    assert {'❓ Допомога', '🐞 Повідомити про баг'} <= set(more_texts)
+    assert '➕ Створити чергу' in queue_texts
+    assert '⚡ Адмін-панель' not in more_texts
+    assert '⚡ Режим адміна' in [b.text for r in get_reply_menu(conn, 100).keyboard for b in r]
     # Адмінські функції (опитування, заміни) не повинні бути в меню студента:
     assert "🗳 Опитування" not in student_texts
     assert "🔄 Заміни" not in student_texts
 
     admin_kb = get_admin_reply_menu()
     admin_texts = [btn.text for row in admin_kb.keyboard for btn in row]
-    assert "📋 Черги та студенти" in admin_texts
-    assert "🗳 Опитування" in admin_texts
-    assert "📊 Звіти та статистика" in admin_texts
-    assert "📅 Розклад і заміни" in admin_texts
-    assert "👥 Список групи" in admin_texts
-    assert "⚙️ Налаштування" in admin_texts
-    assert "🏠 Головне меню (Як студент)" in admin_texts
+    assert admin_texts == ['📋 Черги та студенти', '📅 Розклад і заміни', 'Електронний журнал', '❓ Допомога', '🐞 Повідомити про баг', '👤 Режим студента', 'Ще для адміна']
+    from queue_bot.handlers.common import get_admin_more_menu
+    more_admin = [b.text for row in get_admin_more_menu().keyboard for b in row]
+    assert {'🗳 Опитування', '👥 Список групи', '⚙️ Налаштування'} <= set(more_admin)
+    assert '👤 Режим студента' not in more_admin
+    assert '⚙️ Налаштування' not in [b.text for row in get_admin_more_menu(is_owner=False).keyboard for b in row]
 
     polls_kb = get_admin_polls_menu()
     polls_texts = [btn.text for row in polls_kb.keyboard for btn in row]
@@ -190,16 +191,12 @@ def test_new_grouped_keyboards(conn):
     assert "📡 Активні опитування" in polls_texts
     assert "📦 Історія опитувань" in polls_texts
 
-    reports_kb = get_admin_reports_menu()
-    reports_texts = [btn.text for row in reports_kb.keyboard for btn in row]
-    assert "📈 Загальна статистика" in reports_texts
-    assert "📚 Звіти за предметами" in reports_texts
-    assert "📥 Експорт зведеної таблиці (CSV)" in reports_texts
+    assert '📊 Звіти та статистика' not in more_admin
 
 
 @pytest.mark.asyncio
 async def test_bug_reports_flow(conn, make_user):
-    from services import bugs
+    from queue_bot.services import bugs
 
     make_user(301, "Сидоренко Ілля")
     rep_id = bugs.create_bug_report(
@@ -227,7 +224,7 @@ async def test_bug_reports_flow(conn, make_user):
 
 def test_chart_generators_produce_valid_png(conn, make_user):
     pytest.importorskip("PIL")
-    from services import charts
+    from queue_bot.services import charts
 
     subjects = load_subjects(config.SUBJECTS_PATH)
     make_user(401, "Мельник Софія")

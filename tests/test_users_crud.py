@@ -1,14 +1,14 @@
 import pytest
 import sqlite3
 
-from services import admins, queues, users
-from services.errors import BotError, PermissionDenied
+from queue_bot.services import admins, queues, users
+from queue_bot.services.errors import BotError, PermissionDenied
 
 ADMIN_ID = 100
 NON_ADMIN_ID = 999
 
 
-def test_alphabetical_sorting_and_pagination(conn):
+def test_alphabetical_sorting_returns_the_complete_roster(conn):
     names = [
         "Якименко Петро",
         "Бондар Дмитро",
@@ -23,20 +23,27 @@ def test_alphabetical_sorting_and_pagination(conn):
     for n in names:
         users.admin_create_placeholder(conn, ADMIN_ID, n)
 
-    p1_users, p1_cur, p1_total = users.list_users(conn, page=1, per_page=8)
-    assert p1_cur == 1
-    assert p1_total == 2
-    assert len(p1_users) == 8
+    result = users.list_users(conn)
+    assert len(result) == len(names)
+    assert [u['full_name'] for u in result] == sorted([users.validate_full_name(name) for name in names], key=str.casefold)
 
-    p1_names = [u["full_name"] for u in p1_users]
-    sorted_p1 = sorted(p1_names, key=lambda x: (x.lower(),))
-    assert p1_names == sorted_p1
 
-    p2_users, p2_cur, p2_total = users.list_users(conn, page=2, per_page=8)
-    assert p2_cur == 2
-    assert p2_total == 2
-    assert len(p2_users) == 1
-    assert p2_users[0]["full_name"] == "Якименко Петро"
+def test_ukrainian_special_letters_have_their_alphabetical_positions(conn):
+    expected = ['Гнатюк Іван', 'Ґалаган Іван', 'Денисюк Іван', 'Емець Іван',
+                'Євчук Андрій', 'Євчук Михайло', 'Жук Іван', 'Зінченко Іван',
+                'Иваненко Іван', 'Іваненко Іван', 'Їжакевич Іван', 'Йовенко Іван',
+                'Коваль Іван', 'Яремчук Іван']
+    for name in reversed(expected):
+        users.admin_create_placeholder(conn, ADMIN_ID, name)
+    assert [u['full_name'] for u in users.list_users(conn)] == expected
+    assert [u['full_name'] for u in users.search_users(conn, 'Іван')] == [name for name in expected if 'Іван' in name]
+    conn.execute('UPDATE users SET is_blocked = TRUE')
+    assert [u['full_name'] for u in users.list_blocked_users(conn)] == expected
+
+
+def test_ukrainian_sort_is_case_and_apostrophe_independent():
+    assert users.ukrainian_name_key("Лук'яненко Іван") == users.ukrainian_name_key('ЛУК’ЯНЕНКО ІВАН')
+    assert users.ukrainian_name_key('Йовенко Іван') == users.ukrainian_name_key('И\u0306овенко Іван')
 
 
 def test_case_insensitive_search(conn):
@@ -128,7 +135,7 @@ def test_delete_user_with_queue_entries_prohibited(conn):
 
     with pytest.raises(BotError) as exc:
         users.admin_delete_user(conn, ADMIN_ID, user["id"])
-    assert "активні або історичні записи" in str(exc.value)
+    assert "активні записи" in str(exc.value)
 
 
 def test_delete_unused_placeholder(conn):

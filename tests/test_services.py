@@ -2,9 +2,9 @@ import threading
 
 import pytest
 
-import db
-from services import admins, queues, users
-from services.errors import BotError, PermissionDenied
+from queue_bot.storage import database as db
+from queue_bot.services import admins, queues, users
+from queue_bot.services.errors import BotError, PermissionDenied
 
 ADMIN = 100
 
@@ -82,15 +82,15 @@ def test_rejoin_after_leaving(conn, make_user, session):
     queues.join_queue(conn, 2, session)
     queues.join_queue(conn, 1, session)
     queues.leave_queue(conn, 1, session)
-    assert queues.join_queue(conn, 1, session) == (2, 2)
+    assert queues.join_queue(conn, 1, session, position=2) == (2, 2)
 
 
 # 4. Закрита черга
-def test_closed_queue_rejects_join(conn, make_user, session):
+def test_legacy_closed_queue_accepts_permanent_signup(conn, make_user, session):
     make_user(1, "Петренко Іван")
     queues.set_signup_open(conn, ADMIN, session, False)
-    with pytest.raises(BotError, match="закрито"):
-        queues.join_queue(conn, 1, session)
+    queues.join_queue(conn, 1, session)
+    assert queues.get_user_position(conn, 1, session) == 1
 
 
 def test_one_unfinished_queue_per_teacher(conn, session):
@@ -123,8 +123,9 @@ def test_move_to_position(conn, filled):
 # 8. Видалення
 def test_remove_entry(conn, filled):
     queues.remove_entry(conn, ADMIN, entry_id(conn, filled, 2))
-    assert len(names(conn, filled)) == 4
-    assert positions(conn, filled) == [1, 2, 3, 4]
+    assert len(names(conn, filled)) == 5
+    assert names(conn, filled)[1] is None
+    assert positions(conn, filled) == [1, 2, 3, 4, 5]
 
 
 def test_leave_queue_leaves_free_slot(conn, filled):
@@ -149,15 +150,15 @@ def test_join_end_does_not_fill_free_slot(conn, filled):
     assert names(conn, filled)[5] == "Хтось Новий"
 
 
-def test_leave_queue_at_tail_trims(conn, make_user, session):
+def test_leave_queue_at_tail_preserves_vacancy(conn, make_user, session):
     make_user(1, "Студент Перший")
     make_user(2, "Студент Другий")
     queues.join_queue(conn, 1, session)
     queues.join_queue(conn, 2, session)
-    # Студент Другий у хвості виходить — вільне місце в кінці не накопичується
+    # Last numbered place stays available for another student.
     queues.leave_queue(conn, 2, session)
-    assert positions(conn, session) == [1]
-    assert names(conn, session) == ["Студент Перший"]
+    assert positions(conn, session) == [1, 2]
+    assert names(conn, session) == ["Студент Перший", None]
 
 
 # 9. Здача

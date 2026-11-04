@@ -1,7 +1,41 @@
 import datetime
 import pytest
 
-from services import replacements, schedule
+from queue_bot.services import replacements, schedule
+
+
+def test_committed_schedule_has_fifth_pair_only_on_monday_and_thursday():
+    from pathlib import Path
+    data = schedule.load_schedule_data(str(Path(__file__).resolve().parents[1] / 'data/schedule.json'))
+    for parity in ('numerator', 'denominator'):
+        for day in ('monday', 'thursday'):
+            fifth = [item for item in schedule.get_base_schedule_for_day(data, day, parity) if item['number'] == 5]
+            assert len(fifth) == 1 and fifth[0]['subject'] == 'Програмування в Інтернет'
+        assert all(item['number'] != 5 for item in schedule.get_base_schedule_for_day(data, 'tuesday', parity))
+
+
+def test_five_slots_preserve_gaps_and_have_exact_bell_times(conn):
+    data = {'monday': [{'pair': 2, 'subject': 'МН', 'startTime': '10:05', 'endTime': '11:25'}]}
+    actual, _ = schedule.get_actual_schedule(conn, data, datetime.date(2026, 11, 2))
+    slots = schedule.get_day_slots(actual)
+    assert len(actual) == 1
+    assert [slot['number'] for slot in slots] == [1, 2, 3, 4, 5]
+    assert [(s['startTime'], s['endTime']) for s in slots] == [
+        ('08:30', '09:50'), ('10:00', '11:20'), ('11:50', '13:10'),
+        ('13:20', '14:40'), ('14:50', '16:10')]
+    assert slots[0]['lessons'] == [] and slots[4]['lessons'] == []
+    assert slots[1]['lessons'][0]['subject'] == 'МН'
+    assert (actual[0]['startTime'], actual[0]['endTime']) == ('10:00', '11:20')
+    assert '10:00–11:20' in schedule.format_schedule_for_date(conn, data, datetime.date(2026, 11, 2))
+
+
+def test_fifth_pair_replacement_has_time_even_without_a_base_lesson(conn):
+    replacements.save_replacement(conn, {'date': '2026-11-03', 'group_name': 'ПІ-231',
+        'lesson_number': 5, 'new_subject': 'Додаткова пара', 'teacher': 'Викладач', 'room': '231'})
+    actual, _ = schedule.get_actual_schedule(conn, {}, datetime.date(2026, 11, 3))
+    fifth = schedule.get_day_slots(actual)[4]
+    assert fifth['lessons'][0]['is_replacement']
+    assert (actual[0]['startTime'], actual[0]['endTime']) == ('14:50', '16:10')
 
 
 def test_week_type_parity():
@@ -107,7 +141,7 @@ def test_actual_schedule_with_replacements(conn):
 
 
 def test_lesson_number_and_expansions():
-    from services.recognition import expand_subject, expand_teacher, normalize_lesson_pair
+    from queue_bot.services.recognition import expand_subject, expand_teacher, normalize_lesson_pair
 
     # 1-2 уроки -> 1 пара
     assert normalize_lesson_pair(1, "1-2") == 1
@@ -131,7 +165,7 @@ def test_lesson_number_and_expansions():
 
 
 def test_admin_schedule_keyboards():
-    from handlers.common import get_admin_reply_menu, get_admin_schedule_menu, get_schedule_reply_menu
+    from queue_bot.handlers.common import get_admin_reply_menu, get_admin_schedule_menu, get_schedule_reply_menu
 
     student_sch_menu = get_schedule_reply_menu()
     student_sch_texts = [btn.text for row in student_sch_menu.keyboard for btn in row]
@@ -156,7 +190,7 @@ def test_admin_schedule_keyboards():
 
 
 def test_replacement_correction_menus_and_helpers():
-    from handlers.schedule import (
+    from queue_bot.handlers.schedule import (
         normalize_date_input,
         render_corrections_menu,
         render_item_edit_menu,
@@ -225,7 +259,7 @@ def test_replacement_correction_menus_and_helpers():
 
 
 def test_working_saturdays_flow(conn):
-    from services import working_days
+    from queue_bot.services import working_days
 
     sat_date = datetime.date(2026, 10, 17)
     sat_str = sat_date.isoformat()
@@ -295,7 +329,7 @@ def test_working_saturdays_flow(conn):
 
 def test_next_working_day_calculation(conn):
     from datetime import date
-    from services.working_days import get_next_working_day, set_working_saturday, remove_working_saturday
+    from queue_bot.services.working_days import get_next_working_day, set_working_saturday, remove_working_saturday
 
     # 1. Понеділок (12.10.2026) -> Вівторок (13.10.2026)
     mon = date(2026, 10, 12)
@@ -318,8 +352,8 @@ def test_next_working_day_calculation(conn):
 
 
 def test_auto_archive_previous_replacements(conn):
-    from services import replacements
-    from handlers.common import get_admin_schedule_menu
+    from queue_bot.services import replacements
+    from queue_bot.handlers.common import get_admin_schedule_menu
 
     # Перевірка наявності кнопки архіву в меню
     menu = get_admin_schedule_menu()
@@ -390,7 +424,7 @@ def test_format_replacements_broadcast():
 
 
 def test_updated_help_sections():
-    from handlers.start import HELP_SECTIONS
+    from queue_bot.handlers.start import HELP_SECTIONS
     assert "Хочу вище / ⬇️ Хочу нижче" in HELP_SECTIONS["⚙️ Дії в черзі"]
     assert "17:00" in HELP_SECTIONS["📅 Розклад та заміни"]
     assert "Миттєві сповіщення" in HELP_SECTIONS["📅 Розклад та заміни"]
@@ -402,7 +436,7 @@ async def test_open_schedule_menu_time_of_day_switch(conn):
     from aiogram.fsm.context import FSMContext
     from aiogram.fsm.storage.memory import MemoryStorage
     from aiogram.fsm.storage.base import StorageKey
-    from handlers.schedule import open_schedule_menu
+    from queue_bot.handlers.schedule import open_schedule_menu
 
     storage = MemoryStorage()
     state = FSMContext(storage=storage, key=StorageKey(bot_id=1, chat_id=10, user_id=10))

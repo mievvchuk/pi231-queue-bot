@@ -1,0 +1,20 @@
+"""Ordered Telegram router assembly."""
+from aiogram import Dispatcher
+
+
+def ordered_routers():
+    from queue_bot.handlers import navigation, bans, start, polls, admin, schedule, student, attendance
+    return (attendance.router, navigation.router, bans.router, start.router, polls.router, admin.router,
+            schedule.router, student.router, start.fallback_router)
+
+
+def create_dispatcher(conn, subjects):
+    from queue_bot.handlers.common import Guard
+    from queue_bot.handlers.lab_counts import QueueDraftNavigation
+    dp = Dispatcher(conn=conn, subjects=subjects)
+    dp.message.outer_middleware(Guard())
+    dp.callback_query.outer_middleware(Guard())
+    dp.message.middleware(QueueDraftNavigation())
+    dp.callback_query.middleware(QueueDraftNavigation())
+    dp.include_routers(*ordered_routers())
+    return dp

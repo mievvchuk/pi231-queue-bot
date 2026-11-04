@@ -1,0 +1,23 @@
+name: Помилка
+description: Відтворювана проблема в боті
+title: 'bug: '
+body:
+  - type: textarea
+    id: steps
+    attributes:
+      label: Кроки відтворення
+      description: Роль, екран, кнопки та послідовність дій. Не додавайте токени й URL із паролями.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Очікувана поведінка
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Фактична поведінка
+    validations:
+      required: true
