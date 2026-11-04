@@ -122,9 +122,15 @@ def get_queue_swap_reply_menu(wish=None):
 
 
 def get_admin_reply_menu(is_owner: bool = True) -> ReplyKeyboardMarkup:
-    """Головне меню адмін-панелі: зрозумілі категорії без дублювання (Налаштування — лише для власника)."""
+    """Daily administration first; secondary tools are grouped separately."""
+    return make_reply_keyboard([
+        ['📋 Черги та студенти', '📅 Розклад і заміни'],
+        ['Ще для адміна'],
+    ])
+
+
+def get_admin_more_menu(is_owner: bool = True) -> ReplyKeyboardMarkup:
     rows = [
-        ["📋 Черги та студенти", "📅 Розклад і заміни"],
         ["🗳 Опитування", "📊 Звіти та статистика"],
     ]
     if is_owner:
@@ -132,6 +138,7 @@ def get_admin_reply_menu(is_owner: bool = True) -> ReplyKeyboardMarkup:
     else:
         rows.append(["👥 Список групи"])
     rows.append(["👤 Режим студента"])
+    rows.append(['🔙 В адмін-панель'])
     return make_reply_keyboard(rows)
 
 

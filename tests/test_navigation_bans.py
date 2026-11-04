@@ -39,6 +39,35 @@ async def data(app, uid=100):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize('uid,owner', [(100, True), (2, False)])
+async def test_compact_admin_menu_keeps_secondary_actions_and_owner_access(conn, app, make_user, uid, owner):
+    from queue_bot.services import admins
+    if not owner:
+        make_user(uid, 'Адмін Другий')
+        admins.add_admin(conn, 100, uid)
+    await send(app, '⚡ Адмін-панель', uid=uid)
+    buttons = lambda: [b.text for row in app[1].call_args[0][0].reply_markup.keyboard for b in row]
+    assert buttons() == ['📋 Черги та студенти', '📅 Розклад і заміни', 'Ще для адміна']
+    await send(app, 'Ще для адміна', uid=uid)
+    assert ('⚙️ Налаштування' in buttons()) is owner
+    assert '🗳 Опитування' in buttons() and '👥 Список групи' in buttons()
+    await send(app, '🔙 В адмін-панель', uid=uid)
+    assert len(buttons()) == 3
+    await send(app, 'Ще для адміна', uid=uid)
+    await send(app, '👤 Режим студента', uid=uid)
+    assert buttons() == ['Черги', '📅 Розклад', 'Ще']
+
+
+@pytest.mark.asyncio
+async def test_student_cannot_open_admin_more_by_typing_button_text(conn, app):
+    before = len(app[1].call_args_list)
+    await send(app, 'Ще для адміна', uid=1)
+    assert (await data(app, uid=1)).get('ui_mode') != 'admin'
+    assert not any('🗳 Опитування' in str(call) or '⚙️ Налаштування' in str(call)
+                   for call in app[1].call_args_list[before:])
+
+
+@pytest.mark.asyncio
 async def test_queue_mode_roundtrip_discards_draft_preserves_queue(conn, app):
     sid = queues.create_session(conn, 100, 1, 1)
     queues.join_queue(conn, 1, sid)

@@ -69,23 +69,26 @@ async def admin_panel_open(message: Message, state: FSMContext, conn=None):
             pass
     info_lines.extend([
         "",
-        "🧭 <b>Швидка навігація по розділах:</b>",
-        "• <b>📋 Черги та студенти</b> — додати студентів у чергу, змінити порядок, позначити здачу, закрити/архівувати чергу.",
-        "• <b>📅 Розклад і заміни</b> — додати заміни за фото, робоча субота, оновити розклад.",
-        "• <b>🗳 Опитування</b> — створити голосування для групи (з таймером або без).",
-        "• <b>📊 Звіти та статистика</b> — загальна успішність та вивантаження PDF-звітів.",
-        "• <b>👥 Список групи</b> — база ПІБ студентів групи та блокування.",
+        "<b>Черги та студенти</b> — записи, порядок і результати здачі.",
+        "<b>Розклад і заміни</b> — пари та зміни розкладу.",
+        "<b>Ще для адміна</b> — опитування, звіти, список групи та перехід у режим студента.",
     ])
     if owner_flag:
-        info_lines.append("• <b>⚙️ Налаштування</b> — баг-репорти, оголошення на всю групу, техроботи, список адмінів.")
-    info_lines.extend([
-        "",
-        "💡 <i>Щоб самому записатися в чергу або здати лабу як студент — натисніть <b>«👤 Режим студента»</b> внизу!</i>",
-    ])
+        info_lines.append("Налаштування власника також доступні в «Ще для адміна».")
     await message.answer(
         "\n".join(info_lines),
         reply_markup=get_admin_reply_menu(is_owner=owner_flag),
     )
+
+
+async def admin_more_panel(message: Message, state: FSMContext, conn):
+    from queue_bot.handlers.common import get_admin_more_menu
+    admins.require_admin(conn, message.from_user.id)
+    await state.clear()
+    await state.set_state(AdminPanelState.in_main_menu)
+    await state.update_data(ui_mode='admin')
+    await message.answer('Ще для адміна\nОпитування, звіти, список групи та інші можливості.',
+                         reply_markup=get_admin_more_menu(is_owner=admins.is_owner(conn, message.from_user.id)))
 
 
 

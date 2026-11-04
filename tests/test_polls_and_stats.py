@@ -178,13 +178,11 @@ def test_new_grouped_keyboards(conn):
 
     admin_kb = get_admin_reply_menu()
     admin_texts = [btn.text for row in admin_kb.keyboard for btn in row]
-    assert "📋 Черги та студенти" in admin_texts
-    assert "🗳 Опитування" in admin_texts
-    assert "📊 Звіти та статистика" in admin_texts
-    assert "📅 Розклад і заміни" in admin_texts
-    assert "👥 Список групи" in admin_texts
-    assert "⚙️ Налаштування" in admin_texts
-    assert "👤 Режим студента" in admin_texts
+    assert admin_texts == ['📋 Черги та студенти', '📅 Розклад і заміни', 'Ще для адміна']
+    from queue_bot.handlers.common import get_admin_more_menu
+    more_admin = [b.text for row in get_admin_more_menu().keyboard for b in row]
+    assert {'🗳 Опитування', '📊 Звіти та статистика', '👥 Список групи', '⚙️ Налаштування', '👤 Режим студента'} <= set(more_admin)
+    assert '⚙️ Налаштування' not in [b.text for row in get_admin_more_menu(is_owner=False).keyboard for b in row]
 
     polls_kb = get_admin_polls_menu()
     polls_texts = [btn.text for row in polls_kb.keyboard for btn in row]
