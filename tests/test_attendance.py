@@ -38,36 +38,33 @@ async def test_both_deadlines_are_ten_minutes_and_skip_never_reorders(conn, less
     assert own(conn, sid, 1)['deadline'] == clock[0] + 600
     answer(conn, sid, 2, 'present')
     await deliver(bot, conn, [])
-    assert own(conn, sid, 2)['state'] == 'present'
-    assert own(conn, sid, 2)['deadline'] is None
+    assert own(conn, sid, 2)['state'] == 'called'
+    assert own(conn, sid, 2)['deadline'] == clock[0] + 600
     clock[0] += 599
     a.tick(conn)
     assert own(conn, sid, 1)['state'] == 'pending'
-    assert own(conn, sid, 2)['state'] == 'present'
+    assert own(conn, sid, 2)['state'] == 'called'
     clock[0] += 1
     a.tick(conn)
     assert own(conn, sid, 1)['state'] == 'skipped'
-    assert own(conn, sid, 2)['state'] == 'called'
-    await deliver(bot, conn, [])
-    assert own(conn, sid, 2)['deadline'] == clock[0] + 600
-    clock[0] += 600
-    a.tick(conn)
     assert own(conn, sid, 2)['state'] == 'skipped'
     assert before == [(e['id'], e['position']) for e in queues.get_entries(conn, sid)]
     answer(conn, sid, 1, 'present')
     assert own(conn, sid, 1)['state'] == 'called'
 
 
-@pytest.mark.parametrize('order', [(4, 3, 2, 1), (2, 4, 1, 3), (3, 1, 4, 2)])
+@pytest.mark.parametrize('order', [(4, 3, 2), (2, 4, 3), (3, 4, 2)])
 def test_presence_response_order_does_not_change_call_order(conn, lesson, order):
     sid, _ = lesson
+    answer(conn, sid, 1, 'present')
+    answer(conn, sid, 1, 'ready')
     for uid in order:
         answer(conn, sid, uid, 'present')
-        states = [own(conn, sid, i)['state'] for i in (1, 2, 3, 4)]
-        assert states.count('called') == int(1 in order[:order.index(uid) + 1])
-        if 'called' in states:
-            assert states[0] == 'called'
-    for uid in (1, 2, 3, 4):
+        assert own(conn, sid, uid)['state'] == 'present'
+    assert a.view(conn, sid, 1)['ready_ids'] == [own(conn, sid, i)['entry_id'] for i in (1, 2, 3, 4)]
+    queues.finish_own_entry(conn, 1, sid, passed=True)
+    for uid in (2, 3, 4):
+        a.tick(conn)
         assert own(conn, sid, uid)['state'] == 'called'
         answer(conn, sid, uid, 'ready')
         queues.finish_own_entry(conn, uid, sid, passed=True)
@@ -77,10 +74,54 @@ def test_presence_response_order_does_not_change_call_order(conn, lesson, order)
 @pytest.mark.parametrize('action', ['late', 'absent', 'skip'])
 def test_explicit_unavailability_releases_next_present_student(conn, lesson, action):
     sid, _ = lesson
+    answer(conn, sid, 1, 'present')
     answer(conn, sid, 2, 'present')
     assert own(conn, sid, 2)['state'] == 'present'
     answer(conn, sid, 1, action, **({'minutes': 25} if action == 'late' else {}))
     assert own(conn, sid, 2)['state'] == 'called'
+
+
+def test_no_answer_does_not_hold_back_confirmed_students(conn, lesson):
+    sid, _ = lesson
+    answer(conn, sid, 2, 'present')
+    assert own(conn, sid, 1)['state'] == 'pending'
+    assert own(conn, sid, 2)['state'] == 'called'
+
+
+@pytest.mark.asyncio
+async def test_not_ready_skips_immediately_is_visible_and_returns_with_priority(conn, lesson):
+    from queue_bot.handlers.common import format_queue
+    from queue_bot.services.lesson_notifier import keyboard
+    sid, _ = lesson
+    before = [(e['id'], e['position']) for e in queues.get_entries(conn, sid)]
+    answer(conn, sid, 1, 'present')
+    answer(conn, sid, 2, 'present')
+    answer(conn, sid, 3, 'late', minutes=25)
+    old_token = own(conn, sid, 1)['token']
+    answer(conn, sid, 1, 'skip')
+    assert own(conn, sid, 1)['state'] == 'not_ready'
+    assert own(conn, sid, 2)['state'] == 'called'
+    data = a.view(conn, sid, 1)
+    assert data['ready_ids'] == [own(conn, sid, 2)['entry_id']]
+    assert data['deferred_ids'][0] == own(conn, sid, 1)['entry_id']
+    text = format_queue([], queues.get_session(conn, sid), queues.get_entries(conn, sid), 1, lesson=data)
+    assert text.index('Коваль Андрій') < text.index('Поки пропускаємо') < text.index('Петренко Іван')
+    assert 'Не готовий · тимчасово пропускаємо' in text
+    assert 'Запізнюється' in text and 'очікуємо о ' in text
+    assert any('Вже готовий' in b.text for row in keyboard(data['own']).inline_keyboard for b in row)
+    with pytest.raises(BotError):
+        a.respond(conn, 1, old_token, 'ready')
+    await deliver(AsyncMock(), conn, [])
+    a.tick(conn)
+    assert own(conn, sid, 1)['state'] == 'not_ready'
+    answer(conn, sid, 1, 'present')
+    assert own(conn, sid, 2)['state'] == 'called'
+    answer(conn, sid, 2, 'ready')
+    queues.finish_own_entry(conn, 2, sid, passed=True)
+    a.tick(conn)
+    assert own(conn, sid, 1)['state'] == 'called'
+    assert before[0] == (queues.get_entries(conn, sid)[0]['id'], queues.get_entries(conn, sid)[0]['position'])
+    assert own(conn, sid, 3)['state'] == 'late'
 
 
 @pytest.mark.asyncio

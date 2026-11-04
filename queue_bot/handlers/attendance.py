@@ -31,7 +31,9 @@ def lesson_summary(conn, sid, uid):
     rows = attendance.members(conn, data['id'])
     ready = sum(r['state'] in ('present', 'called', 'serving') for r in rows)
     late = sum(r['state'] == 'late' for r in rows)
-    lines.append(f'Готові: {ready}. Запізнюються: {late}. Решту тимчасово пропускаємо до підтвердження.')
+    not_ready = sum(r['state'] == 'not_ready' for r in rows)
+    lines.append(f'На місці / здають: {ready}. Запізнюються: {late}. Не готові: {not_ready}.')
+    lines.append('Перед підходом бот окремо запитає готовність. «Не готовий» одразу пропускає до наступного; повернутися можна кнопкою «Вже готовий».')
     return '\n'.join(lines)
 
 

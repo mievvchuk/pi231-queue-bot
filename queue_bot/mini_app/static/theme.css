@@ -879,3 +879,9 @@ meter::-moz-meter-bar {
   flex: 1;
   width: auto;
 }
+.queue-group-heading {
+  margin: 0;
+  padding: 16px;
+  font-size: 0.95rem;
+  border-bottom: 1px solid var(--border);
+}

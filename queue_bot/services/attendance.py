@@ -9,9 +9,12 @@ from queue_bot.services.restrictions import require_available
 from queue_bot.storage.database import transaction, PGConnectionWrapper
 
 RESPONSE_SECONDS = 10 * 60
-LABELS = {'pending': 'Присутність не підтверджена', 'present': 'На місці',
-          'late': 'Запізнюється', 'absent': 'На цій парі не буде',
-          'skipped': 'Тимчасово пропущено', 'called': 'Викликано: очікуємо відповідь',
+LABELS = {'pending': 'Присутність не підтверджена · поки пропускаємо',
+          'present': 'На місці · очікує виклику',
+          'late': 'Запізнюється · поки пропускаємо', 'absent': 'На цій парі не буде',
+          'not_ready': 'Не готовий · тимчасово пропускаємо',
+          'skipped': 'Немає відповіді / пропущено · місце збережене',
+          'called': 'Викликано · підтверджує готовність',
           'serving': 'Зараз здає'}
 
 
@@ -96,15 +99,9 @@ def _advance(conn, run, now):
     rows = members(conn, run['id'])
     busy = next((r for r in rows if r['state'] in ('called', 'serving')), None)
     if busy is None:
-        # Initial unanswered presence protects the existing queue order until
-        # its response deadline. A late-arrival reminder must not block others.
-        first = None
-        for row in rows:
-            if row['state'] == 'pending' and row['revision'] == 0:
-                break
-            if row['state'] == 'present':
-                first = row
-                break
+        # Only confirmed students participate in the current calling order.
+        # Original positions decide priority; unavailable students never block it.
+        first = next((r for r in rows if r['state'] == 'present'), None)
         if first:
             # Delivery arms the 10-minute deadline, rather than time waiting in the outbox.
             busy = _change(conn, first, 'called')
@@ -159,11 +156,31 @@ def view(conn, sid, uid):
     current = next((r for r in eligible if r['state'] in ('called', 'serving')), None)
     # A late arrival keeps priority but cannot preempt an existing call/turn.
     ordered = ([current] if current else []) + [r for r in eligible if not current or r['id'] != current['id']]
+    deferred = [r for r in rows if r['state'] not in ('present', 'called', 'serving')]
     rank = next((i for i, r in enumerate(ordered) if own and r['id'] == own['id']), None)
     return dict(id=run['id'], ends_at=run['ends_at'], response_minutes=RESPONSE_SECONDS // 60,
                 current_name=current['full_name'] if current else None,
                 people_ahead=rank, own=dict(own) if own else None,
-                states={r['entry_id']: LABELS.get(r['state'], r['state']) for r in rows})
+                ready_ids=[r['entry_id'] for r in ordered],
+                deferred_ids=[r['entry_id'] for r in deferred],
+                states={r['entry_id']: state_label(r) for r in rows})
+
+
+def state_label(row):
+    label = LABELS.get(row['state'], row['state'])
+    if row['state'] == 'late' and row['deadline'] is not None:
+        from datetime import datetime
+        from queue_bot.services.schedule import UK_TZ
+        label += ' · очікуємо о ' + datetime.fromtimestamp(row['deadline'], UK_TZ).strftime('%H:%M')
+    return label
+
+
+def display_entries(entries, lesson):
+    """Live presentation order; never writes the persistent queue positions."""
+    if not lesson:
+        return list(entries)
+    order = {eid: i for i, eid in enumerate(lesson['ready_ids'] + lesson['deferred_ids'])}
+    return sorted(entries, key=lambda row: (order.get(row['id'], len(order)), row['position']))
 
 
 def respond(conn, uid, token, action, *, minutes=None, now=None):
@@ -206,8 +223,10 @@ def respond(conn, uid, token, action, *, minutes=None, now=None):
             if type(minutes) is not int or not 1 <= minutes <= 240:
                 raise BotError('Вкажіть час запізнення від 1 до 240 хвилин.')
             _event(conn, _change(conn, row, 'late', now + minutes * 60), 'confirmed')
-        elif action in ('absent', 'skip'):
-            _event(conn, _change(conn, row, 'absent' if action == 'absent' else 'skipped'), 'confirmed')
+        elif action in ('absent', 'skip', 'not_ready'):
+            # Keep the old skip callback working, but distinguish an explicit
+            # refusal from a response timeout in every queue view.
+            _event(conn, _change(conn, row, 'absent' if action == 'absent' else 'not_ready'), 'confirmed')
         else:
             raise BotError('Невідома дія.')
         _advance(conn, run, now)

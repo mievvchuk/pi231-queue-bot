@@ -94,7 +94,8 @@ async def open_queue_screen(message: Message, conn, subjects, session_id: int, n
     entries = queues.get_entries(conn, session_id)
     uid = telegram_id if telegram_id is not None else message.from_user.id
     is_adm = admins.is_admin(conn, uid)
-    text = '👤 <b>Режим студента</b>\n\n' + format_queue(subjects, session, entries, uid)
+    from queue_bot.services import attendance
+    text = '👤 <b>Режим студента</b>\n\n' + format_queue(subjects, session, entries, uid, lesson=attendance.view(conn, session_id, uid))
     from queue_bot.handlers.attendance import lesson_summary, show_controls
     text += lesson_summary(conn, session_id, uid)
     if note:
