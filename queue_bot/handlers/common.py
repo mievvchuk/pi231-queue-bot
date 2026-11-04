@@ -131,7 +131,7 @@ def get_admin_reply_menu(is_owner: bool = True) -> ReplyKeyboardMarkup:
 
 def get_admin_more_menu(is_owner: bool = True) -> ReplyKeyboardMarkup:
     rows = [
-        ["🗳 Опитування", "📊 Звіти та статистика"],
+        ["🗳 Опитування"],
     ]
     if is_owner:
         rows.append(["👥 Список групи", "⚙️ Налаштування"])
@@ -147,16 +147,6 @@ def get_admin_polls_menu() -> ReplyKeyboardMarkup:
     return make_reply_keyboard([
         ["➕ Створити опитування", "📡 Активні опитування"],
         ["📦 Історія опитувань", "🔗 Груповий чат ПІ-231"],
-        ["🔙 В адмін-панель"],
-    ])
-
-
-def get_admin_reports_menu() -> ReplyKeyboardMarkup:
-    """Вкладене меню адміна: Звіти, діаграми та аналітика."""
-    return make_reply_keyboard([
-        ["📈 Загальна статистика", "📚 Звіти за предметами"],
-        ["🍩 Діаграма: Типи та статуси", "📊 Діаграма: Предмети"],
-        ["🏆 Діаграма: Топ студентів", "📥 Завантажити звіт (PDF)"],
         ["🔙 В адмін-панель"],
     ])
 

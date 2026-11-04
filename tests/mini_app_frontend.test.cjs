@@ -360,6 +360,15 @@ test("Liquid lens prevents a synthetic click from navigating twice after pointer
 });
 
 const allNodes = node => node instanceof Element ? [node,...node.children.flatMap(allNodes)] : [];
+
+for (const design of [false, true]) test('admin menus do not expose removed statistics or reports, design='+design, () => {
+  const {app}=setup(design);
+  app.S.mode='admin';
+  app.S.data.me.is_admin=true;
+  app.S.data.me.is_owner=true;
+  const page=app.adminPage();
+  assert.doesNotMatch(page.textContent,/Звіти|Статистика|діаграми/);
+});
 test('four-tab navigation keeps secondary features reachable through More', () => {
   const {app}=setup();
   const nav=app.bottomnav();

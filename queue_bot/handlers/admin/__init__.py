@@ -3,7 +3,7 @@ from .common import F, Router, StateFilter
 from .states import AdminPanelState, AdminUserState, AdminSubjectsState, AdminOrderState, AdminManageState
 from .guards import AdminOnly, _is_admin_filter, admin_state_filter
 from .presentation import get_open_session, get_admin_queue_menu, get_admin_student_menu, open_admin_queue_manager, open_admin_student_list, open_admin_student_manager, format_user_card, show_users_page
-from .panels import admin_quick_manage_from_student_view, admin_switch_to_student_queue_view, admin_panel_open, admin_more_panel, admin_category_queues, admin_category_students
+from .panels import admin_quick_manage_from_student_view, admin_switch_to_student_queue_view, admin_panel_open, admin_more_panel, admin_reports_removed, admin_category_queues, admin_category_students
 from .subjects import admin_view_subjects_menu, admin_add_teacher_start, admin_add_teacher_subject_picked, admin_add_teacher_name_received, admin_add_new_subject_start, admin_add_new_subject_name_received, admin_add_new_subject_teacher_received, admin_rename_subject_start, admin_rename_subject_picked, admin_rename_subject_name_received, admin_remove_teacher_start, admin_remove_teacher_subject_picked, admin_remove_teacher_confirmed, admin_delete_subject_start, admin_delete_subject_picked, admin_delete_subject_confirmed
 from .schedule import admin_category_schedule, admin_add_replacement_photo_hint, admin_export_schedule_action, admin_upload_schedule_action, admin_clear_replacements_action, admin_status_action, admin_working_saturday_btn, render_working_saturday_panel, admin_set_working_saturday_day, admin_pick_working_saturday_day, admin_parity_working_saturday, admin_set_parity_working_saturday, admin_cancel_working_saturday, admin_view_working_saturday_schedule, admin_other_working_saturdays, admin_goto_working_saturday, admin_back_working_saturday, admin_broadcast_working_saturday_prompt, admin_broadcast_working_saturday_send
 from .users import admin_category_users
@@ -11,7 +11,6 @@ from .users import admin_list_users_start, admin_paginate_users, admin_open_user
 from .settings import admin_category_settings
 from .settings import admin_back_to_main_panel, admins_menu, list_admins_message, ask_admin_id, receive_admin_id, choose_admin_to_remove, confirm_remove_admin_text, cancel_remove_admin, start_broadcast_flow, preview_broadcast_message, perform_broadcast, start_maintenance_prompt, process_maintenance_time_entry, disable_maintenance
 from .queues import admin_pick_active_queues, admin_paginate_active_queues, admin_pick_add_student, admin_paginate_add_student_queues, admin_pick_order_queue, admin_paginate_order_queues, admin_pick_close_queue, admin_paginate_close_queues, admin_selected_queue_view, admin_selected_queue_add_student, admin_selected_queue_order, admin_selected_queue_close, admin_click_add_students, receive_student_names, toggle_signup_in_manager, start_managing_students, admin_paginate_students, select_student_from_list, back_to_students_list, back_to_queue_manager_from_any, student_move_up, student_move_down, student_ask_number, student_receive_number, student_ask_rename, student_receive_rename, student_toggle_block, student_mark_passed_by_admin, student_remove_by_admin, ask_finish_queue, confirm_finish_archive, confirm_finish_new, history_list, admin_paginate_history, history_details_view
-from .reports import admin_category_reports, admin_global_statistics_view, admin_chart_donut_status, admin_chart_subjects_columns, admin_chart_top_students, admin_export_global_pdf, admin_pick_report_subject, admin_paginate_report_subjects, admin_generate_subject_report
 
 router = Router()
 router.callback_query.filter(_is_admin_filter)
@@ -83,15 +82,10 @@ router.message(F.text.in_({'🔢 Змінити порядок', '✅ Позна
 router.message(AdminPanelState.select_queue_for_order, F.text.in_({'⬅️', '➡️'}))(admin_paginate_order_queues)
 router.message(F.text.in_({'🔒 Відкрити/закрити', '🔒 Відкрити/закрити запис'}), StateFilter('*'))(admin_pick_close_queue)
 router.message(AdminPanelState.select_queue_for_close, F.text.in_({'⬅️', '➡️'}))(admin_paginate_close_queues)
-router.message(F.text.in_({'📊 Звіти та статистика', '📊 Звіти', '📊 Звіти та таблиці'}), StateFilter('*'))(admin_category_reports)
-router.message(F.text == '📈 Загальна статистика', StateFilter('*'))(admin_global_statistics_view)
-router.message(F.text == '🍩 Діаграма: Типи та статуси', StateFilter('*'))(admin_chart_donut_status)
-router.message(F.text == '📊 Діаграма: Предмети', StateFilter('*'))(admin_chart_subjects_columns)
-router.message(F.text == '🏆 Діаграма: Топ студентів', StateFilter('*'))(admin_chart_top_students)
-router.message(F.text.in_({'📥 Завантажити звіт (PDF)', '📥 Експорт зведеної таблиці (CSV)'}), StateFilter('*'))(admin_export_global_pdf)
-router.message(F.text.in_({'📚 Звіти за предметами', '📊 Звіти за предметами', '📊 Інший предмет'}), StateFilter('*'))(admin_pick_report_subject)
-router.message(AdminPanelState.select_subject_for_report, F.text.in_({'⬅️', '➡️'}))(admin_paginate_report_subjects)
-router.message(AdminPanelState.select_subject_for_report, F.text.startswith('📊'))(admin_generate_subject_report)
+router.message(F.text.in_({'📊 Звіти та статистика', '📊 Звіти', '📊 Звіти та таблиці', '📈 Загальна статистика',
+    '🍩 Діаграма: Типи та статуси', '📊 Діаграма: Предмети', '🏆 Діаграма: Топ студентів',
+    '📥 Завантажити звіт (PDF)', '📥 Експорт зведеної таблиці (CSV)', '📚 Звіти за предметами',
+    '📊 Звіти за предметами', '📊 Інший предмет'}), StateFilter('*'))(admin_reports_removed)
 router.message(AdminPanelState.select_queue_for_view, F.text.startswith('📋 '))(admin_selected_queue_view)
 router.message(AdminPanelState.select_queue_for_add_student, F.text.startswith('📋 '))(admin_selected_queue_add_student)
 router.message(AdminPanelState.select_queue_for_order, F.text.startswith('📋 '))(admin_selected_queue_order)
@@ -122,6 +116,10 @@ router.message(AdminManageState.history_view, F.text.startswith('📦 №'))(his
 router.message(F.text.in_({'⛔ Заблоковані', '⛔ Заблоковані користувачі'}), StateFilter('*'))(show_blocked_list)
 router.message(F.text.startswith('🟢 Розблокувати: '), StateFilter('*'))(unblock_student_click)
 router.message(F.text == '👥 Адміністратори', StateFilter('*'))(admins_menu)
+router.message(F.text == '🔙 До адміністраторів', StateFilter('*'))(admins_menu)
+router.message(AdminManageState.viewing_admins, F.text == '🔙 Назад')(admins_menu)
+router.message(F.text == '🔙 До налаштувань', StateFilter('*'))(admin_category_settings)
+router.message(AdminManageState.in_admins_menu, F.text == '🔙 Назад')(admin_category_settings)
 router.message(F.text == '📋 Список адміністраторів', StateFilter('*'))(list_admins_message)
 router.message(F.text == '➕ Додати адміністратора', StateFilter('*'))(ask_admin_id)
 router.message(AdminManageState.add_admin_id, F.text)(receive_admin_id)

@@ -1,10 +1,7 @@
 """Administrative Mini App adapters. Services remain the source of truth."""
-import asyncio
 import base64
 import binascii
-import csv
 import html
-import io
 import json
 import os
 import re
@@ -14,7 +11,7 @@ from datetime import date, datetime
 from aiohttp import web
 
 from queue_bot import config
-from queue_bot.services import admins, bugs, maintenance, polls, queues, recognition, replacements, reports, restrictions, schedule, subjects, users, working_days
+from queue_bot.services import admins, bugs, maintenance, polls, queues, recognition, replacements, restrictions, schedule, subjects, users, working_days
 from queue_bot.services.errors import BotError
 from queue_bot.storage.database import transaction
 
@@ -122,6 +119,8 @@ async def manage(request):
     owner = section in ('owner', 'admins', 'bugs', 'proposals')
     ctx, conn, uid = checked(request, owner)
     catalog = ctx['subjects']
+    if section == 'reports':
+        return web.json_response({'error':'Розділ звітів і статистики прибрано.'}, status=410)
     if request.method == 'GET':
         if section == 'subjects':
             return response({'subjects': catalog})
@@ -162,45 +161,6 @@ async def manage(request):
                                      'archive_at': working_days.saturday_archive_time(r['date']).isoformat()} for r in rows]
             return response({'items': project(active), 'archived': project(archived),
                              'server_time': working_days.now_in_kyiv().isoformat()})
-        if section == 'reports':
-            sid = None
-            if 'subject_id' in request.query:
-                try:
-                    sid = api.integer(int(request.query['subject_id']))
-                except ValueError:
-                    raise BotError('Некоректний предмет.')
-                if not subjects.find_subject(catalog, sid):
-                    raise BotError('Предмет не знайдено.')
-            if request.query.get('format') == 'pdf':
-                if sid is not None:
-                    snapshot = queues.get_subject_report(conn, sid)
-                    subject = subjects.find_subject(catalog, sid)
-                    raw = await asyncio.to_thread(reports.subject_report_pdf, snapshot, subject)
-                else:
-                    snapshot = queues.get_global_statistics(conn, catalog)
-                    raw = await asyncio.to_thread(reports.global_report_pdf, snapshot, catalog)
-                api.revalidate(request)
-                filename = f'pi231-subject-{sid}.pdf' if sid is not None else 'pi231-report.pdf'
-                return web.Response(body=raw, content_type='application/pdf',
-                                    headers={'Content-Disposition': f'attachment; filename="{filename}"',
-                                             'Cache-Control': 'no-store'})
-            if request.query.get('format') == 'csv':
-                if sid is not None:
-                    report = queues.get_subject_report(conn, sid)
-                    stream = io.StringIO(newline='')
-                    writer = csv.writer(stream, delimiter=';', lineterminator='\r\n')
-                    writer.writerow(["Прізвище та ім'я", 'Здано робіт', 'Спроб (не здав)', 'Місце в поточній черзі', 'Дати здач'])
-                    for student in report['students']:
-                        writer.writerow([student['name'], student['passed_count'], student['not_passed_count'], student['current_position'] or '-', ', '.join(student['dates']) or '-'])
-                    raw = stream.getvalue().encode('utf-8-sig')
-                else:
-                    raw = queues.export_global_statistics_csv(conn, catalog)
-                return web.Response(body=raw, content_type='text/csv',
-                                    headers={'Content-Disposition': 'attachment; filename="statistics.csv"'})
-            data = {'statistics': queues.get_global_statistics(conn, catalog), 'subjects': catalog}
-            if sid is not None:
-                data['subject_report'] = queues.get_subject_report(conn, sid)
-            return response(data)
         if section == 'owner':
             return response({'maintenance': maintenance.is_maintenance_active(conn), 'end_time': maintenance.get_maintenance_end_time(conn),
                              'admins': admins.list_admins(conn), 'group_chat_id': polls.get_group_chat_id(conn)})

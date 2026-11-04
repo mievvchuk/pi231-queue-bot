@@ -117,6 +117,21 @@ async def back_from_admin_queue(message, state, conn):
     await state.update_data(ui_mode='admin')
 
 
+@router.message(F.text == '🔙 Назад', StateFilter(None))
+async def recover_back_without_state(message, state, conn, subjects):
+    data = await state.get_data()
+    if data.get('session_id'):
+        if data.get('ui_mode') == 'admin':
+            await switch_admin(message, state, conn, subjects)
+        else:
+            from queue_bot.handlers.student import back_to_current_queue
+            await back_to_current_queue(message, state, conn, subjects)
+    elif admins.is_admin(conn, message.from_user.id) and data.get('ui_mode') != 'student':
+        await admin_home(message, state, conn)
+    else:
+        await student_home(message, state, conn)
+
+
 @router.message(AdminNavigation.queue, F.text == '🔄 Оновити')
 async def refresh_admin_queue(message, state, conn, subjects):
     await switch_admin(message, state, conn, subjects)

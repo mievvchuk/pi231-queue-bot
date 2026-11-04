@@ -71,7 +71,7 @@ async def admin_panel_open(message: Message, state: FSMContext, conn=None):
         "",
         "<b>Черги та студенти</b> — записи, порядок і результати здачі.",
         "<b>Розклад і заміни</b> — пари та зміни розкладу.",
-        "<b>Ще для адміна</b> — опитування, звіти, список групи та перехід у режим студента.",
+        "<b>Ще для адміна</b> — опитування, список групи та перехід у режим студента.",
     ])
     if owner_flag:
         info_lines.append("Налаштування власника також доступні в «Ще для адміна».")
@@ -87,8 +87,14 @@ async def admin_more_panel(message: Message, state: FSMContext, conn):
     await state.clear()
     await state.set_state(AdminPanelState.in_main_menu)
     await state.update_data(ui_mode='admin')
-    await message.answer('Ще для адміна\nОпитування, звіти, список групи та інші можливості.',
+    await message.answer('Ще для адміна\nОпитування, список групи та інші можливості.',
                          reply_markup=get_admin_more_menu(is_owner=admins.is_owner(conn, message.from_user.id)))
+
+
+async def admin_reports_removed(message: Message, state: FSMContext, conn):
+    admins.require_admin(conn, message.from_user.id)
+    await message.answer('Розділ звітів і статистики прибрано. Оберіть дію в меню адміністратора.')
+    await admin_more_panel(message, state, conn)
 
 
 

@@ -54,6 +54,8 @@ class AdminOrderState(StatesGroup):
 
 
 class AdminManageState(StatesGroup):
+    in_admins_menu = State()
+    viewing_admins = State()
     add_admin_id = State()
     select_admin_to_remove = State()
     history_view = State()

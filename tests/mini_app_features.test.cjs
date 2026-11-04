@@ -245,52 +245,9 @@ test("access failures replace protected content with the global fatal state", as
     throw error;
   });
   S.mode = "admin";
-  await features.open("admin-reports");
+  await features.open("admin-history");
   assert.equal(S.fatal, "Доступ відкликано");
   assert.ok(renders() >= 2);
-});
-
-test("reports draw real totals and bars without raw implementation field labels", async () => {
-  const { features, S } = setup(async () => ({
-    subjects: [],
-    statistics: {
-      registered_users: 21,
-      lessons_count: 3,
-      consults_count: 1,
-      cw_count: 0,
-      total_passed: 8,
-      total_active: 2,
-      total_left: 1,
-      total_removed: 0,
-      subjects: [{ name: "Предмет А", passed: 8 }],
-      top_students: [{ name: "Студент А", passed: 5 }],
-    },
-  }));
-  S.mode = "admin";
-  await features.open("admin-reports");
-  const page = features.page("admin-reports");
-  assert.match(page.textContent, /Типи черг/);
-  assert.match(page.textContent, /75%/);
-  assert.doesNotMatch(
-    page.textContent,
-    /lessons_count|total_passed|undefined|NaN/,
-  );
-  assert.ok(
-    descendants(page).some((node) =>
-      node.attrs.style?.includes("conic-gradient"),
-    ),
-  );
-  descendants(page)
-    .find((node) => node.attrs["data-report-view"] === "subjects")
-    .events.click();
-  assert.match(page.textContent, /Предмет А/);
-  assert.ok(
-    descendants(page).some((node) => node.attrs.style?.includes("height:100%")),
-  );
-  descendants(page)
-    .find((node) => node.attrs["data-report-view"] === "students")
-    .events.click();
-  assert.match(page.textContent, /Студент А/);
 });
 
 test("anonymous poll results never show voter names but public polls may", async () => {
@@ -327,28 +284,6 @@ test("anonymous poll results never show voter names but public polls may", async
     descendants(panels[1]).find((node) => node.tag === "meter").attrs.value,
     100,
   );
-});
-
-test("missing or invalid report numbers have an empty chart instead of invalid CSS", async () => {
-  const { features, S } = setup(async () => ({
-    subjects: [],
-    statistics: {
-      lessons_count: NaN,
-      consults_count: -3,
-      cw_count: "4",
-      registered_users: Infinity,
-      subjects: [{ name: "Без здач", passed: undefined }],
-    },
-  }));
-  S.mode = "admin";
-  await features.open("admin-reports");
-  const page = features.page("admin-reports");
-  assert.match(page.textContent, /Немає даних для діаграми/);
-  assert.doesNotMatch(page.textContent, /NaN|Infinity|undefined/);
-  descendants(page)
-    .find((node) => node.attrs["data-report-view"] === "subjects")
-    .events.click();
-  assert.match(page.textContent, /Поки немає зданих робіт/);
 });
 
 test("successful feature retry clears a previous global fatal error", async () => {
@@ -413,44 +348,24 @@ test("schedule JSON import previews text safely and requires separate confirmati
   );
 });
 
-test("PDF download follows the selected subject and screenshot opens an authenticated helper", async () => {
-  const downloads = [],
-    images = [];
-  const { features, S } = setup(
-    async (path) =>
-      path.startsWith("/admin/manage/reports")
-        ? {
-            subjects: [{ id: 5, name: "Предмет" }],
-            subject_report: { students: [] },
-          }
-        : {
-            items: [
-              { id: 8, text: "Помилка", has_photo: true, status: "pending" },
-            ],
-          },
-    {
-      download: async (...args) => downloads.push(args),
-      openImage: async (path) => images.push(path),
-    },
-  );
-  S.mode = "admin";
-  await features.open("admin-reports", false, "?subject_id=5");
-  const report = features.page("admin-reports");
-  const csv = descendants(report).find(
-    (node) => node.tag === "button" && node.textContent.includes("PDF"),
-  );
-  assert.match(csv.textContent, /предмета/);
-  await csv.events.click();
-  assert.match(downloads[0][0], /subject_id=5/);
-  assert.match(downloads[0][0], /format=pdf/);
-  assert.match(downloads[0][1], /\.pdf$/);
-  await features.open("admin-bugs");
-  const photo = descendants(features.page("admin-bugs")).find(
-    (node) => node.tag === "button" && node.textContent.includes("скріншот"),
-  );
-  assert.ok(photo);
-  await photo.events.click();
-  assert.deepEqual(images, ["/bugs/8/photo"]);
+test("bug screenshots still open the authenticated image helper", async () => {
+  const images=[];
+  const {features,S}=setup(async()=>({items:[{id:8,text:'Помилка',has_photo:true,status:'pending'}]}),
+    {openImage:async path=>images.push(path)});
+  S.mode='admin';
+  await features.open('admin-bugs');
+  const photo=descendants(features.page('admin-bugs')).find(node=>node.tag==='button'&&node.textContent.includes('скріншот'));
+  assert.ok(photo);await photo.events.click();
+  assert.deepEqual(images,['/bugs/8/photo']);
+});
+
+test("removed reports cannot open or issue API requests", async()=>{
+  const requests=[];
+  const {features,S}=setup(async path=>{requests.push(path);return {};});
+  S.mode='admin';
+  await features.open('admin-reports');
+  assert.deepEqual(requests,[]);
+  assert.notEqual(S.feature,'admin-reports');
 });
 
 test("schedule import rejects oversized files before reading or uploading", async () => {
@@ -510,7 +425,6 @@ test("every feature page action has a real click handler or a submitted form", a
     "admin-replacements",
     "admin-saturdays",
     "admin-polls",
-    "admin-reports",
     "owner",
     "admin-admins",
     "admin-bugs",

@@ -21,7 +21,6 @@ from queue_bot.handlers.common import (
     get_admin_polls_menu,
     get_admin_queues_menu,
     get_admin_reply_menu,
-    get_admin_reports_menu,
     get_admin_schedule_menu,
     get_admin_settings_menu,
     get_admin_students_menu,
