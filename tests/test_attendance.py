@@ -168,9 +168,7 @@ async def test_partial_pass_keeps_turn_until_finish_then_remaining_moves_to_tail
     sid, _ = lesson
     entry = queues.get_entries(conn, sid)[0]
     with pytest.raises(BotError, match='дочекайтеся'):
-        queues.record_own_passed_labs(conn, 1, sid, 1, entry_id=entry['id'], expected_count=2)
-    with pytest.raises(BotError):
-        queues.finish_own_entry(conn, 1, sid, True)
+        a.require_turn(conn, queues.get_entry(conn, entry['id']))
     answer(conn, sid, 1, 'present')
     await deliver(AsyncMock(), conn, [])
     answer(conn, sid, 1, 'ready')
@@ -307,3 +305,34 @@ def test_restarting_lesson_during_turn_does_not_reuse_old_turn_or_button(conn, l
     answer(conn, sid, 1, 'ready')
     queues.finish_own_entry(conn, 1, sid, passed=False)
     assert queues.get_user_position(conn, 1, sid) == 4
+
+
+@pytest.mark.parametrize('state', ['pending', 'present', 'late', 'absent', 'not_ready', 'skipped'])
+def test_actual_out_of_order_results_do_not_take_over_current_turn(conn, lesson, state):
+    sid, _ = lesson
+    answer(conn, sid, 1, 'present')
+    answer(conn, sid, 1, 'ready')
+    if state == 'skipped':
+        a.correct(conn, 100, own(conn, sid, 2)['entry_id'], 'skipped')
+    elif state != 'pending':
+        action = {'not_ready':'skip'}.get(state, state)
+        answer(conn, sid, 2, action, **({'minutes':25} if state == 'late' else {}))
+    assert own(conn, sid, 2)['state'] == state
+    current = dict(own(conn, sid, 1))
+    entry = queues.get_entries(conn, sid)[1]
+    with pytest.raises(BotError):
+        queues.record_own_passed_lab_numbers(conn, 3, sid, [1], entry_id=entry['id'], expected_revision=entry['entry_revision'])
+    remaining = queues.record_own_passed_lab_numbers(conn, 2, sid, [1], entry_id=entry['id'], expected_revision=entry['entry_revision'])
+    assert remaining == [2]
+    assert queues.get_user_position(conn, 2, sid) == 2
+    assert dict(own(conn, sid, 1)) == current
+    with pytest.raises(BotError):
+        queues.record_own_passed_lab_numbers(conn, 2, sid, [1], entry_id=entry['id'], expected_revision=entry['entry_revision'])
+    queues.finish_own_entry(conn, 2, sid, passed=False)
+    assert queues.get_user_position(conn, 2, sid) == 4
+    assert dict(own(conn, sid, 1)) == current
+    updated = queues.get_entry(conn, entry['id'])
+    assert updated['passed_labs'] == '[1]' and updated['selected_labs'] == '[2]'
+    assert queues.record_own_passed_lab_numbers(conn, 2, sid, [2], entry_id=entry['id'], expected_revision=updated['entry_revision']) == []
+    assert queues.get_entry(conn, entry['id'])['status'] == 'completed'
+    assert dict(own(conn, sid, 1)) == current
