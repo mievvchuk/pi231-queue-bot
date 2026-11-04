@@ -1512,6 +1512,25 @@ window.createPI231Features = function (H) {
       }catch(err){restore();toast(err.message,true);}
       finally{box.disabled=false;}
     };
+    // Spreadsheet-style keys: arrows jump between grade cells, Enter saves.
+    const moveFocus=e=>{
+      const box=e.target;
+      if(e.key==='Enter'){e.preventDefault?.();return box.blur();}
+      const atStart=box.selectionStart===0&&box.selectionEnd===0, atEnd=box.selectionStart===box.value.length;
+      const whole=box.selectionStart===0&&box.selectionEnd===box.value.length;
+      const cell=box.closest('td'), row=cell?.parentElement;
+      if(!row)return;
+      const inputOf=td=>td?.querySelector('.journal-input');
+      let next=null;
+      if(e.key==='ArrowLeft'&&(atStart||whole)){for(let td=cell.previousElementSibling;td&&!next;td=td.previousElementSibling)next=inputOf(td);}
+      else if(e.key==='ArrowRight'&&(atEnd||whole)){for(let td=cell.nextElementSibling;td&&!next;td=td.nextElementSibling)next=inputOf(td);}
+      else if(e.key==='ArrowUp'||e.key==='ArrowDown'){
+        const step=e.key==='ArrowUp'?'previousElementSibling':'nextElementSibling';
+        for(let tr=row[step];tr&&!next;tr=tr[step])next=inputOf(tr.children[cell.cellIndex]);
+      }else return;
+      if(!next)return;
+      e.preventDefault?.();next.focus();
+    };
     const groupsFor=subject=>{
       const labs=rows(subject.labs).length?subject.labs:[{number:1,parts:1}];
       const groups=labs.map(l=>({kind:'lab',number:l.number,parts:l.parts,title:l.title||'ЛР '+l.number,optional_last:l.optional_last,attestation:l.attestation}));
@@ -1546,7 +1565,7 @@ window.createPI231Features = function (H) {
           const cls='journal-cell'+(record?'':' cell-empty');
           if(editable)return el('td',{},el('span',{class:cls},
             el('input',{class:'journal-input'+tone(record?.grade),'data-cell':[student.id,subject.key,column.kind,column.number,column.part].join(':'),type:'text',inputmode:'decimal',autocomplete:'off',maxlength:4,value:record?.grade??'','aria-label':(data.group?student.name+', ':'')+column.title+', оцінка '+column.part,
-              onchange:e=>saveInline(student,subject,column,record,e.target),onkeydown:e=>{if(e.key==='Enter')e.target.blur();}})));
+              onchange:e=>saveInline(student,subject,column,record,e.target),onfocus:e=>e.target.select?.(),onkeydown:moveFocus})));
           return el('td',{},el('span',{class:cls},record?grade(record.grade):el('span',{'aria-label':'Оцінки ще немає'},'—')));
         }))));
         return el('section',{class:'journal-subject'},el('h2',{},subject.name),
