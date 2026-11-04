@@ -921,7 +921,7 @@
       otherActions = el('div',{class:'action-stack'}),
       dock = el('div',{class:'queue-dock'});
     if (own) {
-      if (!q.lesson || q.lesson.own?.state === 'serving') dock.append(
+      dock.append(
         btn(
           [icon('check'), q.labs.length
             ? "Здав" + (own.labs?.length > 1 ? " лабораторні" : "")
@@ -1055,7 +1055,7 @@
       }
       controls.append(summary);
     }
-    if (own && q.labs.length && (!q.lesson || q.lesson.own?.state === 'serving'))
+    if (own && q.labs.length)
       otherActions.append(btn('Завершити підхід з рештою робіт',()=>confirmSheet(
         'Завершити підхід?', 'Решта робіт збережеться, а ви перейдете в кінець черги.',
         ()=>mutate('/queues/'+q.id+'/finish-turn',reference(own))),'button secondary'));
