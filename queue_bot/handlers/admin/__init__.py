@@ -3,7 +3,7 @@ from .common import F, Router, StateFilter
 from .states import AdminPanelState, AdminUserState, AdminSubjectsState, AdminOrderState, AdminManageState
 from .guards import AdminOnly, _is_admin_filter, admin_state_filter
 from .presentation import get_open_session, get_admin_queue_menu, get_admin_student_menu, open_admin_queue_manager, open_admin_student_list, open_admin_student_manager, format_user_card, show_users_page
-from .panels import admin_quick_manage_from_student_view, admin_switch_to_student_queue_view, admin_panel_open, admin_category_queues, admin_category_students
+from .panels import admin_quick_manage_from_student_view, admin_switch_to_student_queue_view, admin_panel_open, admin_more_panel, admin_category_queues, admin_category_students
 from .subjects import admin_view_subjects_menu, admin_add_teacher_start, admin_add_teacher_subject_picked, admin_add_teacher_name_received, admin_add_new_subject_start, admin_add_new_subject_name_received, admin_add_new_subject_teacher_received, admin_rename_subject_start, admin_rename_subject_picked, admin_rename_subject_name_received, admin_remove_teacher_start, admin_remove_teacher_subject_picked, admin_remove_teacher_confirmed, admin_delete_subject_start, admin_delete_subject_picked, admin_delete_subject_confirmed
 from .schedule import admin_category_schedule, admin_add_replacement_photo_hint, admin_export_schedule_action, admin_upload_schedule_action, admin_clear_replacements_action, admin_status_action, admin_working_saturday_btn, render_working_saturday_panel, admin_set_working_saturday_day, admin_pick_working_saturday_day, admin_parity_working_saturday, admin_set_parity_working_saturday, admin_cancel_working_saturday, admin_view_working_saturday_schedule, admin_other_working_saturdays, admin_goto_working_saturday, admin_back_working_saturday, admin_broadcast_working_saturday_prompt, admin_broadcast_working_saturday_send
 from .users import admin_category_users
@@ -22,6 +22,7 @@ router.message.middleware(AdminOnly())
 router.message(F.text == '⚡ Керувати чергою (Адмін)', StateFilter('*'))(admin_quick_manage_from_student_view)
 router.message(F.text == '👤 Як студент (Моє місце)', StateFilter('*'))(admin_switch_to_student_queue_view)
 router.message(F.text.in_({'⚡ Адмін-панель', '🔙 В адмін-панель'}), StateFilter('*'))(admin_panel_open)
+router.message(F.text == 'Ще для адміна', StateFilter('*'))(admin_more_panel)
 router.message(F.text.in_({'📋 Черги та студенти', '📋 Черги', '🎓 Студенти в чергах', '👥 Студенти', '🔙 Назад до черг'}), StateFilter('*'))(admin_category_queues)
 router.message(F.text.in_({'📚 Предмети та викладачі', '📚 Предмети', '🔙 До предметів'}), StateFilter('*'))(admin_view_subjects_menu)
 router.message(F.text == '👨\u200d🏫 Додати викладача', StateFilter('*'))(admin_add_teacher_start)
