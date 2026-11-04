@@ -12,15 +12,16 @@ window.createPI231Design = function (H) {
   const initials = name => (name||'ПІ').split(' ').filter(Boolean).map(x=>x[0]).slice(0,2).join('');
   const subjectIcon = name => /машин/i.test(name)?'cpu':/інтернет/i.test(name)?'globe2':/курсов/i.test(name)?'mortarboard':/людин|людон/i.test(name)?'person-workspace':'code-slash';
   const avatar = (name,cls='avatar-button') => btn(avatarFace('me',initials(name)),()=>navigate('profile'),cls);
-  const studentNav = [['home','Головна','house-door'],['queues','Черги','people'],['schedule','Розклад','calendar3'],['swaps','Обміни','arrow-left-right'],['polls','Опитування','bar-chart'],['help','Допомога','question-circle'],['profile','Профіль','person']];
+  const studentNav = [['home','Головна','house-door'],['queues','Черги','people'],['schedule','Розклад','calendar3'],['journal','Електронний журнал','journal-bookmark'],['swaps','Обміни','arrow-left-right'],['polls','Опитування','bar-chart'],['help','Допомога','question-circle'],['profile','Профіль','person']];
   const adminNav = [['admin','Огляд','grid','Робота'],['admin-history','Черги','people','Робота'],['admin-group','Студенти','person-lines-fill','Робота'],['admin-subjects','Предмети й викладачі','journal-bookmark','Навчання'],['admin-replacements','Розклад і заміни','calendar2-week','Навчання'],['admin-saturdays','Робочі суботи','calendar-check','Навчання'],['admin-polls','Опитування','bar-chart','Комунікації'],['admin-announcements','Оголошення','megaphone','Комунікації'],['admin-bugs','Звернення','chat-left-text','Система'],['owner','Налаштування','gear','Система']];
+  adminNav.splice(3,0,['journal','Електронний журнал','journal-bookmark','Навчання']);
   const go = key => {
     closeMenu();
     if(S.busy)return;
     if(key==='admin-announcements')return openFeature('owner');
     if(key==='appearance') return appearance();
     if(key==='swaps') return navigate('swaps');
-    if(key.startsWith('admin-') || key==='owner') return openFeature(key);
+    if(key==='journal' || key.startsWith('admin-') || key==='owner') return openFeature(key);
     navigate(key);
   };
   function switchMode() {
@@ -52,7 +53,7 @@ window.createPI231Design = function (H) {
         nav,
         el('div',{class:'sidebar-profile'},el('span',{class:'mini-avatar'},avatarFace('me',initials(S.data.me.name))),el('div',{},el('strong',{},S.data.me.name),el('small',{},admin?'Адміністратор':'Студент')),el('button',{type:'button','aria-label':'Оформлення',onclick:appearance},glyph('palette'))));
       const mobile=el('nav',{class:'bottom-nav','aria-label':'Основні розділи'});
-      const tabs=admin?adminNav.slice(0,3):studentNav.slice(0,3).concat([studentNav[6]]);
+      const tabs=admin?adminNav.slice(0,3):studentNav.slice(0,3).concat([studentNav.find(n=>n[0]==='profile')]);
       tabs.forEach(([key,label,name])=>mobile.append(el('button',{type:'button','data-page':key,onclick:()=>go(key)},glyph(name),el('span',{},label))));
       mobile.append(el('button',{type:'button','aria-label':'Усі розділи',onclick:openMenu},glyph('grid'),el('span',{},'Ще')));
       shell=el('div',{class:'make-navigation'},aside,mobile);

@@ -10,6 +10,27 @@ from queue_bot.services import admins, queues, restrictions, users
 from queue_bot.services import swap_requests
 
 
+def test_postgres_grid_imports_v1_grades_and_keeps_independent_components(pg_conn):
+    from queue_bot.services import journal
+    conn=pg_conn
+    key='конструюванняпрограмногозабезпечення'
+    subjects=[{'id':5,'name':'Конструювання програмного забезпечення','teachers':[]}]
+    uid=users.get_user(conn,1)['id']
+    old=conn.execute('''INSERT INTO journal_records(user_id,period,subject_key,subject_name,kind,number,grade,status)
+        VALUES (?,'2026-2027:1',?,'Конструювання програмного забезпечення','lab',1,4,'approved')''',(uid,key)).lastrowid
+    conn.execute("INSERT INTO journal_events(record_id,actor_id,action,snapshot) VALUES (?,100,'approved','{}')",(old,))
+    conn._init_schema()
+    values={'period':'2026-2027:1','subject_key':key,'kind':'lab','number':1,'grade':5}
+    journal.submit(conn,1,subjects,{**values,'record_id':old,'revision':0})
+    second=journal.submit(conn,1,subjects,{**values,'part':2,'grade':2})
+    journal.review(conn,100,{'record_id':second,'revision':0,'status':'approved'})
+    conn._init_schema()
+    rows=journal.view(conn,1,subjects,period='2026-2027:1')['records']
+    assert [(r['part'],r['grade'],r['status']) for r in rows] == [(1,5,'pending'),(2,2,'approved')]
+    assert conn.execute('SELECT COUNT(*) FROM journal_cell_events').fetchone()[0] == 4
+    assert conn.execute('SELECT grade FROM journal_records WHERE id=?',(old,)).fetchone()[0] == 4
+
+
 def test_postgres_free_slots_retirement_and_journal_survive_schema_restart(pg_conn):
     from queue_bot.services import journal
     conn = pg_conn
@@ -29,7 +50,7 @@ def test_postgres_free_slots_retirement_and_journal_survive_schema_restart(pg_co
     assert users.get_user(conn,1) is None
     assert queues.get_entries(conn,sid)[13]['user_id'] is None
     assert queues.get_history(conn,sid)[0]['status'] == 'left'
-    assert conn.execute('SELECT COUNT(*) FROM journal_events').fetchone()[0] == 4
+    assert conn.execute('SELECT COUNT(*) FROM journal_cell_events').fetchone()[0] == 4
     users.register_user(conn,1,'Петренко Іван')
     data = journal.view(conn,1,subjects,period='2026-2027:1')
     assert data['records'][0]['status'] == 'approved'

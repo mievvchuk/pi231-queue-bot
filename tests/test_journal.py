@@ -15,9 +15,10 @@ def test_sqlite_additive_migration_preserves_existing_users(tmp_path):
     from queue_bot.storage import database
     path = str(tmp_path / 'legacy.db')
     old = sqlite3.connect(path)
-    for migration in database.MIGRATIONS[:-2]:
+    cutoff = next(i for i,s in enumerate(database.MIGRATIONS) if 'ALTER TABLE users ADD COLUMN deleted_at' in s)
+    for migration in database.MIGRATIONS[:cutoff]:
         old.executescript(migration)
-    old.execute(f'PRAGMA user_version = {len(database.MIGRATIONS)-2}')
+    old.execute(f'PRAGMA user_version = {cutoff}')
     old.execute("INSERT INTO users(telegram_id,full_name) VALUES (1,'Петренко Іван')")
     old.commit()
     old.close()
@@ -42,7 +43,7 @@ async def test_journal_student_submission_review_edit_resets_approval_and_audit(
     assert (await client.post(url,headers=headers(1),json=payload())).status == 200
     data = await (await client.get(url+'?period=2026-2027:1',headers=headers(1))).json()
     row = data['records'][0]
-    assert row['grade'] == 5 and row['status'] == 'pending' and 'user_id' not in row
+    assert row['grade'] == 5 and row['status'] == 'pending' and row['can_edit'] is True
     review = {'action':'review','record_id':row['id'],'revision':0,'status':'approved'}
     assert (await client.post(url+'?mode=admin',headers=headers(100),json=review)).status == 200
     assert (await client.post(url+'?mode=admin',headers=headers(100),json=review)).status == 400
@@ -52,7 +53,7 @@ async def test_journal_student_submission_review_edit_resets_approval_and_audit(
     assert (await client.post(url,headers=headers(1),json=edited)).status == 200
     latest = journal.view(conn,1,SUBJECTS,period='2026-2027:1')['records'][0]
     assert latest['status'] == 'pending' and latest['revision'] == 2
-    assert conn.execute('SELECT COUNT(*) FROM journal_events').fetchone()[0] == 3
+    assert conn.execute('SELECT COUNT(*) FROM journal_cell_events').fetchone()[0] == 3
 
 
 @pytest.mark.asyncio
@@ -62,7 +63,9 @@ async def test_journal_privacy_forged_identity_and_admin_mode(client, conn):
     row = journal.view(conn,1,SUBJECTS,period='2026-2027:1')['records'][0]
     url = '/api/miniapp/journal'
     own = await (await client.get(url+'?period=2026-2027:1',headers=headers(2))).json()
-    assert own['records'] == [] and own['students'] == []
+    assert len(own['records']) == 1 and len(own['students']) == 3
+    assert own['records'][0]['can_edit'] is False
+    assert 'note' not in own['records'][0] and 'review_note' not in own['records'][0]
     assert (await client.get(url+'?scope=group',headers=headers(1))).status == 403
     assert (await client.get(url+'?scope=group',headers=headers(100))).status == 403
     assert (await client.post(url,headers=headers(1),json=payload(user_id=target))).status == 403
@@ -79,7 +82,7 @@ def test_journal_rejects_invalid_grades_without_writes(conn, make_user, grade):
     make_user(1,'Петренко Іван')
     with pytest.raises(BotError):
         journal.submit(conn,1,SUBJECTS,payload(grade=grade))
-    assert conn.execute('SELECT COUNT(*) FROM journal_records').fetchone()[0] == 0
+    assert conn.execute('SELECT COUNT(*) FROM journal_cells').fetchone()[0] == 0
 
 
 def test_rejection_requires_reason_duplicate_and_stale_edits_are_safe(conn, make_user):
@@ -93,7 +96,7 @@ def test_rejection_requires_reason_duplicate_and_stale_edits_are_safe(conn, make
     journal.review(conn,100,{**data,'note':'Уточни номер лабораторної'})
     with pytest.raises(BotError):
         journal.submit(conn,1,SUBJECTS,payload(record_id=rid,revision=0,grade=2))
-    journal.submit(conn,1,SUBJECTS,payload(record_id=rid,revision=1,grade=2,number=2))
+    journal.submit(conn,1,SUBJECTS,payload(record_id=rid,revision=1,grade=2,number=2,kind='attestation'))
     updated = journal.view(conn,1,SUBJECTS,period='2026-2027:1')['records'][0]
     assert updated['status'] == 'pending' and updated['number'] == 2
 
@@ -140,7 +143,7 @@ def test_removed_user_disappears_but_retains_queue_and_journal_history(conn, mak
     assert users.get_user(conn,1) is None and users.get_user_by_id(conn,uid) is None
     assert users.list_users(conn) == []
     assert [dict(r) for r in queues.get_history(conn,sid)] == history
-    assert conn.execute('SELECT user_id FROM journal_records WHERE id = ?', (rid,)).fetchone()[0] == uid
+    assert conn.execute('SELECT user_id FROM journal_cells WHERE id = ?', (rid,)).fetchone()[0] == uid
     with pytest.raises(BotError):
         queues.join_queue(conn,1,sid,position=14)
     restored = users.register_user(conn,1,'Петренко Іван')

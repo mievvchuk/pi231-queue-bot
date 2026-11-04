@@ -223,6 +223,8 @@ MIGRATIONS.append('ALTER TABLE lesson_attendance ADD COLUMN turn_due BIGINT;')
 MIGRATIONS.append('ALTER TABLE users ADD COLUMN deleted_at TEXT;')
 from queue_bot.storage.journal_schema import JOURNAL_SCHEMA
 MIGRATIONS.append(JOURNAL_SCHEMA)
+from queue_bot.storage.journal_grid_schema import GRID_SCHEMA, GRID_COPY
+MIGRATIONS.append(GRID_SCHEMA + GRID_COPY)
 
 PG_SCHEMA = BROWSER_SESSIONS_SCHEMA + """
 CREATE TABLE IF NOT EXISTS working_saturdays (
@@ -375,6 +377,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS ux_pending_swap_pair ON swap_requests(session_
 
 PG_SCHEMA += LESSON_SCHEMA.replace('INTEGER PRIMARY KEY AUTOINCREMENT', 'SERIAL PRIMARY KEY')
 PG_SCHEMA += JOURNAL_SCHEMA.replace('INTEGER PRIMARY KEY AUTOINCREMENT', 'SERIAL PRIMARY KEY')
+PG_SCHEMA += GRID_SCHEMA + GRID_COPY
 
 
 class PGRow(dict):
