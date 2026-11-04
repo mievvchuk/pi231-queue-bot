@@ -561,7 +561,7 @@
       await load();
     } catch (error) {
       toast(error.message, true);
-      if (error.status === 401 || error.status === 403) {
+      if ([401, 403, 409].includes(error.status) || error.status === 400 && /застар|змінив|оновіть|не записані/i.test(error.message)) {
         closeSheet();
         await load();
       }
@@ -921,7 +921,8 @@
       otherActions = el('div',{class:'action-stack'}),
       dock = el('div',{class:'queue-dock'});
     if (own) {
-      if (!q.lesson || q.lesson.own?.state === 'serving') dock.append(
+      const resultActions = !q.lesson || q.lesson.own?.state === 'serving' ? dock : otherActions;
+      resultActions.append(
         btn(
           [icon('check'), q.labs.length
             ? "Здав" + (own.labs?.length > 1 ? " лабораторні" : "")
@@ -934,21 +935,8 @@
         ),
       );
       if (q.labs.length)
-        controls.append(
-          btn([icon('code-slash'),"Лабораторні та час"], () => labForm(q, own), "button secondary"),
-        );
-      if (!consultation(q) && (!q.lesson || q.lesson.own?.state === 'serving'))
         otherActions.append(
-          btn(
-            [icon('refresh'),"Не здав — у кінець"],
-            () =>
-              confirmSheet(
-                "Перейти в кінець черги?",
-                "Вибрані лабораторні збережуться.",
-                () => mutate("/queues/" + q.id + "/not-passed", reference(own)),
-              ),
-            "button secondary",
-          ),
+          btn([icon('code-slash'),"Лабораторні та час"], () => labForm(q, own), "button secondary"),
         );
       otherActions.append(
         el(
@@ -974,11 +962,11 @@
           ),
         ),
       );
-      controls.append(btn([icon('swap'),'Обмін місцями'],()=>{
+      otherActions.append(btn([icon('swap'),'Обмін місцями'],()=>{
         const panel=sheet('Обмін місцями','Натисни на учасника у списку, щоб запропонувати обмін. На відповідь є 10 хвилин.');
         panel.append(btn('Обрати учасника',()=>{closeSheet();document.querySelector('.entry-list')?.scrollIntoView({behavior:'smooth',block:'start'});},'button primary'));
       },'button secondary'));
-      dock.append(
+      otherActions.append(
         btn(
           [icon('close'),"Вийти з черги"],
           () =>
@@ -1007,6 +995,7 @@
       const summary = el('section', {class:'card action-stack'},
         el('strong',{},'Здача на парі активна'),
         small('На підтвердження присутності та виклику — 10 хвилин.'),
+        q.lesson.collecting ? small('Збираємо присутність до '+new Date(q.lesson.check_in_until*1000).toLocaleTimeString('uk-UA',{timeZone:'Europe/Kyiv',hour:'2-digit',minute:'2-digit'})+' або до відповіді всіх. Перший виклик — за порядком черги.') : null,
         small('Присутніх викликаємо за збереженою чергою. «Не готовий» одразу пропускає до наступного.'),
         small('До '+new Date(q.lesson.ends_at*1000).toLocaleTimeString('uk-UA',{hour:'2-digit',minute:'2-digit'})),
         q.lesson.current_name ? small('Викликано / зараз здає: '+q.lesson.current_name) : small('Очікуємо готових студентів.'),
@@ -1028,23 +1017,17 @@
           else if(ownState.turn_due===0) summary.append(small(ownState.deadline
             ? 'Підтвердьте завершення або продовжіть час до '+clock(ownState.deadline)
             : 'Ваш час минув. Завершили чи ще здаєте? На відповідь після повідомлення — 10 хвилин.'));
-          summary.append(btn('Ще здаю',()=>durationForm('extend'),'button secondary'),
-            btn('Я вже завершив',()=>{
-              if(!q.labs.length) return mutate('/queues/'+q.id+'/complete',reference(own));
-              const panel=sheet('Завершення підходу','Позначте фактично здані роботи або завершіть із незданими. Автоматично нічого не зараховується.');
-              panel.append(btn('Позначити здані роботи',()=>{
-                if(own.labs?.length>1) completionForm(q,own);
-                else mutate('/queues/'+q.id+'/complete',reference(own));
-              },'button primary'),btn('Завершити з незданими роботами',()=>mutate('/queues/'+q.id+'/finish-turn',reference(own)),'button secondary'));
-            },'button primary'));
+          otherActions.append(btn('Ще здаю — додати час',()=>durationForm('extend'),'button secondary'));
         }
         if (ownState.state === 'called') summary.append(
           btn('Готовий здавати',()=>own.planned_minutes?answer('ready'):durationForm('ready'),'button primary'),
           btn('Не готовий, пропустити мене',()=>answer('skip'),'button secondary'));
-        else if (ownState.state !== 'serving') summary.append(
+        else if (ownState.state !== 'serving') {
+          summary.append(
           ownState.state === 'present'
             ? btn('Поки не готовий, пропустити мене',()=>answer('skip'),'button secondary')
-            : btn(['not_ready','skipped'].includes(ownState.state)?'Вже готовий, повернути до виклику':'Я вже на місці',()=>answer('present'),'button primary'),
+            : btn(['not_ready','skipped'].includes(ownState.state)?'Вже готовий, повернути до виклику':'Я вже на місці',()=>answer('present'),'button primary'));
+          (ownState.state === 'pending' ? summary : otherActions).append(
           btn('Запізнююсь',()=>{
             const panel=sheet('Запізнююсь','Через скільки хвилин будете? Місце зберігається, інші поки можуть здавати.');
             const minutes=el('input',{type:'number',min:1,max:240,step:1,value:10,required:true,'aria-label':'Хвилин до приходу'});
@@ -1052,11 +1035,12 @@
             form.addEventListener('submit',event=>{event.preventDefault();answer('late',Number(minutes.value));});panel.append(form);
           },'button secondary'),
           btn('На цій парі не буду',()=>answer('absent'),'button secondary'));
+        }
       }
       controls.append(summary);
     }
-    if (own && q.labs.length && (!q.lesson || q.lesson.own?.state === 'serving'))
-      otherActions.append(btn('Завершити підхід з рештою робіт',()=>confirmSheet(
+    if (own && q.labs.length)
+      (!q.lesson || q.lesson.own?.state === 'serving' ? dock : otherActions).append(btn('Завершити підхід з рештою робіт',()=>confirmSheet(
         'Завершити підхід?', 'Решта робіт збережеться, а ви перейдете в кінець черги.',
         ()=>mutate('/queues/'+q.id+'/finish-turn',reference(own))),'button secondary'));
     if (isAdmin()) {
@@ -1145,7 +1129,8 @@
       );
       return heading ? [heading, entry] : [entry];
     });
-    if(design) return design.queuePage(q,own,entries,controls,dock,otherActions);
+    const extra = el('details',{class:'queue-extra'},el('summary',{},'Інші дії'),otherActions);
+    if(design) return design.queuePage(q,own,entries,controls,dock,extra);
     return el(
       "main",
       {class:'queue-detail'+(isAdmin()?' admin-detail':'')},
@@ -1196,7 +1181,7 @@
           )
         : null,
       controls,
-      own ? el('div',{class:'queue-secondary-actions'},otherActions) : null,
+      own ? el('div',{class:'queue-secondary-actions'},extra) : null,
       dock,
       own && !isAdmin() && q.count > 1
         ? el(

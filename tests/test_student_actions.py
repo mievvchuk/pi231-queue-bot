@@ -206,7 +206,7 @@ def test_consultation_queue_support(conn, make_user):
 
 
 def test_ready_to_swap_toggle_and_format(conn, filled):
-    from queue_bot.handlers.common import format_entry, get_queue_actions_reply_menu
+    from queue_bot.handlers.common import format_entry, get_queue_actions_reply_menu, get_queue_swap_reply_menu
 
     # Початковий стан — False
     assert not queues.is_ready_to_swap(conn, 1, filled)
@@ -224,7 +224,7 @@ def test_ready_to_swap_toggle_and_format(conn, filled):
     assert "🔄 [готовий до обміну]" in formatted
 
     # Кнопки в меню Дії
-    menu_ready = get_queue_actions_reply_menu(is_in_queue=True, swap_wish=None)
+    menu_ready = get_queue_swap_reply_menu()
     flat_btns_ready = [btn.text for row in menu_ready.keyboard for btn in row]
     assert "⬆️ Хочу вище" in flat_btns_ready
     assert "⬇️ Хочу нижче" in flat_btns_ready
@@ -236,7 +236,7 @@ def test_ready_to_swap_toggle_and_format(conn, filled):
 
 
 def test_swap_wish_higher_and_lower(conn, filled):
-    from queue_bot.handlers.common import format_entry, get_queue_actions_reply_menu
+    from queue_bot.handlers.common import format_entry, get_queue_actions_reply_menu, get_queue_swap_reply_menu
 
     # 1. Встановлення "higher"
     assert queues.get_swap_wish(conn, 2, filled) is None
@@ -251,7 +251,7 @@ def test_swap_wish_higher_and_lower(conn, filled):
     assert "⬆️ [хочу вище]" in format_entry(e2)
 
     # Меню дій: має бути кнопка для скасування
-    menu = get_queue_actions_reply_menu(is_in_queue=True, swap_wish="higher")
+    menu = get_queue_swap_reply_menu("higher")
     flat_btns = [btn.text for row in menu.keyboard for btn in row]
     assert "⏸ Зняти «Хочу вище»" in flat_btns
     assert "⬇️ Хочу нижче" in flat_btns
@@ -264,7 +264,7 @@ def test_swap_wish_higher_and_lower(conn, filled):
     e2 = next(e for e in entries if e["telegram_id"] == 2)
     assert "⬇️ [хочу нижче]" in format_entry(e2)
 
-    menu_lower = get_queue_actions_reply_menu(is_in_queue=True, swap_wish="lower")
+    menu_lower = get_queue_swap_reply_menu("lower")
     flat_btns_l = [btn.text for row in menu_lower.keyboard for btn in row]
     assert "⬆️ Хочу вище" in flat_btns_l
     assert "⏸ Зняти «Хочу нижче»" in flat_btns_l

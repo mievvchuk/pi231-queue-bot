@@ -86,7 +86,9 @@ def _advance(conn, run, now):
                 continue
             if row['deadline'] is not None and row['deadline'] <= now:
                 entry = queues.get_entry(conn, row['entry_id'])
-                _move_to_tail(conn, entry)
+                # Silence is not proof that an approach was used. Release only
+                # attendance; keep priority and every recorded lab result.
+                conn.execute('UPDATE queue_entries SET entry_revision = entry_revision + 1 WHERE id = ?', (entry['id'],))
                 timed_out = _change(conn, row, 'skipped')
                 _event(conn, timed_out, 'turn_timeout')
                 continue
@@ -98,7 +100,8 @@ def _advance(conn, run, now):
             _event(conn, _change(conn, row, 'pending'), 'reminder')
     rows = members(conn, run['id'])
     busy = next((r for r in rows if r['state'] in ('called', 'serving')), None)
-    if busy is None:
+    collecting = _collecting(conn, run, rows, now)
+    if busy is None and not collecting:
         # Only confirmed students participate in the current calling order.
         # Original positions decide priority; unavailable students never block it.
         first = next((r for r in rows if r['state'] == 'present'), None)
@@ -106,6 +109,9 @@ def _advance(conn, run, now):
             # Delivery arms the 10-minute deadline, rather than time waiting in the outbox.
             busy = _change(conn, first, 'called')
             _event(conn, busy, 'call')
+    if busy:
+        conn.execute("INSERT INTO bot_state(key, value) VALUES (?, 'done') ON CONFLICT(key) DO NOTHING",
+                     (f'lesson_checkin:{run["id"]}',))
     eligible = [r for r in members(conn, run['id']) if r['state'] in ('present', 'called', 'serving')]
     if busy:
         eligible = [r for r in eligible if r['id'] == busy['id']] + [r for r in eligible if r['id'] != busy['id']]
@@ -114,6 +120,16 @@ def _advance(conn, run, now):
         if not third['warned']:
             _event(conn, third, 'warning')
             conn.execute('UPDATE lesson_attendance SET warned = 1 WHERE id = ?', (third['id'],))
+
+
+def _collecting(conn, run, rows, now):
+    """Collect the first roll call before selecting a student by priority."""
+    if now >= run['started_at'] + RESPONSE_SECONDS or not any(r['state'] == 'pending' for r in rows):
+        return False
+    if conn.execute('SELECT key FROM bot_state WHERE key = ?', (f'lesson_checkin:{run["id"]}',)).fetchone():
+        return False
+    return not conn.execute("""SELECT m.id FROM lesson_messages m JOIN lesson_attendance a
+        ON a.id = m.attendance_id WHERE a.run_id = ? AND m.kind = 'call' LIMIT 1""", (run['id'],)).fetchone()
 
 
 def start(conn, actor, sid, *, minutes=90, now=None):
@@ -159,6 +175,8 @@ def view(conn, sid, uid):
     deferred = [r for r in rows if r['state'] not in ('present', 'called', 'serving')]
     rank = next((i for i, r in enumerate(ordered) if own and r['id'] == own['id']), None)
     return dict(id=run['id'], ends_at=run['ends_at'], response_minutes=RESPONSE_SECONDS // 60,
+                collecting=_collecting(conn, run, rows, now_seconds()),
+                check_in_until=run['started_at'] + RESPONSE_SECONDS,
                 current_name=current['full_name'] if current else None,
                 people_ahead=rank, own=dict(own) if own else None,
                 ready_ids=[r['entry_id'] for r in ordered],
@@ -242,6 +260,20 @@ def require_turn(conn, entry):
             raise BotError('Спочатку дочекайтеся виклику й підтвердьте готовність здавати.')
         if row['deadline'] is not None and row['deadline'] <= now_seconds():
             raise BotError('Час на відповідь після нагадування минув. Оновіть чергу.')
+
+
+def require_completion(conn, entry):
+    """Allow reporting real results outside a call without claiming a turn.
+
+    An expired serving turn still needs a refresh before submitting, so an old
+    confirmation cannot race the timeout which changes the entry revision.
+    """
+    run = active_run(conn, entry['session_id'])
+    if run:
+        row = conn.execute('SELECT state FROM lesson_attendance WHERE run_id = ? AND entry_id = ? AND user_id = ?',
+                           (run['id'], entry['id'], entry['user_id'])).fetchone()
+        if row and row['state'] == 'serving':
+            require_turn(conn, entry)
 
 
 def end_turn(conn, entry):

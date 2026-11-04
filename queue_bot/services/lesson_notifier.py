@@ -13,20 +13,21 @@ from queue_bot.storage.database import transaction
 log = logging.getLogger(__name__)
 
 
-def keyboard(row):
+def keyboard(row, *, session_id=None):
     token, state = row['token'], row['state']
     def button(text, action):
-        return InlineKeyboardButton(text=text, callback_data=f'att:{token}:{action}')
+        prefix = f'qa:{session_id}' if session_id is not None else 'att'
+        return InlineKeyboardButton(text=text, callback_data=f'{prefix}:{token}:{action}')
     if state == 'serving':
-        rows = [[button('Я вже завершив', 'review')], [button('Ще здаю', 'extend')]]
+        rows = [[button('Позначити здані роботи', 'done')], [button('Завершити підхід', 'review')]]
     elif state == 'called':
         rows = [[button('Готовий здавати', 'ready')], [button('Не готовий, пропустити мене', 'skip')]]
     elif state in ('not_ready', 'skipped'):
-        rows = [[button('Вже готовий, повернути до виклику', 'present')],
-                [button('Запізнююсь', 'late')], [button('На цій парі не буду', 'absent')]]
+        rows = [[button('Вже готовий, повернути до виклику', 'present')]]
     elif state == 'present':
-        rows = [[button('Поки не готовий, пропустити мене', 'skip')],
-                [button('Запізнююсь', 'late')], [button('На цій парі не буду', 'absent')]]
+        rows = [[button('Поки не готовий, пропустити мене', 'skip')]]
+    elif state == 'late':
+        rows = [[button('Я вже на місці', 'present')], [button('Уточнити запізнення', 'late')]]
     else:
         rows = [[button('Я вже на місці', 'present')],
                 [button('Запізнююсь', 'late')], [button('На цій парі не буду', 'absent')]]
@@ -42,9 +43,9 @@ def late_keyboard(token):
 
 def message_content(row, kind, title):
     if kind == 'finish_reminder':
-        return f'{title}\nЧас вашого підходу минув. Ви вже завершили чи ще здаєте? Якщо потрібно більше часу, вкажіть скільки. На відповідь є 10 хвилин. Без відповіді підхід завершиться, а нездані роботи перейдуть у кінець. Здачу автоматично не зараховуємо.'
+        return f'{title}\nЧас вашого підходу минув. Ви вже завершили чи ще здаєте? Якщо потрібно більше часу, вкажіть скільки. На відповідь є 10 хвилин. Без відповіді тимчасово пропустимо вас зі збереженням місця та робіт. Здачу автоматично не зараховуємо.'
     if kind == 'turn_timeout':
-        return f'{title}\nПісля нагадування минуло 10 хвилин без відповіді. Підхід звільнено, запис із незданими роботами перенесено в кінець. Жодної роботи автоматично не зараховано. Щоб знову здавати на цій парі, підтвердьте присутність.'
+        return f'{title}\nПісля нагадування минуло 10 хвилин без відповіді. Вас тимчасово пропущено. Місце та нездані роботи збережено. Жодної роботи автоматично не зараховано. Щоб повернутися до виклику, натисніть «Вже готовий».'
     if kind == 'turn_extended':
         return f'{title}\nДодатковий час підтверджено. Бот нагадає про завершення після вказаного вами часу.'
     if kind == 'warning':
@@ -92,7 +93,7 @@ async def deliver(bot, conn, subjects, *, now=None):
             if not row['telegram_id'] or row['telegram_id'] < 0:
                 raise ValueError('У студента ще немає Telegram-профілю')
             await bot.send_message(row['telegram_id'], message_content(row, event['kind'], title),
-                                   reply_markup=None if event['kind'] == 'warning' else keyboard(row))
+                                   reply_markup=None if event['kind'] == 'warning' else keyboard(row, session_id=row['session_id']))
         except TelegramRetryAfter as exc:
             conn.execute('UPDATE lesson_messages SET retry_at = ? WHERE id = ?', (now + int(exc.retry_after) + 1, event['id']))
             continue

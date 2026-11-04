@@ -68,14 +68,10 @@ def get_schedule_reply_menu() -> ReplyKeyboardMarkup:
 def get_queue_view_reply_menu(is_admin: bool = False, can_edit_labs: bool = False) -> ReplyKeyboardMarkup:
     """Основні кнопки екрану перегляду черги (для старости/адміна додається швидкий перехід до керування чергою)."""
     rows = [
-        ["📍 Моє місце", "⚙️ Дії"],
-        ["🔄 Оновити", "🔙 До черг"],
+        ["🔙 До черг", '🏠 Головне меню'],
     ]
-    if can_edit_labs:
-        rows.insert(1, ['🧪 Обрати лабораторні', '⏱ Час здачі'])
     if is_admin:
         rows.append(["⚡ Режим адміна"])
-    rows.append(['🏠 Головне меню'])
     return make_reply_keyboard(rows)
 
 
@@ -90,24 +86,14 @@ def get_queue_actions_reply_menu(
 ) -> ReplyKeyboardMarkup:
     """Меню «Дії» залежно від статусу запису студента."""
     if is_in_queue:
-        if swap_wish == "higher":
-            btn_higher = "⏸ Зняти «Хочу вище»"
-            btn_lower = "⬇️ Хочу нижче"
-        elif swap_wish == "lower":
-            btn_higher = "⬆️ Хочу вище"
-            btn_lower = "⏸ Зняти «Хочу нижче»"
-        else:
-            btn_higher = "⬆️ Хочу вище"
-            btn_lower = "⬇️ Хочу нижче"
-
         rows = [
-            ['✅ Завершити консультацію'] if consultation else ["✅ Здав", "❌ Не здав"],
-            ["🔁 Обмінятися місцями"],
-            [btn_higher, btn_lower],
+            ['✅ Завершити консультацію'] if consultation else ["✅ Здав", "Завершити підхід"],
+            ['Присутність на парі'],
+            ["🔁 Обмін і пріоритет"],
             ["🚪 Покинути чергу", "🔙 Назад до черги"],
         ]
         if labs_available:
-            rows.insert(1, ['🧪 Обрати лабораторні', '⏱ Час здачі'])
+            rows.insert(1, ['🧪 Роботи та час'])
         return make_reply_keyboard(rows)
     if is_open:
         if can_pick_number:
@@ -120,6 +106,14 @@ def get_queue_actions_reply_menu(
             ["🔙 Назад до черги"],
         ])
     return make_reply_keyboard([["🔙 Назад до черги"]])
+
+
+def get_queue_swap_reply_menu(wish=None):
+    return make_reply_keyboard([
+        ['🔁 Обмінятися місцями'],
+        ['⏸ Зняти «Хочу вище»' if wish == 'higher' else '⬆️ Хочу вище',
+         '⏸ Зняти «Хочу нижче»' if wish == 'lower' else '⬇️ Хочу нижче'],
+        ['🔙 Назад до черги']])
 
 
 def get_admin_reply_menu(is_owner: bool = True) -> ReplyKeyboardMarkup:
