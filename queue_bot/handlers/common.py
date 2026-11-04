@@ -23,7 +23,6 @@ from queue_bot.services.subjects import find_subject, find_teacher
 
 log = logging.getLogger(__name__)
 
-STATUS_TEXT = {"open": "постійна черга", "closed": "постійна черга", "archived": "архів"}
 
 
 def make_keyboard(rows: list[list[tuple[str, str]]]) -> InlineKeyboardMarkup:
@@ -425,16 +424,16 @@ def format_category_queues_overview(
             _, teacher = session_names(subjects, s)
             entries = queues.get_entries(conn, s["id"])
             count = len(entries)
-            st_text = "постійна черга" if s["status"] != "archived" else "архів"
-            lines.append(f"• 👨‍🏫 <b>{html.escape(teacher)}</b> — {st_text} (у черзі: <b>{count}</b>)")
+            status_suffix = " · архів" if s["status"] == "archived" else ""
+            lines.append(f"• 👨‍🏫 <b>{html.escape(teacher)}</b> — у черзі: <b>{count}</b>{status_suffix}")
         lines.append("\nОберіть керівника на кнопках внизу 👇")
     else:
         for s in sessions:
             sub, teacher = session_names(subjects, s)
             entries = queues.get_entries(conn, s["id"])
             count = len(entries)
-            st_text = "постійна черга" if s["status"] != "archived" else "архів"
-            lines.append(f"• <b>{html.escape(sub)}</b>\n  👨‍🏫 {html.escape(teacher)} — {st_text} (у черзі: <b>{count}</b>)")
+            status_suffix = " · архів" if s["status"] == "archived" else ""
+            lines.append(f"• <b>{html.escape(sub)}</b>\n  👨‍🏫 {html.escape(teacher)} — у черзі: <b>{count}</b>{status_suffix}")
         lines.append("\nОберіть чергу на кнопках внизу 👇")
 
     return "\n".join(lines)
@@ -462,8 +461,8 @@ def format_queues_overview(conn, sessions: list, subjects: list[dict], title: st
             sub, teacher = session_names(subjects, s)
             entries = queues.get_entries(conn, s["id"])
             count = len(entries)
-            st_text = "постійна черга" if s["status"] != "archived" else "архів"
-            lines.append(f"• <b>{html.escape(sub)}</b>\n  👨‍🏫 {html.escape(teacher)} — {st_text} (у черзі: <b>{count}</b>)")
+            status_suffix = " · архів" if s["status"] == "archived" else ""
+            lines.append(f"• <b>{html.escape(sub)}</b>\n  👨‍🏫 {html.escape(teacher)} — у черзі: <b>{count}</b>{status_suffix}")
         lines.append("")
 
     if consultations:
@@ -472,8 +471,8 @@ def format_queues_overview(conn, sessions: list, subjects: list[dict], title: st
             sub, teacher = session_names(subjects, s)
             entries = queues.get_entries(conn, s["id"])
             count = len(entries)
-            st_text = "постійна черга" if s["status"] != "archived" else "архів"
-            lines.append(f"• <b>{html.escape(sub)}</b>\n  👨‍🏫 {html.escape(teacher)} — {st_text} (у черзі: <b>{count}</b>)")
+            status_suffix = " · архів" if s["status"] == "archived" else ""
+            lines.append(f"• <b>{html.escape(sub)}</b>\n  👨‍🏫 {html.escape(teacher)} — у черзі: <b>{count}</b>{status_suffix}")
         lines.append("")
 
     lines.append("Оберіть чергу на кнопках внизу 👇")
@@ -491,12 +490,12 @@ def format_my_queues_overview(conn, sessions: list, subjects: list[dict], telegr
         my_pos = queues.get_user_position(conn, telegram_id, s["id"])
         entries = queues.get_entries(conn, s["id"])
         total = len(entries)
-        st_text = "постійна черга" if s["status"] != "archived" else "архів"
+        status_suffix = " · архів" if s["status"] == "archived" else ""
         q_type = s["queue_type"] if "queue_type" in s.keys() else "lesson"
         type_badge = " [Консультація]" if q_type == "consultation" else ""
         lines.append(
             f"• <b>{html.escape(sub)}</b>{type_badge}\n"
-            f"  👨‍🏫 {html.escape(teacher)} — 📍 Ваше місце: <b>{my_pos}</b> з {total} ({st_text})"
+            f"  👨‍🏫 {html.escape(teacher)} — 📍 Ваше місце: <b>{my_pos}</b> з {total}{status_suffix}"
         )
     lines.append("\nОберіть чергу на кнопках внизу 👇")
     return "\n".join(lines)
@@ -608,14 +607,13 @@ def format_queue(subjects: list[dict], session, entries, my_telegram_id: int | N
     lines.append("")
 
     status = session["status"] if "status" in session.keys() else ""
-    if status in ('open', 'closed'):
-        lines.append('🟢 <b>Постійна черга · запис доступний завжди</b>')
-    elif status == "archived":
+    if status == "archived":
         lines.append("📦 <b>Архів</b>")
-    else:
+    elif status not in ("open", "closed"):
         lines.append(f"Статус: {status}")
 
-    lines.append("")
+    if status not in ("open", "closed"):
+        lines.append("")
     from queue_bot.services.attendance import display_entries
     if lesson:
         lines.append('Номери — збережені місця. Порядок виклику — зверху вниз серед присутніх.')
