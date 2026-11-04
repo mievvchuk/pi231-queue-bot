@@ -42,36 +42,20 @@ def lesson_summary(conn, sid, uid):
     return '\n'.join(lines)
 
 
-@router.message(F.text == 'Почати здачу на парі')
-async def begin_lesson(message, state, conn):
+@router.message(F.text.in_({'Почати здачу на парі', 'Зупинити здачу на парі'}))
+async def automatic_lesson_notice(message, state, conn, subjects):
     require_admin(conn, message.from_user.id)
+    await message.answer('Здача запускається автоматично через 5 хвилин після початку пари та зупиняється за розкладом. Черга і результати зберігаються.')
+    from queue_bot.handlers.admin.presentation import open_admin_queue_manager
     sid = (await state.get_data()).get('session_id')
-    if not sid:
-        raise BotError('Спочатку відкрийте потрібну чергу.')
-    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-    await message.answer('Оберіть тривалість здачі на цій парі. Після її завершення автоматичні виклики зупиняться. На обидві відповіді даємо 10 хвилин.',
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
-            InlineKeyboardButton(text=f'{n} хв', callback_data=f'lesson:{sid}:{n}') for n in (40, 80, 90)]]))
+    if sid and queues.get_session(conn, sid):
+        await open_admin_queue_manager(message, conn, subjects, sid, state=state)
 
 
 @router.callback_query(F.data.startswith('lesson:'))
-async def start_lesson(callback, conn, subjects):
-    try:
-        _, sid, minutes = callback.data.split(':')
-        attendance.start(conn, callback.from_user.id, int(sid), minutes=int(minutes))
-    except (ValueError, BotError) as exc:
-        await callback.answer(str(exc), show_alert=True)
-        return
-    await callback.answer('Здачу запущено')
-    await deliver(callback.bot, conn, subjects)
-    await callback.message.answer('Здачу запущено. Порядок збережено, студентам надіслано запит присутності. На відповідь — 10 хвилин.')
-
-
-@router.message(F.text == 'Зупинити здачу на парі')
-async def stop_lesson(message, state, conn):
-    sid = (await state.get_data()).get('session_id')
-    attendance.stop(conn, message.from_user.id, sid)
-    await message.answer('Здачу на цій парі зупинено. Місця збережено.')
+async def automatic_lesson_callback(callback, conn):
+    require_admin(conn, callback.from_user.id)
+    await callback.answer('Здача працює автоматично за розкладом. Ця кнопка застаріла.', show_alert=True)
 
 
 def screen_keyboard(conn, sid, uid):

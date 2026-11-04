@@ -366,7 +366,7 @@ for(const design of [false,true]) test('permanent queues have no signup toggles 
   app.S.mode='admin';app.S.data.me.is_admin=true;app.S.data.me.is_owner=true;
   app.S.queue={id:1,subject:'КПЗ',teacher:'Викладач',status:'open',count:0,labs:[],entries:[]};
   const text=app.queuePage().textContent;
-  assert.doesNotMatch(text,/Закрити запис|Відкрити запис|завершення черги|Завершити сесію/);
+  assert.doesNotMatch(text,/Закрити запис|Відкрити запис|завершення черги|Завершити сесію|Почати здачу|Зупинити здачу/);
   assert.match(text,/Постійна черга/);
 });
 

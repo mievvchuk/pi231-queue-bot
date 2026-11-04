@@ -26,7 +26,7 @@ async def admin_quick_manage_from_student_view(message: Message, state: FSMConte
         conn,
         subjects,
         session_id,
-        note="⚡ <b>Режим старости/адміна:</b> тут можна додати студентів за списком, змінити порядок або завершити чергу.", state=state,
+        note="⚡ <b>Режим старости/адміна:</b> тут можна додати студентів за списком, змінити порядок або позначити здані роботи. Здача працює автоматично за розкладом.", state=state,
     )
 
 

@@ -326,13 +326,7 @@ async def admin_queue(request):
     data = await body(request)
     action = data.get('action')
     if action in ('start-lesson', 'stop-lesson'):
-        from queue_bot.services import attendance
-        conn, uid, sid = request[REQ_CONTEXT]['conn'], request[REQ_UID], path_id(request)
-        if action == 'start-lesson':
-            attendance.start(conn, uid, sid, minutes=data.get('minutes', 90))
-        else:
-            attendance.stop(conn, uid, sid)
-        return web.json_response({'message': 'Здачу запущено. На відповіді є 10 хвилин.' if action == 'start-lesson' else 'Здачу зупинено. Пріоритет збережено.'})
+        raise BotError('Здача запускається і зупиняється автоматично за розкладом.')
     if action == 'add_students':
         names_list = data.get('names')
         if not isinstance(names_list, list) or not 1 <= len(names_list) <= 100:

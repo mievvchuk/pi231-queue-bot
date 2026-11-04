@@ -1,14 +1,13 @@
 [
   {
     "message": [
-      "begin_lesson",
-      "stop_lesson",
+      "automatic_lesson_notice",
       "presence_settings",
       "custom_late_time",
       "turn_time"
     ],
     "callback_query": [
-      "start_lesson",
+      "automatic_lesson_callback",
       "queue_action",
       "attendance_answer",
       "attendance_answer",
@@ -255,6 +254,7 @@
       "refresh_coursework_queues_list",
       "back_to_queues_list",
       "select_queue_by_button",
+      "queue_search_text",
       "refresh_current_queue",
       "show_my_place",
       "show_queue_actions",
@@ -299,6 +299,8 @@
       "receive_passed_labs"
     ],
     "callback_query": [
+      "queue_search_page",
+      "queue_search_select",
       "swap_accept",
       "swap_decline",
       "swap_request_from_notification",

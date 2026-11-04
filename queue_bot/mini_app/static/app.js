@@ -1043,13 +1043,6 @@
       (!q.lesson || q.lesson.own?.state === 'serving' ? dock : otherActions).append(btn('Завершити підхід з рештою робіт',()=>confirmSheet(
         'Завершити підхід?', 'Решта робіт збережеться, а ви перейдете в кінець черги.',
         ()=>mutate('/queues/'+q.id+'/finish-turn',reference(own))),'button secondary'));
-    if (isAdmin()) {
-      if (q.lesson) controls.append(btn('Зупинити здачу на парі',()=>mutate('/admin/queues/'+q.id,{action:'stop-lesson'}),'button secondary'));
-      else controls.append(btn('Почати здачу на парі',()=>{
-        const panel=sheet('Почати здачу','Студенти отримають запит присутності. На обидві відповіді — 10 хвилин. Оберіть тривалість пари; після неї виклики зупиняться.');
-        [40,80,90].forEach(minutes=>panel.append(btn(minutes+' хв',()=>mutate('/admin/queues/'+q.id,{action:'start-lesson',minutes}),'button secondary')));
-      },'button primary'));
-    }
     if (isAdmin())
       controls.append(
         btn("Додати студентів", () => addStudentsForm(q), "button secondary"),
