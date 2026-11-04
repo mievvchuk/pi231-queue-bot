@@ -22,7 +22,7 @@ class TurnTime(StatesGroup):
 def lesson_summary(conn, sid, uid):
     data = attendance.view(conn, sid, uid)
     if not data:
-        return '\n\nЗапис і здача почнуться автоматично через 5 хвилин після початку відповідної пари за розкладом.'
+        return '\n\nЗапис доступний завжди. Запит присутності почнеться через 5 хвилин після початку відповідної пари.'
     lines = ['\n\nЗдача на парі активна. На відповіді — 10 хвилин.']
     if data['collecting']:
         from datetime import datetime
@@ -85,7 +85,7 @@ def screen_keyboard(conn, sid, uid):
             rows.extend(keyboard(data['own'], session_id=sid).inline_keyboard)
         elif entry:
             rows.append([InlineKeyboardButton(text='Позначити здані роботи', callback_data=f'queue:{sid}:complete')])
-        elif session['status'] == 'open':
+        elif session['status'] != 'archived':
             rows.append([InlineKeyboardButton(text='Стати в чергу', callback_data=f'queue:{sid}:join')])
     rows.append([InlineKeyboardButton(text='Інші дії', callback_data=f'queue:{sid}:more'),
                  InlineKeyboardButton(text='Оновити', callback_data=f'queue:{sid}:refresh')])
@@ -140,7 +140,7 @@ async def queue_action(callback, state, conn, subjects):
             entry = next((r for r in queues.get_entries(conn, sid) if r['telegram_id'] == uid), None)
             from queue_bot.services import lab_catalog
             await callback.message.answer('Інші дії для цієї черги', reply_markup=get_queue_actions_reply_menu(
-                bool(entry), is_open=session['status'] == 'open',
+                bool(entry), is_open=session['status'] != 'archived',
                 can_pick_number=not queues.are_first_10_occupied(conn, sid) or queues.has_free_slots(conn, sid),
                 swap_wish=entry['swap_wish'] if entry else None,
                 labs_available=bool(lab_catalog.labs_for_session(session)),

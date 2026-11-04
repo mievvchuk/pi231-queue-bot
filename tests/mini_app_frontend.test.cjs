@@ -361,6 +361,15 @@ test("Liquid lens prevents a synthetic click from navigating twice after pointer
 
 const allNodes = node => node instanceof Element ? [node,...node.children.flatMap(allNodes)] : [];
 
+for(const design of [false,true]) test('permanent queues have no signup toggles or whole-queue finish actions, design='+design,()=>{
+  const {app}=setup(design);
+  app.S.mode='admin';app.S.data.me.is_admin=true;app.S.data.me.is_owner=true;
+  app.S.queue={id:1,subject:'КПЗ',teacher:'Викладач',status:'open',count:0,labs:[],entries:[]};
+  const text=app.queuePage().textContent;
+  assert.doesNotMatch(text,/Закрити запис|Відкрити запис|завершення черги|Завершити сесію/);
+  assert.match(text,/Постійна черга/);
+});
+
 for (const design of [false, true]) test('admin menus do not expose removed statistics or reports, design='+design, () => {
   const {app}=setup(design);
   app.S.mode='admin';

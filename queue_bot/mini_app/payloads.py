@@ -25,7 +25,7 @@ def entry_view(row, uid, admin=False):
 def queue_view(conn, subjects, session, uid, *, detail=False, admin=False):
     rows = queues.get_entries(conn, session['id'])
     subject, teacher = names(subjects, session)
-    result = dict(id=session['id'], subject=subject, teacher=teacher, status=session['status'],
+    result = dict(id=session['id'], subject=subject, teacher=teacher, status='archived' if session['status'] == 'archived' else 'open',
                   type=session['queue_type'], title=session['lesson_title'], count=sum(r['user_id'] is not None for r in rows),
                   my_position=queues.get_user_position(conn, uid, session['id']))
     from queue_bot.services import attendance

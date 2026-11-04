@@ -136,8 +136,6 @@ def join_queue(conn: sqlite3.Connection, telegram_id: int, session_id: int,
             raise BotError(f"🛠 Зараз тривають технічні роботи (орієнтовно до {end_t}). Запис до черги закрито.")
 
         session = _require_session(conn, session_id, statuses=("open", "closed"))
-        if session["status"] != "open":
-            raise BotError("Запис до цієї черги закрито.")
         if lab_numbers is not None:
             lab_numbers = lab_catalog.validate_numbers(session, lab_numbers)
             lab_catalog.validate_selection_time(session, lab_numbers, planned_minutes)
@@ -651,6 +649,8 @@ def _insert_session(conn, subject_id: int, teacher_id: int, lesson_title: str, q
     return cursor.lastrowid
 
 
+# Legacy storage compatibility for archived-data imports and historical fixtures.
+# Live Telegram/HTTP routes never expose signup toggles or session finalization.
 def set_signup_open(conn, actor_id: int, session_id: int, is_open: bool) -> None:
     with transaction(conn):
         require_admin(conn, actor_id)

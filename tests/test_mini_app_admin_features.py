@@ -95,9 +95,9 @@ async def test_history_finish_is_json_serializable(admin_client, conn):
     queues.join_queue(conn, 1, sid, lab_numbers=[1], planned_minutes=10)
     entry = queues.get_entries(conn, sid)[0]
     result = await post(admin_client, 'history', {'action': 'finish', 'session_id': sid, 'create_new': True, 'carry': {str(entry['id']): 2}})
-    assert result.status == 200
-    new_id = (await result.json())['session_id']
-    assert queues.get_user_position(conn, 1, new_id) == 2
+    assert result.status == 400
+    new_id = sid
+    assert queues.get_user_position(conn, 1, new_id) == 1
     active_history = await (await admin_client.get(f'/api/miniapp/admin/manage/history?sid={new_id}&mode=admin', headers=headers(100))).json()
     assert len(active_history['entries']) == 1 and active_history['entries'][0]['status'] == 'active'
     assert active_history['entries'][0]['user_id'] == entry['user_id']

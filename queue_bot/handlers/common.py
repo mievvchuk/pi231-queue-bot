@@ -23,7 +23,7 @@ from queue_bot.services.subjects import find_subject, find_teacher
 
 log = logging.getLogger(__name__)
 
-STATUS_TEXT = {"open": "запис відкрито", "closed": "запис закрито", "archived": "архів"}
+STATUS_TEXT = {"open": "постійна черга", "closed": "постійна черга", "archived": "архів"}
 
 
 def make_keyboard(rows: list[list[tuple[str, str]]]) -> InlineKeyboardMarkup:
@@ -43,19 +43,19 @@ def make_reply_keyboard(rows: list[list[str]]) -> ReplyKeyboardMarkup:
 
 def get_reply_menu(conn, telegram_id: int) -> ReplyKeyboardMarkup:
     """Three stable sections; secondary actions live in their own menu."""
-    return make_reply_keyboard([['Черги', '📅 Розклад'], ['Ще']])
+    rows = [['Черги', '📅 Розклад'], ['❓ Допомога', '🐞 Повідомити про баг']]
+    if admins.is_admin(conn, telegram_id):
+        rows.append(['⚡ Режим адміна'])
+    return make_reply_keyboard(rows)
 
 
 def get_student_queues_menu() -> ReplyKeyboardMarkup:
-    return make_reply_keyboard([['👥 Мої черги', '📋 Усі черги'], ['🏠 Головне меню']])
+    return make_reply_keyboard([['👥 Мої черги', '📋 Усі черги'], ['➕ Створити чергу'], ['🏠 Головне меню']])
 
 
 def get_student_more_menu(conn, telegram_id: int) -> ReplyKeyboardMarkup:
-    rows = [['➕ Відкрити чергу'], ['❓ Допомога', '🐞 Повідомити про баг']]
-    if admins.is_admin(conn, telegram_id):
-        rows.append(['⚡ Адмін-панель'])
-    rows.append(['🏠 Головне меню'])
-    return make_reply_keyboard(rows)
+    # Compatibility for old keyboards: all actions now live on the main screen.
+    return get_reply_menu(conn, telegram_id)
 
 
 def get_schedule_reply_menu() -> ReplyKeyboardMarkup:
@@ -122,6 +122,8 @@ def get_admin_reply_menu(is_owner: bool = True) -> ReplyKeyboardMarkup:
     """Daily administration first; secondary tools are grouped separately."""
     return make_reply_keyboard([
         ['📋 Черги та студенти', '📅 Розклад і заміни'],
+        ['❓ Допомога', '🐞 Повідомити про баг'],
+        ['👤 Режим студента'],
         ['Ще для адміна'],
     ])
 
@@ -134,7 +136,6 @@ def get_admin_more_menu(is_owner: bool = True) -> ReplyKeyboardMarkup:
         rows.append(["👥 Список групи", "⚙️ Налаштування"])
     else:
         rows.append(["👥 Список групи"])
-    rows.append(["👤 Режим студента"])
     rows.append(['🔙 В адмін-панель'])
     return make_reply_keyboard(rows)
 
@@ -183,7 +184,7 @@ def get_admin_queues_menu() -> ReplyKeyboardMarkup:
     return make_reply_keyboard([
         ["👀 Активні черги", "➕ Створити чергу"],
         ["📝 Додати студента", "🔢 Змінити порядок"],
-        ["🔒 Відкрити/закрити", "📦 Історія"],
+        ["📦 Історія"],
         ["📚 Предмети та викладачі", "🔙 В адмін-панель"],
     ])
 
@@ -424,7 +425,7 @@ def format_category_queues_overview(
             _, teacher = session_names(subjects, s)
             entries = queues.get_entries(conn, s["id"])
             count = len(entries)
-            st_text = "🟢 відкрито" if s["status"] == "open" else "🔴 закрито"
+            st_text = "постійна черга" if s["status"] != "archived" else "архів"
             lines.append(f"• 👨‍🏫 <b>{html.escape(teacher)}</b> — {st_text} (у черзі: <b>{count}</b>)")
         lines.append("\nОберіть керівника на кнопках внизу 👇")
     else:
@@ -432,7 +433,7 @@ def format_category_queues_overview(
             sub, teacher = session_names(subjects, s)
             entries = queues.get_entries(conn, s["id"])
             count = len(entries)
-            st_text = "🟢 відкрито" if s["status"] == "open" else "🔴 закрито"
+            st_text = "постійна черга" if s["status"] != "archived" else "архів"
             lines.append(f"• <b>{html.escape(sub)}</b>\n  👨‍🏫 {html.escape(teacher)} — {st_text} (у черзі: <b>{count}</b>)")
         lines.append("\nОберіть чергу на кнопках внизу 👇")
 
@@ -461,7 +462,7 @@ def format_queues_overview(conn, sessions: list, subjects: list[dict], title: st
             sub, teacher = session_names(subjects, s)
             entries = queues.get_entries(conn, s["id"])
             count = len(entries)
-            st_text = "🟢 відкрито" if s["status"] == "open" else "🔴 закрито"
+            st_text = "постійна черга" if s["status"] != "archived" else "архів"
             lines.append(f"• <b>{html.escape(sub)}</b>\n  👨‍🏫 {html.escape(teacher)} — {st_text} (у черзі: <b>{count}</b>)")
         lines.append("")
 
@@ -471,7 +472,7 @@ def format_queues_overview(conn, sessions: list, subjects: list[dict], title: st
             sub, teacher = session_names(subjects, s)
             entries = queues.get_entries(conn, s["id"])
             count = len(entries)
-            st_text = "🟢 відкрито" if s["status"] == "open" else "🔴 закрито"
+            st_text = "постійна черга" if s["status"] != "archived" else "архів"
             lines.append(f"• <b>{html.escape(sub)}</b>\n  👨‍🏫 {html.escape(teacher)} — {st_text} (у черзі: <b>{count}</b>)")
         lines.append("")
 
@@ -490,7 +491,7 @@ def format_my_queues_overview(conn, sessions: list, subjects: list[dict], telegr
         my_pos = queues.get_user_position(conn, telegram_id, s["id"])
         entries = queues.get_entries(conn, s["id"])
         total = len(entries)
-        st_text = "🟢 відкрито" if s["status"] == "open" else "🔴 закрито"
+        st_text = "постійна черга" if s["status"] != "archived" else "архів"
         q_type = s["queue_type"] if "queue_type" in s.keys() else "lesson"
         type_badge = " [Консультація]" if q_type == "consultation" else ""
         lines.append(
@@ -607,10 +608,8 @@ def format_queue(subjects: list[dict], session, entries, my_telegram_id: int | N
     lines.append("")
 
     status = session["status"] if "status" in session.keys() else ""
-    if status == "open":
-        lines.append("🟢 <b>Запис відкрито</b>")
-    elif status == "closed":
-        lines.append("🔴 <b>Запис закрито</b>")
+    if status in ('open', 'closed'):
+        lines.append('🟢 <b>Постійна черга · запис доступний завжди</b>')
     elif status == "archived":
         lines.append("📦 <b>Архів</b>")
     else:

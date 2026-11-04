@@ -127,15 +127,15 @@ async def test_compact_admin_menu_keeps_secondary_actions_and_owner_access(conn,
         admins.add_admin(conn, 100, uid)
     await send(app, '⚡ Адмін-панель', uid=uid)
     buttons = lambda: [b.text for row in app[1].call_args[0][0].reply_markup.keyboard for b in row]
-    assert buttons() == ['📋 Черги та студенти', '📅 Розклад і заміни', 'Ще для адміна']
+    assert buttons() == ['📋 Черги та студенти', '📅 Розклад і заміни', '❓ Допомога', '🐞 Повідомити про баг', '👤 Режим студента', 'Ще для адміна']
     await send(app, 'Ще для адміна', uid=uid)
     assert ('⚙️ Налаштування' in buttons()) is owner
     assert '🗳 Опитування' in buttons() and '👥 Список групи' in buttons()
     await send(app, '🔙 В адмін-панель', uid=uid)
-    assert len(buttons()) == 3
+    assert len(buttons()) == 6
     await send(app, 'Ще для адміна', uid=uid)
     await send(app, '👤 Режим студента', uid=uid)
-    assert buttons() == ['Черги', '📅 Розклад', 'Ще']
+    assert buttons() == ['Черги', '📅 Розклад', '❓ Допомога', '🐞 Повідомити про баг', '⚡ Режим адміна']
 
 
 @pytest.mark.asyncio

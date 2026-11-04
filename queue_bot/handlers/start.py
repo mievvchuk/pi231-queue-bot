@@ -49,7 +49,7 @@ HELP_SECTIONS = {
     ),
     "➕ Створення черги": (
         "➕ <b>Створення черги</b>\n\n"
-        "• Відкрийте «Ще» ➔ «➕ Відкрити чергу».\n"
+        "• Відкрийте «Черги» ➔ «➕ Створити чергу».\n"
         "• Оберіть тип черги: «📖 Звичайна пара» або «💬 Консультація».\n"
         "• Оберіть предмет та викладача зі списку.\n"
         "• Черга відкриється для запису всій групі."
@@ -136,8 +136,23 @@ async def reply_main_menu(message: Message, state: FSMContext, conn):
     )
 
 
+async def remember_support_home(state):
+    current = await state.get_state() or ''
+    data = await state.get_data()
+    await state.update_data(support_mode='admin' if str(current).startswith('Admin') or data.get('ui_mode') == 'admin' else 'student')
+
+
+async def return_from_support(message, state, conn):
+    from queue_bot.handlers.navigation import admin_home, student_home
+    if (await state.get_data()).get('support_mode') == 'admin':
+        await admin_home(message, state, conn)
+    else:
+        await student_home(message, state, conn)
+
+
 @router.message(F.text == "❓ Допомога", StateFilter("*"))
 async def reply_help(message: Message, state: FSMContext):
+    await remember_support_home(state)
     await state.set_state(NameForm.browsing_help)
     await message.answer(
         "❓ <b>Довідка</b>\n\nОберіть розділ, щоб переглянути інструкцію 👇",
@@ -153,11 +168,7 @@ async def reply_help_topic(message: Message):
 
 @router.message(NameForm.browsing_help, F.text == "🔙 Назад")
 async def reply_help_back(message: Message, state: FSMContext, conn):
-    await state.clear()
-    await message.answer(
-        "Головне меню. Оберіть дію на клавіатурі внизу 👇",
-        reply_markup=get_reply_menu(conn, message.from_user.id),
-    )
+    await return_from_support(message, state, conn)
 
 
 @router.callback_query(F.data == "menu")
@@ -173,7 +184,7 @@ async def open_menu(callback: CallbackQuery, state: FSMContext, conn):
 async def help_screen(callback: CallbackQuery):
     await show(
         callback,
-        "❓ <b>Довідка</b>\n\nВідкрийте «Ще» ➔ «❓ Допомога» для перегляду розділів.",
+        "❓ <b>Довідка</b>\n\nВідкрийте «❓ Допомога» в головному меню для перегляду розділів.",
         make_keyboard([[("Назад", "menu")]]),
     )
 
@@ -185,6 +196,7 @@ async def help_screen(callback: CallbackQuery):
 async def start_bug_report(message: Message, state: FSMContext, conn):
     if not users.get_user(conn, message.from_user.id):
         raise BotError("Спочатку зареєструйтесь: /start")
+    await remember_support_home(state)
     await state.set_state(NameForm.reporting_bug)
     await message.answer(
         "🐞 <b>Повідомлення про помилку або пропозиція</b>\n\n"
@@ -196,11 +208,7 @@ async def start_bug_report(message: Message, state: FSMContext, conn):
 
 @router.message(NameForm.reporting_bug, F.text.in_({"🔙 Скасувати", "↩️ Скасувати", "🔙 Назад"}))
 async def cancel_bug_report(message: Message, state: FSMContext, conn):
-    await state.clear()
-    await message.answer(
-        "Скасовано. Головне меню 👇",
-        reply_markup=get_reply_menu(conn, message.from_user.id),
-    )
+    await return_from_support(message, state, conn)
 
 
 @router.message(NameForm.reporting_bug)
@@ -226,13 +234,12 @@ async def receive_bug_report(message: Message, state: FSMContext, conn):
         )
         return
 
-    await state.clear()
     await bugs.notify_admins_new_bug(message.bot, conn, report_id)
     await message.answer(
         f"✅ <b>Дякуємо! Ваш баг-репорт #{report_id} передано адміністраторам.</b>\n\n"
         "Ми перевіримо це якнайшвидше та за потреби надішлемо відповідь у цей чат.",
-        reply_markup=get_reply_menu(conn, message.from_user.id),
     )
+    await return_from_support(message, state, conn)
 
 
 @router.message(F.text == "🐞 Баг-репорти", StateFilter("*"))

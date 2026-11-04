@@ -729,8 +729,8 @@
             q.status === "open"
               ? q.my_position === 1
                 ? "Твоя черга"
-                : "Запис відкрито"
-              : "Запис закрито",
+                : "Постійна черга"
+              : "Архівна черга",
           ),
           el("h3", {}, q.subject),
           el(
@@ -807,7 +807,7 @@
         small(lesson ? [lesson.date !== S.data.today ? lessonDate : null, lesson.startTime+'–'+lesson.endTime, rooms.length ? 'ауд. '+[...new Set(rooms)].join(' / ') : null].filter(Boolean).join(' · ') : 'Пари, заміни та твій навчальний тиждень'),
       ],()=>{S.scheduleDate=lesson?.date || S.data.today; navigate('schedule');},'card upcoming-card'),
       primary ? btn([
-        el('div',{class:'hero-top'},el('span',{class:'eyebrow hero-eyebrow'},icon('queues'),'ТВІЙ ЗАПИС'),el('span',{class:'status '+primary.status},primary.status==='open'?'Запис відкрито':'Запис закрито')),
+        el('div',{class:'hero-top'},el('span',{class:'eyebrow hero-eyebrow'},icon('queues'),'ТВІЙ ЗАПИС'),el('span',{class:'status '+primary.status},primary.status==='open'?'Постійна черга':'Архівна черга')),
         el('h2',{},primary.subject),
         el('div',{class:'hero-position'},el('strong',{},primary.my_position),el('div',{},small('місце в черзі'),el('p',{},consultation(primary)?'Консультація':labText({labs:primary.my_labs,planned_minutes:primary.my_planned_minutes}) || primary.teacher))),
         el('span',{class:'hero-open'},icon('arrow'),'Відкрити чергу'),
@@ -985,11 +985,11 @@
         el(
           "p",
           { class: "notice" },
-          "Запис закрито. Уже записані студенти можуть завершувати здачу.",
+          "Архівна черга доступна для перегляду.",
         ),
       );
     if (!q.lesson && q.type === 'lesson' && q.status !== 'archived') controls.append(
-      small('Запис і здача почнуться автоматично через 5 хвилин після початку відповідної пари за розкладом.'));
+      small('Запис доступний завжди. Запит присутності почнеться через 5 хвилин після початку відповідної пари.'));
     if (q.lesson) {
       const ownState = q.lesson.own;
       const summary = el('section', {class:'card action-stack'},
@@ -1052,20 +1052,9 @@
     }
     if (isAdmin())
       controls.append(
-        btn(
-          q.status === "open" ? "Закрити запис" : "Відкрити запис",
-          () =>
-            mutate("/admin/queues/" + q.id, {
-              action: q.status === "open" ? "close" : "open",
-            }),
-          "button secondary",
-        ),
-      );
-    if (isAdmin())
-      controls.append(
         btn("Додати студентів", () => addStudentsForm(q), "button secondary"),
         btn(
-          "Історія та завершення черги",
+          "Історія записів",
           () => features.open("admin-history", false, "?sid=" + q.id),
           "button secondary",
         ),
@@ -1138,7 +1127,7 @@
       el(
         "div",
         { class: "detail-title" },
-        el('span',{class:'status '+q.status},q.status==='open'?'Запис відкрито':'Запис закрито'),
+        el('span',{class:'status '+q.status},q.status==='open'?'Постійна черга':'Архівна черга'),
         el("h1", {}, q.subject),
         el("p", { class: "muted" }, q.teacher),
       ),

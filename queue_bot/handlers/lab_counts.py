@@ -45,7 +45,7 @@ async def begin_lab_count(message, state, conn, session_id, *, action='join', po
         raise BotError('Ця черга вже недоступна.')
     entry = next((r for r in queues.get_entries(conn, session_id) if r['telegram_id'] == uid), None)
     if action == 'join':
-        if session['status'] != 'open':
+        if session['status'] == 'archived':
             raise BotError('Запис у цю чергу закрито.')
         if entry:
             raise BotError('Ви вже записані в цю чергу.')

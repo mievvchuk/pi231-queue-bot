@@ -194,9 +194,9 @@ async def test_admin_operations_and_ban_then_unban(client, conn):
     sid = queues.create_session(conn, 100, 1, 1)
     path = f'/api/miniapp/admin/queues/{sid}?mode=admin'
     assert (await client.post(path, headers=headers(), json={'action': 'close'})).status == 403
-    assert (await client.post(path, headers=headers(100), json={'action': 'close'})).status == 200
-    assert queues.get_session(conn, sid)['status'] == 'closed'
-    assert (await client.post(path, headers=headers(100), json={'action': 'open'})).status == 200
+    assert (await client.post(path, headers=headers(100), json={'action': 'close'})).status == 400
+    assert queues.get_session(conn, sid)['status'] == 'open'
+    assert (await client.post(path, headers=headers(100), json={'action': 'open'})).status == 400
     uid = users.get_user(conn, 2)['id']
     queues.join_queue(conn, 2, sid)
     assert (await client.post(f'/api/miniapp/admin/users/{uid}?mode=admin', headers=headers(100), json={'action': 'ban', 'days': 2})).status == 200
@@ -327,7 +327,7 @@ def test_mini_app_is_not_duplicated_in_chat_keyboards(conn, monkeypatch):
     before = [b.text for row in get_reply_menu(conn, 100).keyboard for b in row]
     monkeypatch.setattr(config, 'MINI_APP_URL', 'https://example.invalid/app/')
     after = [b.text for row in get_reply_menu(conn, 100).keyboard for b in row]
-    assert after == before == ['Черги', '📅 Розклад', 'Ще']
+    assert after == before == ['Черги', '📅 Розклад', '❓ Допомога', '🐞 Повідомити про баг', '⚡ Режим адміна']
     assert '📱 Мініапка' not in [b.text for row in get_student_more_menu(conn, 100).keyboard for b in row]
 
 
