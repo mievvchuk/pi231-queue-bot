@@ -1473,7 +1473,7 @@ window.createPI231Features = function (H) {
       btn("Повідомити про помилку", () => open("bugs"), "button secondary"),
     ];
   }
-  let journalSubject='',journalAttestation='';
+  let journalSubject='';
   function journalPage(data) {
     const query = (review=data.group,period=data.period) => '?period='+encodeURIComponent(period)+(review?'&scope=group':'');
     const save = async (values, ctx) => {
@@ -1485,9 +1485,9 @@ window.createPI231Features = function (H) {
     period.addEventListener('change',()=>open('journal',false,query(data.group,period.value)));
     const subjects=rows(data.subjects);
     const initial=subjects.some(s=>s.key===journalSubject)?journalSubject:subjects.find(s=>/конструювання/i.test(s.name))?.key||subjects[0]?.key||'';
-    const subjectFilter=select([['','Усі предмети'],...subjects.map(s=>[s.key,s.name])],initial);
-    const attestationFilter=select([['','Обидві'],['1','Перша'],['2','Друга']],journalAttestation);
-    const avgLabels={'1':'1 атест.','2':'2 атест.',all:'Загалом'};
+    const subjectFilter={value:initial};
+    const pick=key=>{subjectFilter.value=journalSubject=key;draw();};
+    const pager=el('nav',{class:'journal-pager','aria-label':'Предмети'});
     const avgText=a=>a&&a.average!==null?a.average.toFixed(2):'Немає оцінок';
     const mine=()=>data.averages?.[data.viewer_id]||{};
     const summary=card();
@@ -1535,23 +1535,23 @@ window.createPI231Features = function (H) {
         group.parts=Math.max(group.parts,record.part||1);
       }
       groups.sort((a,b)=>a.number-b.number);
-      const attestations=new Set([1,2,...rows(data.dates).filter(d=>d.subject_key===subject.key).map(d=>d.number),...rows(data.records).filter(r=>r.subject_key===subject.key&&r.kind==='attestation').map(r=>r.number)]);
-      for(const number of [...attestations].sort((a,b)=>a-b))groups.push({kind:'attestation',number,parts:1,title:'Атестація '+number,attestation:number});
-      const only=Number(attestationFilter.value);
-      return only?groups.filter(g=>g.attestation===only):groups;
+      // An attestation is the average of its works: works of the 1st, «Атестація 1», the rest, «Атестація 2».
+      const average=number=>({kind:'average',number,parts:1,title:'Атестація '+number});
+      const first=groups.filter(g=>g.attestation===1);
+      return [...first,average(1),...groups.filter(g=>g.attestation!==1),average(2)];
     };
     const draw=()=>{
       const needle=search.value.trim().toLocaleLowerCase('uk-UA');
       const students=rows(data.students).filter(s=>!needle||s.name.toLocaleLowerCase('uk-UA').includes(needle));
-      const avgKeys=attestationFilter.value?[attestationFilter.value]:['1','2','all'];
-      const sections=subjects.filter(s=>!subjectFilter.value||s.key===subjectFilter.value).map(subject=>{
+      const sections=subjects.filter(s=>s.key===subjectFilter.value).map(subject=>{
         const groups=groupsFor(subject), columns=groups.flatMap(g=>Array.from({length:g.parts},(_,i)=>({...g,part:i+1})));
         const head=el('thead',{},el('tr',{},el('th',{rowspan:2,scope:'col',class:'journal-name'},'Прізвище та ім’я'),groups.map(g=>{
-          const due=rows(data.dates).find(d=>d.subject_key===subject.key&&d.number===g.number&&g.kind==='attestation')?.due_date;
-          return el('th',{colspan:g.parts,scope:'colgroup'},g.title,due?el('small',{},due):null);
-        }),el('th',{colspan:avgKeys.length,scope:'colgroup'},'Середній бал')),
-          el('tr',{},columns.map(c=>el('th',{scope:'col'},c.optional_last&&c.part===3?'3*':c.kind==='attestation'?'Оцінка':String(c.part))),avgKeys.map(k=>el('th',{scope:'col'},avgLabels[k]))));
+          const due=rows(data.dates).find(d=>d.subject_key===subject.key&&d.number===g.number&&g.kind==='average')?.due_date;
+          return el('th',{colspan:g.parts,scope:'colgroup',class:g.kind==='average'?'journal-average':null},g.title,due?el('small',{},due):null);
+        })),
+          el('tr',{},columns.map(c=>el('th',{scope:'col',class:c.kind==='average'?'journal-average':null},c.optional_last&&c.part===3?'3*':c.kind==='average'?'Сер. бал':String(c.part)))));
         const body=el('tbody',{},students.map(student=>el('tr',{class:student.id===data.viewer_id?'journal-own-row':''},el('th',{scope:'row',class:'journal-name'},student.name),columns.map(column=>{
+          if(column.kind==='average'){const a=data.averages?.[student.id]?.[subject.key]?.[column.number];return el('td',{class:'journal-average'},a&&a.average!==null?a.average.toFixed(2):'—');}
           const record=rows(data.records).find(r=>r.user_id===student.id&&r.subject_key===subject.key&&r.kind===column.kind&&r.number===column.number&&(r.part||1)===column.part);
           const configured=subject.labs?.find(l=>l.number===column.number)?.parts||1;
           const editable=record?record.can_edit:((student.id===data.viewer_id||data.can_review)&&!column.legacy&&(column.kind==='attestation'||column.part<=configured));
@@ -1562,22 +1562,25 @@ window.createPI231Features = function (H) {
           const content=record?[grade(record.grade,record.status),mark(record)]:el('span',{'aria-label':'Оцінки ще немає'},'—');
           const node=editable?el('button',{class:cls,type:'button','aria-label':student.name+', '+column.title+', оцінка '+column.part+(record?': '+record.grade:' — додати'),onclick:()=>editCell(student,subject,column,record)},content):el('span',{class:cls},content);
           return el('td',{},node);
-        }),avgKeys.map(k=>{const a=data.averages?.[student.id]?.[subject.key]?.[k];return el('td',{class:'journal-average'},a&&a.average!==null?a.average.toFixed(2):'—');}))));
+        }))));
         return el('section',{class:'journal-subject'},el('h2',{},subject.name),
           el('div',{class:'journal-table-scroll',role:'region',tabindex:0,'aria-label':'Таблиця оцінок: '+subject.name},el('table',{class:'journal-table'},el('caption',{class:'screen-reader-only'},subject.name+' — журнал групи'),head,body)),
           groups.some(g=>g.optional_last)?small('* Третя оцінка за лабораторну — за потреби.'):null,
           !students.length?small('У списку немає студентів за цим пошуком.'):null);
       });
       tables.replaceChildren(...sections);
+      const index=subjects.findIndex(s=>s.key===subjectFilter.value);
+      const step=(label,to)=>el('button',{type:'button',class:'button secondary journal-pager-step','aria-label':label==='‹'?'Попередній предмет':'Наступний предмет',disabled:!subjects[to],onclick:()=>subjects[to]&&pick(subjects[to].key)},label);
+      pager.replaceChildren(step('‹',index-1),
+        ...subjects.map((s,i)=>el('button',{type:'button',class:'journal-pager-page'+(i===index?' active':''),title:s.name,'aria-label':s.name,'aria-current':i===index?'page':null,onclick:()=>pick(s.key)},String(i+1))),
+        step('›',index+1));
       summary.replaceChildren(el('h2',{},'Мої середні бали'),el('div',{class:'journal-summary'},subjects.filter(s=>mine()[s.key]).map(subject=>{
         const a=mine()[subject.key];
-        return el('button',{type:'button',class:'journal-summary-row'+(subjectFilter.value===subject.key?' active':''),onclick:()=>{subjectFilter.value=journalSubject=subject.key;draw();}},
+        return el('button',{type:'button',class:'journal-summary-row'+(subjectFilter.value===subject.key?' active':''),onclick:()=>pick(subject.key)},
           el('strong',{},subject.name),el('span',{},'1 атест.: '+avgText(a['1'])),el('span',{},'2 атест.: '+avgText(a['2'])),
           el('small',{},'Заповнено '+a.all.filled+' з '+a.all.total));
       })));
     };
-    subjectFilter.addEventListener('change',()=>{journalSubject=subjectFilter.value;draw();});
-    attestationFilter.addEventListener('change',()=>{journalAttestation=attestationFilter.value;draw();});
     search.addEventListener('input',draw);draw();
     const dates=card(el('h2',{},'Дати атестацій'),!rows(data.dates).some(d=>d.due_date)?small('Дати ще не вказані. Власник додасть їх пізніше.'):small('Дати показані в заголовках атестацій у таблицях.'));
     if(data.can_set_dates)dates.append(btn('Вказати дату',()=>{
@@ -1585,9 +1588,9 @@ window.createPI231Features = function (H) {
       sheet('Дата атестації','Порожня дата прибирає попередню дату.').append(form([field('Предмет',subject),field('Номер атестації',number),field('Дата',due)],'Зберегти дату',ctx=>save({action:'date',period:data.period,subject_key:subject.value,number:Number(number.value),due_date:due.value},ctx)));
     },'button secondary'));
     return [card(small(data.group?'Режим перевірки: натисни на клітинку, щоб підтвердити або повернути оцінку.':'Впиши оцінку прямо в клітинку свого рядка — вона збережеться сама, а адміністратор потім її підтвердить.'),
-      field('Навчальний період',period),field('Предмет',subjectFilter),field('Атестація',attestationFilter),field('Студент',search),
+      field('Навчальний період',period),field('Студент',search),
       small('? — чекає підтвердження. ! — повернуто на виправлення.'),
-      S.data?.me?.is_admin?btn(data.group?'Завершити перевірку':'Перевірка адміністратора',()=>{if(!data.group)S.mode='admin';open('journal',false,query(!data.group));},'button secondary'):null),summary,tables,dates];
+      S.data?.me?.is_admin?btn(data.group?'Завершити перевірку':'Перевірка адміністратора',()=>{if(!data.group)S.mode='admin';open('journal',false,query(!data.group));},'button secondary'):null),summary,tables,pager,dates];
   }
 
 

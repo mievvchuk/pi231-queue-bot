@@ -1177,3 +1177,8 @@ button.journal-cell:focus-visible { outline: 2px solid var(--accent, #647a1e); o
 .journal-summary-row.active { border-color: var(--accent, #647a1e); }
 .journal-summary-row strong, .journal-summary-row small { grid-column: 1 / -1; }
 .journal-summary-row small { opacity: .7; }
+.journal-table .journal-average { background: color-mix(in srgb, var(--accent, #647a1e) 12%, transparent); }
+.journal-pager { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 6px; }
+.journal-pager-step { min-width: 44px; min-height: 44px; padding: 0 12px; }
+.journal-pager-page { min-width: 40px; min-height: 40px; border: 1px solid var(--line, #8885); border-radius: 10px; background: transparent; color: inherit; font: inherit; font-weight: 700; cursor: pointer; }
+.journal-pager-page.active { border-color: var(--accent, #647a1e); background: var(--accent, #647a1e); color: #fff; }
