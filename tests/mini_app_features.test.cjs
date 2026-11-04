@@ -653,3 +653,37 @@ test("history groups attempts by stable student identity and renders Kyiv timest
  assert.match(page.textContent,/Учасники сесії · 2/);assert.match(page.textContent,/23:37/);assert.match(page.textContent,/02.07.2026, 00:30/);
  assert.doesNotMatch(page.textContent,/T21:|651405|602856/);assert.match(page.textContent,/Історія записів · 2/);
 });
+
+test('arrow keys move focus between journal grade cells like a spreadsheet',async()=>{
+  const data=journalData(true);
+  const {features,S}=setup(async()=>data);
+  S.mode='admin';
+  await features.open('journal',false,'?period=2026-2027:1&scope=group');
+  const keydown=descendants(features.page('journal')).find(n=>n.tag==='input'&&n.events.keydown).events.keydown;
+  // 2x3 grid: name cell, two inputs, an average cell without input.
+  let focused=null;
+  const rows=[0,1].map(()=>({children:[]}));
+  rows.forEach((tr,r)=>{
+    for(let c=0;c<4;c++){
+      const td={cellIndex:c,parentElement:tr};
+      const box=c===1||c===2?{value:'4',selectionStart:0,selectionEnd:0,closest:()=>td,focus(){focused=this;},id:`${r}:${c}`,blur(){focused=null;}}:null;
+      td.querySelector=()=>box;tr.children.push(td);
+    }
+    tr.children.forEach((td,i)=>{td.previousElementSibling=tr.children[i-1]||null;td.nextElementSibling=tr.children[i+1]||null;});
+  });
+  rows[0].nextElementSibling=rows[1];rows[1].previousElementSibling=rows[0];
+  const box=(r,c)=>rows[r].children[c].querySelector();
+  const press=(key,target,extra={})=>{Object.assign(target,extra);keydown({key,target,preventDefault(){}});};
+  press('ArrowRight',box(0,1),{selectionStart:1,selectionEnd:1});
+  assert.equal(focused.id,'0:2');
+  focused=null;press('ArrowRight',box(0,2),{selectionStart:1,selectionEnd:1});
+  assert.equal(focused,null);
+  press('ArrowDown',box(0,2));
+  assert.equal(focused.id,'1:2');
+  press('ArrowUp',box(1,1));
+  assert.equal(focused.id,'0:1');
+  focused=null;press('ArrowLeft',box(0,2),{selectionStart:1,selectionEnd:1});
+  assert.equal(focused,null);
+  press('ArrowLeft',box(0,2),{selectionStart:0,selectionEnd:0});
+  assert.equal(focused.id,'0:1');
+});
