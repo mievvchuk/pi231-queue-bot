@@ -108,7 +108,7 @@ async def test_consultation_and_excluded_subjects_skip_labs_and_time(conn, app, 
     await send(app, '📍 Моє місце')
     method = app[1].call_args[0][0]
     assert 'ліміт' not in method.text and 'лаб.' not in method.text
-    assert all('лаборатор' not in b.text and 'Час здачі' not in b.text for r in method.reply_markup.keyboard for b in r)
+    assert all('лаборатор' not in b.text and 'Час здачі' not in b.text for r in method.reply_markup.inline_keyboard for b in r)
     await send(app, '✅ Здав')
     assert queues.get_user_position(conn, 1, app[2]) is None
 

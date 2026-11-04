@@ -3,11 +3,14 @@
     "message": [
       "begin_lesson",
       "stop_lesson",
+      "presence_settings",
       "custom_late_time",
       "turn_time"
     ],
     "callback_query": [
       "start_lesson",
+      "queue_action",
+      "attendance_answer",
       "attendance_answer",
       "finish_turn",
       "correct_attendance"
@@ -260,6 +263,9 @@
       "refresh_current_queue",
       "show_my_place",
       "show_queue_actions",
+      "lab_settings",
+      "swap_settings",
+      "ask_finish_turn",
       "handle_swap_wish_higher",
       "handle_swap_wish_lower",
       "toggle_swap_readiness",

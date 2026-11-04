@@ -339,8 +339,8 @@ def record_own_passed_lab_numbers(conn, telegram_id, session_id, numbers, *, ent
         session = _require_session(conn, session_id)
         entry = _own_active_entry(conn, telegram_id, session_id)
         _check_revision(entry, entry_id, expected_revision)
-        from queue_bot.services.attendance import require_turn
-        require_turn(conn, entry)
+        from queue_bot.services.attendance import require_completion
+        require_completion(conn, entry)
         pending = lab_catalog.read_numbers(entry['selected_labs'])
         numbers = lab_catalog.validate_numbers(session, numbers)
         if not pending or not set(numbers).issubset(pending):
@@ -365,8 +365,8 @@ def record_own_passed_labs(conn, telegram_id: int, session_id: int, passed_count
     with transaction(conn):
         _require_session(conn, session_id)
         entry = _own_active_entry(conn, telegram_id, session_id)
-        from queue_bot.services.attendance import require_turn
-        require_turn(conn, entry)
+        from queue_bot.services.attendance import require_completion
+        require_completion(conn, entry)
         if entry['selected_labs'] is not None:
             raise BotError('Для цього запису оберіть конкретні здані лабораторні.')
         remaining = entry['lab_count']
@@ -451,8 +451,8 @@ def finish_own_entry(conn: sqlite3.Connection, telegram_id: int, session_id: int
     with transaction(conn):
         entry = _own_active_entry(conn, telegram_id, session_id)
         _require_session(conn, session_id)
-        from queue_bot.services.attendance import require_turn, end_turn
-        require_turn(conn, entry)
+        from queue_bot.services.attendance import require_completion, end_turn
+        require_completion(conn, entry)
         if passed:
             _close_entry(conn, entry, "completed")
             return None

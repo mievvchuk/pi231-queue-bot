@@ -381,7 +381,7 @@ test('queue detail puts participants before tools and preserves completion and r
   app.S.queue={id:1,subject:'Машинне навчання',teacher:'Викладач',status:'open',count:1,labs:[{number:4}],entries:[{id:1,name:'Тест Студент',position:8,is_me:true,labs:[4],planned_minutes:30}]};
   const page=app.queuePage(), text=page.textContent;
   assert.ok(text.indexOf('Учасники')<text.indexOf('Лабораторні та час'));
-  for(const value of ['Здав','Не здав — у кінець','Хочу вище','Хочу нижче','Вийти з черги','Обмін місцями']) assert.ok(text.includes(value));
+  for(const value of ['Здав','Завершити підхід з рештою робіт','Хочу вище','Хочу нижче','Вийти з черги','Обмін місцями']) assert.ok(text.includes(value));
   assert.equal(allNodes(page).filter(n=>n.className==='queue-dock').length,1);
 });
 
@@ -402,16 +402,19 @@ test('a custom upcoming date does not select Today or show a false lens',async()
   assert.equal(allNodes(segments).filter(n=>n.tag==='button'&&n.className==='selected').length,0);
   assert.equal(allNodes(segments).find(n=>n.className==='liquid-lens').hidden,true);
 });
-test('queue actions are directly visible with icons rather than a details dropdown',()=>{
-  const {app}=setup();
-  app.S.queue={id:1,subject:'Предмет',status:'open',count:1,labs:[{number:1}],entries:[{id:1,name:'Тест Студент',position:1,is_me:true,labs:[1]}]};
+for(const design of [false,true]) test('secondary queue actions are grouped and collapsed, design='+design,()=>{
+  const {app}=setup(design);
+  app.S.queue={id:1,subject:'Предмет',teacher:'Викладач',status:'open',count:1,labs:[{number:1}],entries:[{id:1,name:'Тест Студент',position:1,is_me:true,labs:[1]}]};
   const page=app.queuePage();
-  assert.equal(allNodes(page).filter(n=>n.tag==='details').length,0);
-  const retry=allNodes(page).find(n=>n.tag==='button'&&n.textContent.includes('Не здав — у кінець'));
-  assert.ok(allNodes(retry).some(n=>n.tag==='svg'));
+  const extra=allNodes(page).find(n=>n.tag==='details');
+  assert.ok(extra);
+  assert.ok(!extra.attrs.open);
+  assert.ok(extra.textContent.includes('Інші дії'));
+  for(const value of ['Лабораторні та час','Обмін місцями','Вийти з черги']) assert.ok(extra.textContent.includes(value));
+  assert.ok(!page.textContent.includes('Не здав — у кінець'));
 });
 
-test('active lesson exposes ten-minute confirmation and keeps completion for the serving student',()=>{
+test('active lesson exposes readiness and actual completion even before a serving turn',()=>{
   const {app}=setup();
   app.S.queue={id:1,subject:'КПЗ',status:'open',count:1,labs:[{number:1}],
     entries:[{id:1,name:'Тест Студент',position:5,is_me:true,labs:[1]}],
@@ -423,7 +426,8 @@ test('active lesson exposes ten-minute confirmation and keeps completion for the
   assert.ok(buttons.some(n=>n.textContent.includes('Готовий здавати')));
   assert.ok(buttons.some(n=>n.textContent.includes('Не готовий, пропустити мене')));
   assert.ok(!buttons.some(n=>n.textContent.includes('Не здав — у кінець')));
-  assert.ok(!buttons.some(n=>n.textContent.includes('Завершити підхід з рештою робіт')));
+  assert.ok(buttons.some(n=>n.textContent.includes('Завершити підхід з рештою робіт')));
+  assert.ok(buttons.some(n=>n.textContent.includes('Здав')));
   app.S.queue.lesson.own.state='serving';
   const serving=app.queuePage();
   assert.ok(serving.textContent.includes('Завершити підхід з рештою робіт'));
@@ -472,7 +476,7 @@ test('serving student sees their reminder and a separate response deadline in Ky
   let page=app.queuePage();
   assert.ok(page.textContent.includes('Нагадування про завершення о 09:00'));
   assert.ok(page.textContent.includes('Ще здаю'));
-  assert.ok(page.textContent.includes('Я вже завершив'));
+  assert.ok(page.textContent.includes('Завершити підхід з рештою робіт'));
   app.S.queue.lesson.own.turn_due=0;
   app.S.queue.lesson.own.deadline=Date.parse('2026-11-03T07:10:00Z')/1000;
   page=app.queuePage();

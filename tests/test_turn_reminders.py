@@ -40,7 +40,7 @@ async def test_student_duration_then_ten_minutes_releases_turn_without_passing_l
     a.tick(conn)
     assert own(conn, sid, 1)['state'] == 'skipped'
     assert own(conn, sid, 2)['state'] == 'called'
-    assert queues.get_user_position(conn, 1, sid) == 4
+    assert queues.get_user_position(conn, 1, sid) == 1
     entry = queues.get_entry(conn, own(conn, sid, 1)['entry_id'])
     assert entry['selected_labs'] == '[1, 2]' and entry['passed_labs'] == '[]'
     assert entry['labs_passed'] == 0 and entry['status'] == 'active'
@@ -86,7 +86,7 @@ async def test_partial_pass_survives_timeout_and_original_timer_is_not_reset(con
     clock[0] += 600
     a.tick(conn)
     current = queues.get_entry(conn, entry['id'])
-    assert current['position'] == 4
+    assert current['position'] == 1
     assert current['selected_labs'] == '[2]' and current['passed_labs'] == '[1]' and current['labs_passed'] == 1
 
 
@@ -124,7 +124,7 @@ async def test_restart_preserves_turn_and_response_timers(conn, db_path, lesson)
         deadline = own(reopened, sid, 1)['deadline']
         clock[0] = deadline
         a.tick(reopened)
-        assert queues.get_user_position(reopened, 1, sid) == 4
+        assert queues.get_user_position(reopened, 1, sid) == 1
     finally:
         reopened.close()
 
@@ -157,7 +157,7 @@ async def test_expired_answer_cannot_extend_or_mark_success_before_worker_tick(c
     with pytest.raises(BotError):
         queues.finish_own_entry(conn, 1, sid, passed=True)
     a.tick(conn)
-    assert queues.get_user_position(conn, 1, sid) == 4
+    assert queues.get_user_position(conn, 1, sid) == 1
 
 
 def test_missing_estimate_requires_student_duration_not_a_guessed_default(conn, make_user, monkeypatch):

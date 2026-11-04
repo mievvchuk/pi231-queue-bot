@@ -96,14 +96,15 @@ async def open_queue_screen(message: Message, conn, subjects, session_id: int, n
     is_adm = admins.is_admin(conn, uid)
     from queue_bot.services import attendance
     text = '👤 <b>Режим студента</b>\n\n' + format_queue(subjects, session, entries, uid, lesson=attendance.view(conn, session_id, uid))
-    from queue_bot.handlers.attendance import lesson_summary, show_controls
+    from queue_bot.handlers.attendance import lesson_summary, screen_keyboard
     text += lesson_summary(conn, session_id, uid)
     if note:
         text = f"{note}\n\n{text}"
     in_queue = queues.get_user_position(conn, uid, session_id) is not None
     markup = get_queue_view_reply_menu(is_admin=is_adm, can_edit_labs=in_queue and session['status'] != 'archived' and bool(lab_catalog.labs_for_session(session)))
-    await show_controls(message, conn, session_id, uid)
-    await message.answer(text, reply_markup=markup)
+    # One queue message owns all contextual actions. Reply keys only navigate.
+    await message.answer('Оберіть дію під списком. Додаткові налаштування — у «Інші дії».', reply_markup=markup)
+    await message.answer(text, reply_markup=screen_keyboard(conn, session_id, uid))
 
 
 async def not_admin_state_filter(message: Message, state: FSMContext) -> bool:
@@ -430,7 +431,7 @@ async def show_my_place(message: Message, state: FSMContext, conn, subjects):
     await open_queue_screen(message, conn, subjects, session_id, note=note)
 
 
-@router.message(F.text == "⚙️ Дії", not_admin_state_filter)
+@router.message(F.text.in_({"⚙️ Дії", "⚙️ Інші дії"}), not_admin_state_filter)
 async def show_queue_actions(message: Message, state: FSMContext, conn):
     session_id = await ensure_session_id(message, state)
     if not session_id:
@@ -447,6 +448,35 @@ async def show_queue_actions(message: Message, state: FSMContext, conn):
         consultation=session['queue_type'] == 'consultation' or session['subject_id'] == 7,
     )
     await message.answer("⚙️ <b>Оберіть дію:</b>", reply_markup=markup)
+
+
+@router.message(F.text == '🧪 Роботи та час', not_admin_state_filter)
+async def lab_settings(message, state):
+    if await ensure_session_id(message, state):
+        await message.answer('Лабораторні роботи та орієнтовний час підходу', reply_markup=make_reply_keyboard([
+            ['🧪 Обрати лабораторні', '⏱ Час здачі'], ['🔙 Назад до черги']]))
+
+
+@router.message(F.text == '🔁 Обмін і пріоритет', not_admin_state_filter)
+async def swap_settings(message, state, conn):
+    sid = await ensure_session_id(message, state)
+    if not sid:
+        return
+    wish = queues.get_swap_wish(conn, message.from_user.id, sid)
+    from queue_bot.handlers.common import get_queue_swap_reply_menu
+    await message.answer('Обмін місцями та побажання', reply_markup=get_queue_swap_reply_menu(wish))
+
+
+@router.message(F.text == 'Завершити підхід', not_admin_state_filter)
+async def ask_finish_turn(message, state, conn):
+    sid = await ensure_session_id(message, state)
+    if not sid:
+        return
+    entry = queues._own_active_entry(conn, message.from_user.id, sid)
+    await message.answer('Завершити підхід? Нездані роботи збережуться, а ви перейдете з ними в кінець черги.',
+        reply_markup=make_keyboard([
+            [('Так, завершити підхід', f'turn:{entry["id"]}:{entry["entry_revision"]}')],
+            [('Продовжити', f'queue:{sid}:refresh')]]))
 
 
 @router.message(F.text.in_({"⬆️ Хочу вище", "⏸ Зняти «Хочу вище»"}), not_admin_state_filter)
