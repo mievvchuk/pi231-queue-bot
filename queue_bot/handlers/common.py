@@ -598,7 +598,7 @@ def queue_label(subjects: list[dict], session) -> str:
     return f"{subject} — {teacher}{type_badge}{lock}"
 
 
-def format_queue(subjects: list[dict], session, entries, my_telegram_id: int | None = None, show_id: bool = False) -> str:
+def format_queue(subjects: list[dict], session, entries, my_telegram_id: int | None = None, show_id: bool = False, *, lesson=None) -> str:
     lines = []
 
     subject, teacher = session_names(subjects, session)
@@ -624,8 +624,22 @@ def format_queue(subjects: list[dict], session, entries, my_telegram_id: int | N
         lines.append(f"Статус: {status}")
 
     lines.append("")
-    for row in entries:
-        lines.append(format_entry(row, my_telegram_id, show_id=show_id))
+    from queue_bot.services.attendance import display_entries
+    if lesson:
+        lines.append('Номери — збережені місця. Порядок виклику — зверху вниз серед присутніх.')
+    previous_group = None
+    ready = set(lesson['ready_ids']) if lesson else set()
+    for row in display_entries(entries, lesson):
+        if lesson:
+            group = ('На місці — порядок виклику' if row['id'] in ready else
+                     'Вільні місця' if row['user_id'] is None else 'Поки пропускаємо — місця збережені')
+            if group != previous_group:
+                lines.extend(['', '<b>' + group + '</b>'])
+                previous_group = group
+        line = format_entry(row, my_telegram_id, show_id=show_id)
+        if lesson and row['id'] in lesson['states']:
+            line += ' — ' + html.escape(lesson['states'][row['id']])
+        lines.append(line)
     if not entries:
         lines.append("Черга порожня.")
     return "\n".join(lines)

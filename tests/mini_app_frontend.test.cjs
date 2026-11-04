@@ -35,7 +35,7 @@ class Element {
       .join(" ");
   }
 }
-function setup() {
+function setup(enableDesign = false) {
   const root = new Element("root");
   const context = vm.createContext({
     Node: Element,
@@ -61,6 +61,8 @@ function setup() {
     path.join(__dirname, "../queue_bot/mini_app/static/app.js"),
     "utf8",
   );
+  if (enableDesign) vm.runInContext(fs.readFileSync(
+    path.join(__dirname, '../queue_bot/mini_app/static/design.js'), 'utf8'), context);
   // Export the existing closure only in this VM; production contains no test hooks.
   vm.runInContext(
     source.slice(0, source.indexOf('  document.addEventListener("keydown"')) +
@@ -410,7 +412,7 @@ test('active lesson exposes ten-minute confirmation and keeps completion for the
   const buttons=allNodes(page).filter(n=>n.tag==='button');
   assert.ok(page.textContent.includes('10 хвилин'));
   assert.ok(buttons.some(n=>n.textContent.includes('Готовий здавати')));
-  assert.ok(buttons.some(n=>n.textContent.includes('Пропустити мене')));
+  assert.ok(buttons.some(n=>n.textContent.includes('Не готовий, пропустити мене')));
   assert.ok(!buttons.some(n=>n.textContent.includes('Не здав — у кінець')));
   assert.ok(!buttons.some(n=>n.textContent.includes('Завершити підхід з рештою робіт')));
   app.S.queue.lesson.own.state='serving';
@@ -428,6 +430,29 @@ test('late student can confirm arrival without losing their queue position',()=>
   assert.ok(page.textContent.includes('Я вже на місці'));
   assert.ok(page.textContent.includes('На цій парі не буду'));
   assert.equal(app.S.queue.entries[0].position,2);
+});
+
+for (const enableDesign of [false,true]) test('live queue groups present students before not-ready and late students with saved numbers, design='+enableDesign,()=>{
+  const {app}=setup(enableDesign);
+  app.S.queue={id:1,subject:'КПЗ',status:'open',count:3,labs:[{number:1}],
+    entries:[{id:2,name:'Присутній Студент',position:2,labs:[1]},
+      {id:1,name:'Неготовий Студент',position:1,is_me:true,labs:[1]},
+      {id:3,name:'Запізнілий Студент',position:3,labs:[1]}],
+    lesson:{id:1,ends_at:1800000000,people_ahead:null,current_name:'Присутній Студент',
+      ready_ids:[2],deferred_ids:[1,3],own:{state:'not_ready',token:'test'},
+      states:{'2':'Викликано · підтверджує готовність','1':'Не готовий · тимчасово пропускаємо',
+        '3':'Запізнюється · очікуємо о 08:55'}}};
+  const page=app.queuePage();
+  const list=allNodes(page).find(n=>(n.className||'').split(' ').includes('entry-list'));
+  assert.ok(list.textContent.indexOf('На місці — порядок виклику') < list.textContent.indexOf('Присутній Студент'));
+  assert.ok(list.textContent.indexOf('Присутній Студент') < list.textContent.indexOf('Поки пропускаємо'));
+  assert.ok(list.textContent.indexOf('Поки пропускаємо') < list.textContent.indexOf('Неготовий Студент'));
+  assert.ok(list.textContent.includes('Запізнюється · очікуємо о 08:55'));
+  assert.ok(page.textContent.includes('Вже готовий, повернути до виклику'));
+  assert.ok(!page.textContent.includes('Твоя черга'));
+  assert.deepEqual(app.S.queue.entries.map(e=>e.position),[2,1,3]);
+  app.S.queue.lesson.own.state='present';
+  assert.ok(app.queuePage().textContent.includes('Поки не готовий, пропустити мене'));
 });
 
 test('serving student sees their reminder and a separate response deadline in Kyiv time',()=>{

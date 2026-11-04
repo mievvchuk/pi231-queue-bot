@@ -40,7 +40,7 @@ def queue_view(conn, subjects, session, uid, *, detail=False, admin=False):
     result['my_labs'] = lab_catalog.read_numbers(own['selected_labs']) if own else None
     result['my_planned_minutes'] = own['planned_minutes'] if own else None
     if detail:
-        result['entries'] = [entry_view(row, uid, admin) for row in rows]
+        result['entries'] = [entry_view(row, uid, admin) for row in attendance.display_entries(rows, lesson)]
         result['labs'] = list(lab_catalog.labs_for_session(session))
         result['can_pick_position'] = queues.has_free_slots(conn, session['id']) or not queues.are_first_10_occupied(conn, session['id'])
         # Reflect existing queue rules: vacant placeholders can be taken at any

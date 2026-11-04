@@ -981,6 +981,7 @@
       const summary = el('section', {class:'card action-stack'},
         el('strong',{},'Здача на парі активна'),
         small('На підтвердження присутності та виклику — 10 хвилин.'),
+        small('Присутніх викликаємо за збереженою чергою. «Не готовий» одразу пропускає до наступного.'),
         small('До '+new Date(q.lesson.ends_at*1000).toLocaleTimeString('uk-UA',{hour:'2-digit',minute:'2-digit'})),
         q.lesson.current_name ? small('Викликано / зараз здає: '+q.lesson.current_name) : small('Очікуємо готових студентів.'),
         ownState ? small(q.lesson.states[String(own.id)] || '') : null,
@@ -1013,9 +1014,11 @@
         }
         if (ownState.state === 'called') summary.append(
           btn('Готовий здавати',()=>own.planned_minutes?answer('ready'):durationForm('ready'),'button primary'),
-          btn('Пропустити мене',()=>answer('skip'),'button secondary'));
+          btn('Не готовий, пропустити мене',()=>answer('skip'),'button secondary'));
         else if (ownState.state !== 'serving') summary.append(
-          btn('Я вже на місці',()=>answer('present'),'button primary'),
+          ownState.state === 'present'
+            ? btn('Поки не готовий, пропустити мене',()=>answer('skip'),'button secondary')
+            : btn(['not_ready','skipped'].includes(ownState.state)?'Вже готовий, повернути до виклику':'Я вже на місці',()=>answer('present'),'button primary'),
           btn('Запізнююсь',()=>{
             const panel=sheet('Запізнююсь','Через скільки хвилин будете? Місце зберігається, інші поки можуть здавати.');
             const minutes=el('input',{type:'number',min:1,max:240,step:1,value:10,required:true,'aria-label':'Хвилин до приходу'});
@@ -1057,7 +1060,14 @@
           "button secondary",
         ),
       );
-    const entries = q.entries.map((row) => {
+    const readyIds = new Set(q.lesson?.ready_ids || []);
+    let previousGroup = null;
+    const entries = q.entries.flatMap((row) => {
+      const group = q.lesson ? (readyIds.has(row.id) ? 'На місці — порядок виклику'
+        : row.vacant ? 'Вільні місця' : 'Поки пропускаємо — місця збережені') : null;
+      const heading = group && group !== previousGroup
+        ? el('h3',{class:'queue-group-heading'},group) : null;
+      previousGroup = group;
       const action = isAdmin()
         ? () => adminEntryForm(q, row)
         : own && !row.is_me && !row.vacant
@@ -1073,7 +1083,7 @@
                   }),
               )
           : null;
-      return el(
+      const entry = el(
         action ? "button" : "div",
         {
           class: "entry " + (row.is_me ? "self" : ""),
@@ -1107,6 +1117,7 @@
         ),
         action ? icon(isAdmin() ? "admin" : "arrow") : null,
       );
+      return heading ? [heading, entry] : [entry];
     });
     if(design) return design.queuePage(q,own,entries,controls,dock,otherActions);
     return el(
@@ -1132,7 +1143,10 @@
             el(
               "div",
               {},
-              el("b", {}, own.position === 1 ? "Твоя черга" : "Твоє місце"),
+              el("b", {}, q.lesson ? (q.lesson.own?.state === 'serving' ? 'Зараз ти здаєш'
+                : q.lesson.own?.state === 'called' ? 'Підтвердь готовність'
+                : q.lesson.states[String(own.id)] || 'Твоє збережене місце')
+                : own.position === 1 ? "Твоя черга" : "Твоє місце"),
               el(
                 "p",
                 {},
@@ -1147,6 +1161,7 @@
         el("h2", {}, "Учасники"),
         badge(q.count),
       ),
+      q.lesson ? small('Номери — збережені місця. Порядок виклику — зверху вниз серед присутніх.') : null,
       el("section", { class: "entry-list" }, entries),
       !entries.length
         ? empty(
