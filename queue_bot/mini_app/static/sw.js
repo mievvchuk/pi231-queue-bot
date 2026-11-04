@@ -1,5 +1,5 @@
 "use strict";
-const CACHE = 'pi231-shell-v15';
+const CACHE = 'pi231-shell-v17';
 const SHELL = ['/app/', '/app/app.js', '/app/features.js', '/app/help-videos.js', '/app/icons.js',
   '/app/design.js', '/app/design.css', '/app/design-adapter.css', '/app/bootstrap-icons.css', '/app/bootstrap-icons.woff2', '/app/manrope-400.ttf', '/app/manrope-500.ttf', '/app/manrope-600.ttf', '/app/manrope-700.ttf', '/app/manrope-800.ttf', '/app/pwa.js', '/app/app.css', '/app/theme.css', '/app/glass.css', '/app/wallet.css',
   '/app/manifest.webmanifest', '/app/icon-192.png', '/app/icon-512.png'];

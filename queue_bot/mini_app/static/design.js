@@ -85,11 +85,12 @@ window.createPI231Design = function (H) {
   }
   function queueRow(q){return btn([el('span',{class:'subject-icon'},glyph(subjectIcon(q.subject))),el('div',{class:'queue-main'},el('div',{class:'queue-title'},el('h3',{},q.subject),badge(q.my_position!=null?'Ти №'+q.my_position:q.status==='open'?'Відкрито':'Запис закрито',q.my_position!=null?'accent':q.status==='open'?'success':'neutral')),el('p',{},q.teacher),el('div',{class:'meta-line'},el('span',{},glyph('people'),q.count+' учасників'),el('span',{},glyph('book'),consultation(q)?'Консультація':'Лабораторні'))),glyph('chevron-right')],()=>openQueue(q.id),'card queue-row');}
   function queuesPage(){
-    const list=el('div',{class:'queue-list'}), search=el('input',{placeholder:'Знайти предмет або викладача',value:S.search||'','aria-label':'Знайти предмет або викладача'});
-    const update=()=>{S.search=search.value;const qs=(S.queueFilter==='mine'?ownQueues():S.data.queues).filter(q=>(q.subject+' '+q.teacher).toLocaleLowerCase('uk').includes(S.search.toLocaleLowerCase('uk')));list.replaceChildren(...(qs.length?qs.map(queueRow):[card('empty-state',glyph('search'),el('h3',{},'Нічого не знайдено'),small('Спробуй змінити запит або фільтр.'))]));};
+    const list=el('div',{class:'queue-list'}), count=small(''), search=el('input',{type:'search',placeholder:'Знайти предмет або викладача',value:S.search||'','aria-label':'Знайти предмет або викладача'});
+    const update=()=>{S.search=search.value;const qs=H.filteredQueues();count.replaceChildren('Знайдено: '+qs.length);list.replaceChildren(...(qs.length?qs.map(queueRow):[card('empty-state',glyph('search'),el('h3',{},'Нічого не знайдено'),small('Спробуй змінити запит або фільтр.'))]));};
     search.addEventListener('input',update);update();
     return el('main',{class:'page make-queues'},heading('Навчання','Черги',button('Стати в чергу',pickQueue,'primary','plus-lg')),
-      el('div',{class:'toolbar'},el('div',{class:'segment queue-filters'},[['all','Усі',S.data.queues.length],['mine','Мої',ownQueues().length]].map(([key,label,count])=>btn([label,el('span',{},count)],()=>{S.queueFilter=key;render();},S.queueFilter===key?'active':''))),el('label',{class:'search'},glyph('search'),search)),list);
+      el('div',{class:'toolbar'},el('div',{class:'segment queue-filters'},[['all','Усі',S.data.queues.length],['mine','Мої',ownQueues().length]].map(([key,label,count])=>el('button',{type:'button','aria-pressed':String(S.queueFilter===key),class:S.queueFilter===key?'active':'',onclick:()=>{S.queueFilter=key;render();}},label,el('span',{},count)))),el('label',{class:'search'},glyph('search'),search)),
+      el('div',{class:'segment queue-type-filters',role:'group','aria-label':'Тип черги'},H.queueTypes.map(([key,label])=>el('button',{type:'button','aria-pressed':String(S.queueTypeFilter===key),class:S.queueTypeFilter===key?'active':'',onclick:()=>{S.queueTypeFilter=key;render();}},label))),count,list);
   }
   function pickQueue(){
     const panel=sheet('Стати в чергу','Обери відкриту чергу.');

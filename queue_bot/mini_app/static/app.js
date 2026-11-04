@@ -6,6 +6,8 @@
   const S = {
     tab: "home",
     queueFilter: 'all',
+    queueTypeFilter: 'all',
+    search: '',
     feature: null,
     mode: "student",
     data: null,
@@ -838,8 +840,18 @@
   }
   function queuesPage() {
     if(design) return design.queuesPage();
-    const qs = S.queueFilter === 'mine' ? mine() : S.data.queues,
-      own = mine();
+    const own = mine(), list = el('div',{class:'subject-list'}),
+      count = small(''), search = el('input',{type:'search',value:S.search,
+        placeholder:'Знайти предмет або викладача','aria-label':'Знайти предмет або викладача'});
+    const update = () => {
+      S.search = search.value;
+      const qs = filteredQueues();
+      count.replaceChildren('Знайдено: '+qs.length);
+      list.replaceChildren(...(qs.length ? qs.map(subjectCard)
+        : [empty('Нічого не знайдено','Спробуй змінити запит або фільтр.')]));
+    };
+    search.addEventListener('input',update);
+    update();
     return el(
       "main",
       {},
@@ -853,21 +865,33 @@
         el('button',{type:'button',class:S.queueFilter==='all'?'selected':'','aria-pressed':String(S.queueFilter==='all'),onclick:()=>{S.queueFilter='all';render();}},icon('queues'),'Усі'),
         el('button',{type:'button',class:S.queueFilter==='mine'?'selected':'','aria-pressed':String(S.queueFilter==='mine'),onclick:()=>{S.queueFilter='mine';render();}},icon('profile'),'Мої · '+own.length),
       ),
+      el('div',{class:'segments queue-type-filters',role:'group','aria-label':'Тип черги'},
+        queueTypes.map(([key,label])=>el('button',{type:'button',
+          'aria-pressed':String(S.queueTypeFilter===key),class:S.queueTypeFilter===key?'selected':'',
+          onclick:()=>{S.queueTypeFilter=key;render();}},label))),
+      el('label',{class:'search'},icon('queues'),search),
       btn(
         [icon("plus"), "Відкрити чергу"],
         () => openFeature("create"),
         "button secondary create-queue",
       ),
-      sectionTitle("Доступні предмети", "Предметів: " + qs.length),
-      qs.length
-        ? el("div", { class: "subject-list" }, qs.map(subjectCard))
-        : empty("Черги ще не відкриті", "Потрібні предмети з’являться тут."),
+      sectionTitle('Доступні черги'),
+      count,
+      list,
       el(
         "p",
         { class: "footnote" },
         "Ті самі черги, що й у боті. Обирай, як зручніше сьогодні.",
       ),
     );
+  }
+  const queueTypes = [['all','Усі типи'],['lesson','Звичайні пари'],['consultation','Консультації']];
+  function filteredQueues() {
+    const query = (S.search || '').trim().toLocaleLowerCase('uk');
+    return S.data.queues.filter(q =>
+      (S.queueFilter !== 'mine' || q.my_position != null) &&
+      (S.queueTypeFilter === 'all' || q.type === S.queueTypeFilter) &&
+      [q.subject,q.teacher].join(' ').toLocaleLowerCase('uk').includes(query));
   }
   function labText(row) {
     const numbers = row.labs?.length
@@ -2187,7 +2211,7 @@
   });
   design = window.createPI231Design?.({S, el, btn, small, api, sheet, closeSheet, navigate, openFeature, openQueue,
     labForm, avatarFace, consultation, labText, isAdmin, render, toast, appearanceSettings, setAppearance,
-    mutate, load, logout, completionForm, adminEntryForm, confirmSheet, reference, download, installCard, browserSession, loginFailureMessage, initData});
+    mutate, load, logout, completionForm, adminEntryForm, confirmSheet, reference, download, installCard, browserSession, loginFailureMessage, initData, filteredQueues, queueTypes});
   window.matchMedia?.('(prefers-color-scheme: dark)')?.addEventListener?.('change',()=>{if(presentation.theme==='system')theme();});
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape" && !S.busy) {closeSheet();design?.closeMenu();}
