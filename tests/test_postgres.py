@@ -169,7 +169,16 @@ async def test_postgres_mini_app_shares_bot_signup_completion_and_replacements(p
         history = await (await client.get(f'/api/miniapp/admin/manage/history?mode=admin&sid={sid}',headers=owner_auth)).json()
         assert len([r for r in history['entries'] if r['status']=='active']) == 2
         response = await client.get('/api/miniapp/admin/manage/reports?mode=admin',headers=owner_auth)
-        assert response.status == 200 and 'statistics' in await response.json()
+        assert response.status == 410 and 'прибрано' in (await response.json())['error']
+        expected = ['Гнатюк Іван', 'Ґалаган Іван', 'Денисюк Іван', 'Емець Іван', 'Євчук Михайло',
+                    'Жук Іван', 'Зінченко Іван', 'Иваненко Іван', 'Іваненко Іван', 'Їжакевич Іван', 'Йовенко Іван']
+        for name in reversed(expected):
+            users.admin_create_placeholder(pg_conn, 100, name)
+        response = await client.get('/api/miniapp/admin/users?mode=admin', headers=owner_auth)
+        assert response.status == 200
+        roster = (await response.json())['users']
+        assert len(roster) == len(expected) + 4
+        assert [row['full_name'] for row in roster if row['full_name'] in expected] == expected
         created = await client.post('/api/miniapp/admin/manage/polls?mode=admin',headers=owner_auth,
             json={'action':'create','question':'Тестове голосування','options':['Так','Ні'],'is_anonymous':True,'allows_multiple':False,'target':'private','minutes':10})
         assert created.status == 200

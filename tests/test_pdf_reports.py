@@ -1,8 +1,5 @@
 from io import BytesIO
-from types import SimpleNamespace
-from unittest.mock import AsyncMock
 
-import pytest
 from pypdf import PdfReader
 
 from queue_bot.services import queues, reports
@@ -33,16 +30,3 @@ def test_subject_pdf_paginates_and_repeats_headers_without_losing_rows():
     assert all('Студент' in text and 'Сторінка' in text for text in texts)
     assert 'Студент Український 000' in texts[0]
     assert 'Студент Український 099' in texts[-1]
-
-
-@pytest.mark.asyncio
-async def test_telegram_report_sends_a_pdf_document(conn, make_user):
-    from queue_bot.handlers.admin.reports import admin_export_global_pdf
-
-    make_user(1, 'Шевчук Іллюша')
-    message = SimpleNamespace(answer_document=AsyncMock())
-    await admin_export_global_pdf(message, conn, [])
-    file = message.answer_document.await_args.args[0]
-    assert file.filename.endswith('.pdf')
-    text = '\n'.join(page.extract_text() for page in PdfReader(BytesIO(file.data)).pages)
-    assert 'Шевчук Іллюша' in text
