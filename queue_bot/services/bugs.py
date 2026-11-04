@@ -1,5 +1,6 @@
 import html
 import logging
+import json
 from contextlib import suppress
 
 from aiogram import Bot
@@ -38,7 +39,13 @@ def create_bug_report(
                VALUES (?, ?, ?, ?, ?, 'open')""",
             (telegram_id, user_name, username, clean_text, photo_file_id),
         )
-        return cur.lastrowid
+        report_id = cur.lastrowid
+        from queue_bot.services import diagnostics
+        diagnostic = diagnostics.latest(telegram_id)
+        if diagnostic:
+            conn.execute('INSERT INTO bot_state(key, value) VALUES (?, ?)',
+                (f'bug_diagnostic:{report_id}', json.dumps(diagnostic, ensure_ascii=False)))
+        return report_id
 
 
 def get_bug_report(conn, report_id: int):
@@ -96,6 +103,10 @@ async def notify_admins_new_bug(bot: Bot, conn, report_id: int) -> None:
         return
 
     text = format_bug_report_card(report)
+    diagnostic = conn.execute('SELECT value FROM bot_state WHERE key = ?', (f'bug_diagnostic:{report_id}',)).fetchone()
+    diagnostic = json.loads(diagnostic['value']) if diagnostic else None
+    if diagnostic:
+        text += f'\n\nОстання технічна помилка користувача: <code>{html.escape(diagnostic["code"])}</code>. Деталі — у файлі. Вона може стосуватися іншої дії.'
     kb = InlineKeyboardMarkup(
         inline_keyboard=[
             [
@@ -121,3 +132,10 @@ async def notify_admins_new_bug(bot: Bot, conn, report_id: int) -> None:
         # photo-caption limit; a failed photo must not suppress the text report.
         with suppress(Exception):
             await bot.send_message(chat_id=adm_id, text=text, reply_markup=kb)
+        if diagnostic:
+            from aiogram.types import BufferedInputFile
+            from queue_bot.services import diagnostics
+            with suppress(Exception):
+                await bot.send_document(chat_id=adm_id,
+                    document=BufferedInputFile(diagnostics.document(diagnostic), filename=f'bug-{report_id}-{diagnostic["code"]}.json'),
+                    caption=f'Повна технічна помилка до звернення #{report_id}')

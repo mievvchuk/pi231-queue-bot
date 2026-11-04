@@ -67,6 +67,7 @@ async def start_schedule_notifier(bot: Bot, conn, interval_sec: int = 60) -> Non
                 mark_sent_today(conn, today_key)
 
         except Exception as e:
-            log.exception(f"Error in schedule notifier loop: {e}")
+            from queue_bot.services import diagnostics
+            await diagnostics.report(e, bot=bot, conn=conn, context={'source':'worker', 'operation':'schedule_notifier'})
 
         await asyncio.sleep(interval_sec)

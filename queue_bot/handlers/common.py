@@ -54,9 +54,6 @@ def get_student_more_menu(conn, telegram_id: int) -> ReplyKeyboardMarkup:
     rows = [['➕ Відкрити чергу'], ['❓ Допомога', '🐞 Повідомити про баг']]
     if admins.is_admin(conn, telegram_id):
         rows.append(['⚡ Адмін-панель'])
-    from queue_bot import config
-    if config.MINI_APP_URL:
-        rows.append(['📱 Мініапка'])
     rows.append(['🏠 Головне меню'])
     return make_reply_keyboard(rows)
 
@@ -706,6 +703,36 @@ class Guard(BaseMiddleware):
     """Підтверджує натискання кнопки та перетворює помилки на повідомлення."""
 
     async def __call__(self, handler, event, data):
+        try:
+            return await self._dispatch(handler, event, data)
+        except BotError as error:
+            await self.notify(event, f"⚠️ {html.escape(str(error))}")
+        except Exception as error:
+            from queue_bot.services import diagnostics
+            context = {'source':'telegram', 'event':type(event).__name__}
+            selected = getattr(data.get('handler'), 'callback', handler)
+            context['handler'] = getattr(selected, '__qualname__', type(selected).__name__)
+            state = data.get('state')
+            if state:
+                with suppress(Exception):
+                    context['state'] = await state.get_state()
+                    form = await state.get_data()
+                    context.update({k: form[k] for k in ('session_id', 'ui_mode', 'passed_entry_id') if k in form})
+            if isinstance(event, CallbackQuery):
+                context['callback_prefix'] = (event.data or '').split(':', 1)[0]
+                markup = getattr(event.message, 'reply_markup', None)
+                if markup:
+                    for row in markup.inline_keyboard:
+                        for button in row:
+                            if button.callback_data == event.data:
+                                context['button'] = button.text
+            elif not context.get('state') or 'browsing' in str(context.get('state')):
+                context['button'] = (getattr(event, 'text', '') or '')[:160]
+            record = await diagnostics.report(error, bot=getattr(event, 'bot', None), conn=data.get('conn'),
+                telegram_id=getattr(getattr(event, 'from_user', None), 'id', None), context=context)
+            await self.notify(event, html.escape(diagnostics.explanation(error)) + f'\nКод помилки: <code>{record["code"]}</code>. Можете додати його до баг-репорту.')
+
+    async def _dispatch(self, handler, event, data):
         conn = data.get("conn")
         if conn:
             from queue_bot.services.restrictions import restriction_message
@@ -749,16 +776,7 @@ class Guard(BaseMiddleware):
         if isinstance(event, CallbackQuery):
             with suppress(TelegramBadRequest):
                 await event.answer()
-        try:
-            return await handler(event, data)
-        except BotError as error:
-            await self.notify(event, f"⚠️ {html.escape(str(error))}")
-        except TelegramAPIError:
-            log.exception("Telegram API error")
-        except Exception as error:
-            log.exception(f"Unexpected error in handler: {error}")
-            err_details = f"{type(error).__name__}: {error}"
-            await self.notify(event, f"⚠️ <b>Помилка:</b> {html.escape(err_details)}\nСпробуйте /start або 🏠 Головне меню.")
+        return await handler(event, data)
 
     @staticmethod
     async def notify(event, text: str) -> None:
