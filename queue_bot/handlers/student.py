@@ -89,7 +89,7 @@ async def ensure_session_id(message: Message, state: FSMContext) -> int | None:
     return session_id
 
 
-async def open_queue_screen(message: Message, conn, subjects, session_id: int, note: str = "", *, telegram_id=None):
+async def open_queue_screen(message: Message, conn, subjects, session_id: int, note: str = "", *, telegram_id=None, refresh=False, edit_message=None):
     session = get_session_or_fail(conn, session_id)
     entries = queues.get_entries(conn, session_id)
     uid = telegram_id if telegram_id is not None else message.from_user.id
@@ -105,9 +105,16 @@ async def open_queue_screen(message: Message, conn, subjects, session_id: int, n
     markup = get_queue_view_reply_menu(is_admin=is_adm,
         back_text='🔙 До моїх черг' if origin['source'] == 'my' else '🔙 До черг',
         can_edit_labs=in_queue and session['status'] != 'archived' and bool(lab_catalog.labs_for_session(session)))
-    # One queue message owns all contextual actions. Reply keys only navigate.
-    await message.answer('Оберіть дію під списком. Додаткові налаштування — у «Інші дії».', reply_markup=markup)
-    await message.answer(text, reply_markup=screen_keyboard(conn, session_id, uid))
+    from queue_bot.handlers import queue_messages
+    controls = screen_keyboard(conn, session_id, uid)
+    if refresh and await queue_messages.refresh(message, conn, uid, session_id, 'student', text,
+                                               markup=controls, target=edit_message):
+        return
+    # Navigation is sent only when entering the queue, never on a refresh.
+    if not refresh:
+        await message.answer('Оберіть дію під списком. Додаткові налаштування — у «Інші дії».', reply_markup=markup)
+    sent = await message.answer(text, reply_markup=controls)
+    queue_messages.remember(conn, sent, uid, session_id, 'student')
 
 
 async def not_admin_state_filter(message: Message, state: FSMContext) -> bool:
@@ -425,8 +432,8 @@ async def open_coursework_group(message: Message, state: FSMContext, conn, subje
         _, teacher = session_names(subjects, s)
         entries = queues.get_entries(conn, s["id"])
         count = len(entries)
-        st_text = "постійна черга" if s["status"] != "archived" else "архів"
-        cw_lines.append(f"• 👨‍🏫 <b>{html.escape(teacher)}</b> — {st_text} (у черзі: <b>{count}</b>)")
+        status_suffix = " · архів" if s["status"] == "archived" else ""
+        cw_lines.append(f"• 👨‍🏫 <b>{html.escape(teacher)}</b> — у черзі: <b>{count}</b>{status_suffix}")
     cw_lines.append("\nОберіть керівника на кнопках внизу 👇")
 
     await state.set_state(StudentFlow.browsing_coursework_queues)
@@ -517,7 +524,7 @@ async def refresh_current_queue(message: Message, state: FSMContext, conn, subje
     session_id = await ensure_session_id(message, state)
     if not session_id:
         return
-    await open_queue_screen(message, conn, subjects, session_id)
+    await open_queue_screen(message, conn, subjects, session_id, refresh=True)
 
 
 @router.message(F.text == "📍 Моє місце", not_admin_state_filter)
@@ -1459,10 +1466,9 @@ async def new_queue_subject_selected(message: Message, state: FSMContext, conn, 
         existing = queues.find_active_session_by_subject_teacher(conn, matched_sub["id"], teacher["id"], queue_type=q_type)
         if existing:
             await state.clear()
-            status_text = "постійна, запис доступний завжди"
             await open_queue_screen(
                 message, conn, subjects, existing["id"],
-                note=f"ℹ️ Черга на {type_label} для предмета <b>{matched_sub['name']}</b> ({teacher['name']}) вже створена ({status_text})!"
+                note=f"ℹ️ Черга на {type_label} для предмета <b>{matched_sub['name']}</b> ({teacher['name']}) вже створена!"
             )
             return
 
@@ -1536,10 +1542,9 @@ async def new_queue_teacher_selected(message: Message, state: FSMContext, conn, 
     existing = queues.find_active_session_by_subject_teacher(conn, matched_sub["id"], matched_teacher["id"], queue_type=q_type)
     if existing:
         await state.clear()
-        status_text = "постійна, запис доступний завжди"
         await open_queue_screen(
             message, conn, subjects, existing["id"],
-            note=f"ℹ️ Черга на {type_label} для предмета <b>{matched_sub['name']}</b> ({matched_teacher['name']}) вже створена ({status_text})!"
+            note=f"ℹ️ Черга на {type_label} для предмета <b>{matched_sub['name']}</b> ({matched_teacher['name']}) вже створена!"
         )
         return
 

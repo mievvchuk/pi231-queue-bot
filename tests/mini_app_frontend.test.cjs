@@ -367,7 +367,7 @@ for(const design of [false,true]) test('permanent queues have no signup toggles 
   app.S.queue={id:1,subject:'КПЗ',teacher:'Викладач',status:'open',count:0,labs:[],entries:[]};
   const text=app.queuePage().textContent;
   assert.doesNotMatch(text,/Закрити запис|Відкрити запис|завершення черги|Завершити сесію|Почати здачу|Зупинити здачу/);
-  assert.match(text,/Постійна черга/);
+  assert.doesNotMatch(text,/Постійна черга|Запис доступний завжди/i);
 });
 
 for (const design of [false, true]) test('admin menus do not expose removed statistics or reports, design='+design, () => {

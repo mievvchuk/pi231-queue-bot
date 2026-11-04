@@ -137,7 +137,13 @@ async def recover_back_without_state(message, state, conn, subjects):
 
 @router.message(AdminNavigation.queue, F.text == '🔄 Оновити')
 async def refresh_admin_queue(message, state, conn, subjects):
-    await switch_admin(message, state, conn, subjects)
+    admins.require_admin(conn, message.from_user.id)
+    sid = (await state.get_data()).get('session_id')
+    if not sid:
+        await admin_home(message, state, conn)
+        return
+    from queue_bot.handlers.admin.presentation import open_admin_queue_manager
+    await open_admin_queue_manager(message, conn, subjects, sid, state=state, refresh=True)
 
 
 @router.message(F.text == '🔙 Назад до черги', StateFilter('*'))

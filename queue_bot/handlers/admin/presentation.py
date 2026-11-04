@@ -51,7 +51,7 @@ def get_admin_student_menu(is_blocked: bool) -> ReplyKeyboardMarkup:
 
 
 
-async def open_admin_queue_manager(message: Message, conn, subjects, session_id: int, note: str = "", state=None):
+async def open_admin_queue_manager(message: Message, conn, subjects, session_id: int, note: str = "", state=None, *, refresh=False):
     if state is not None:
         from queue_bot.handlers.navigation import AdminNavigation
         await state.set_state(AdminNavigation.queue)
@@ -64,7 +64,14 @@ async def open_admin_queue_manager(message: Message, conn, subjects, session_id:
     text += lesson_summary(conn, session_id, message.from_user.id)
     if note:
         text = f"{note}\n\n{text}"
-    await message.answer(text, reply_markup=get_admin_queue_menu(session["status"] == "open"))
+    from queue_bot.handlers import queue_messages
+    uid = message.from_user.id
+    if refresh and await queue_messages.refresh(message, conn, uid, session_id, 'admin', text):
+        return
+    if not refresh:
+        await message.answer('Керування чергою', reply_markup=get_admin_queue_menu(session["status"] == "open"))
+    sent = await message.answer(text)
+    queue_messages.remember(conn, sent, uid, session_id, 'admin')
 
 
 

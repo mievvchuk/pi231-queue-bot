@@ -37,10 +37,10 @@ def test_authentication_proves_identity_not_unsafe_user_field():
         authenticate(signed().replace('auth_date=', 'auth_date=1'), TOKEN)
 
 
-@pytest.mark.parametrize('value', ['', 'user=1', signed(when=1), signed(when=int(time.time())+120), signed()+'&user=forged'])
+@pytest.mark.parametrize('value', ['', 'user=1', signed(when=1), signed(when=1700000120), signed(when=1700000000)+'&user=forged'])
 def test_authentication_rejects_missing_expired_future_and_duplicate_fields(value):
     with pytest.raises(AuthenticationError):
-        authenticate(value, TOKEN)
+        authenticate(value, TOKEN, now=1700000000)
 
 
 @pytest_asyncio.fixture

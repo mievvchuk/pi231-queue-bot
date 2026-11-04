@@ -59,7 +59,8 @@ async def test_retired_manual_buttons_do_not_change_active_lesson(conn, app):
         await state(app, 100).update_data(session_id=sid)
         await send(app, button, uid=100)
         assert dict(attendance.active_run(conn, sid)) == before
-        keys = [b.text for r in app[1].call_args.args[0].reply_markup.keyboard for b in r]
+        menu = app[1].call_args_list[-2].args[0].reply_markup
+        keys = [b.text for r in menu.keyboard for b in r]
         assert button not in keys
 
 

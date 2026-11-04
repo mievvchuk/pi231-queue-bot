@@ -22,7 +22,7 @@ class TurnTime(StatesGroup):
 def lesson_summary(conn, sid, uid):
     data = attendance.view(conn, sid, uid)
     if not data:
-        return '\n\nЗапис доступний завжди. Запит присутності почнеться через 5 хвилин після початку відповідної пари.'
+        return ''
     lines = ['\n\nЗдача на парі активна. На відповіді — 10 хвилин.']
     if data['collecting']:
         from datetime import datetime
@@ -130,7 +130,8 @@ async def queue_action(callback, state, conn, subjects):
                 labs_available=bool(lab_catalog.labs_for_session(session)),
                 consultation=session['queue_type'] == 'consultation' or session['subject_id'] == 7))
         elif action == 'refresh':
-            await open_queue_screen(callback.message, conn, subjects, sid, telegram_id=uid)
+            await open_queue_screen(callback.message, conn, subjects, sid, telegram_id=uid,
+                                    refresh=True, edit_message=callback.message)
         else:
             raise BotError('Оновіть чергу й оберіть дію ще раз.')
         await callback.answer()
