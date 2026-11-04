@@ -5,15 +5,13 @@ from queue_bot.handlers.common import get_admin_reply_menu, get_reply_menu
 from tests.test_navigation_bans import app, send
 
 
-def test_journal_menu_buttons_open_exact_page_for_both_roles(conn, monkeypatch):
+def test_journal_reply_buttons_are_plain_text_so_launch_goes_through_inline_button(conn, monkeypatch):
+    # A reply-keyboard web_app opens the Mini App without initData, which forces a login screen.
     monkeypatch.setattr(config,'MINI_APP_URL','https://bot.example/app/')
     for menu in (get_reply_menu(conn,999),get_reply_menu(conn,100),get_admin_reply_menu()):
         buttons = [button for row in menu.keyboard for button in row if button.text == 'Електронний журнал']
         assert len(buttons) == 1
-        assert buttons[0].web_app.url == 'https://bot.example/app/?page=journal'
-    monkeypatch.setattr(config,'MINI_APP_URL','')
-    button = next(b for row in get_reply_menu(conn,999).keyboard for b in row if b.text == 'Електронний журнал')
-    assert button.web_app is None
+        assert buttons[0].web_app is None
 
 
 @pytest.mark.asyncio

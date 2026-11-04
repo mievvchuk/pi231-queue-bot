@@ -41,15 +41,18 @@ def make_reply_keyboard(rows: list[list[str | KeyboardButton]]) -> ReplyKeyboard
     )
 
 
-def journal_menu_button() -> KeyboardButton:
+JOURNAL_TEXT = 'Електронний журнал'
+
+
+def journal_web_app() -> WebAppInfo | None:
+    # Only inline buttons pass initData; a reply-keyboard web_app opens the app unauthenticated.
     from queue_bot import config
-    target = WebAppInfo(url=f'{config.MINI_APP_URL}?page=journal') if config.MINI_APP_URL else None
-    return KeyboardButton(text='Електронний журнал', web_app=target)
+    return WebAppInfo(url=f'{config.MINI_APP_URL}?page=journal') if config.MINI_APP_URL else None
 
 
 def get_reply_menu(conn, telegram_id: int) -> ReplyKeyboardMarkup:
-    """Main navigation with a direct authenticated Mini App journal launch."""
-    rows = [['Черги', '📅 Розклад'], [journal_menu_button()], ['❓ Допомога', '🐞 Повідомити про баг']]
+    """Main navigation; the journal text button answers with an inline Mini App launch."""
+    rows = [['Черги', '📅 Розклад'], [JOURNAL_TEXT], ['❓ Допомога', '🐞 Повідомити про баг']]
     if admins.is_admin(conn, telegram_id):
         rows.append(['⚡ Режим адміна'])
     return make_reply_keyboard(rows)
@@ -128,7 +131,7 @@ def get_admin_reply_menu(is_owner: bool = True) -> ReplyKeyboardMarkup:
     """Daily administration first; secondary tools are grouped separately."""
     return make_reply_keyboard([
         ['📋 Черги та студенти', '📅 Розклад і заміни'],
-        [journal_menu_button()],
+        [JOURNAL_TEXT],
         ['❓ Допомога', '🐞 Повідомити про баг'],
         ['👤 Режим студента'],
         ['Ще для адміна'],
