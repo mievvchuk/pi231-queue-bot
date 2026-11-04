@@ -38,7 +38,7 @@ from queue_bot.handlers.common import (
     session_names,
     show,
 )
-from queue_bot.services import admins, queues, users, swap_requests
+from queue_bot.services import admins, queues, users, swap_requests, queue_navigation
 from queue_bot.services.errors import BotError
 from queue_bot.handlers.completions import CompletionFlow, begin_completion, receive_passed_labs, passed_selection_callback
 from queue_bot.services import lab_catalog
@@ -101,7 +101,10 @@ async def open_queue_screen(message: Message, conn, subjects, session_id: int, n
     if note:
         text = f"{note}\n\n{text}"
     in_queue = queues.get_user_position(conn, uid, session_id) is not None
-    markup = get_queue_view_reply_menu(is_admin=is_adm, can_edit_labs=in_queue and session['status'] != 'archived' and bool(lab_catalog.labs_for_session(session)))
+    origin = queue_navigation.return_to(conn, uid, session_id)
+    markup = get_queue_view_reply_menu(is_admin=is_adm,
+        back_text='🔙 До моїх черг' if origin['source'] == 'my' else '🔙 До черг',
+        can_edit_labs=in_queue and session['status'] != 'archived' and bool(lab_catalog.labs_for_session(session)))
     # One queue message owns all contextual actions. Reply keys only navigate.
     await message.answer('Оберіть дію під списком. Додаткові налаштування — у «Інші дії».', reply_markup=markup)
     await message.answer(text, reply_markup=screen_keyboard(conn, session_id, uid))
@@ -203,21 +206,22 @@ async def open_queue_category(message: Message, state: FSMContext, conn, subject
 
 
 @router.message(F.text == "👥 Мої черги", StateFilter("*"))
-async def my_queues(message: Message, state: FSMContext, conn, subjects):
+async def my_queues(message: Message, state: FSMContext, conn, subjects, page=1):
     await state.clear()
     sessions = queues.list_user_sessions(conn, message.from_user.id)
+    page = max(1, min(page, (len(sessions) + 7) // 8 or 1))
+    await state.set_state(StudentFlow.browsing_my_queues)
+    await state.update_data(page=page)
     if not sessions:
         await message.answer(
-            "Ви ще не записані в жодну чергу.",
+            "Мої черги\nВи ще не записані в жодну чергу.",
             reply_markup=get_reply_menu(conn, message.from_user.id),
         )
         return
-    await state.set_state(StudentFlow.browsing_my_queues)
-    await state.update_data(page=1)
     text = format_my_queues_overview(conn, sessions, subjects, message.from_user.id)
     await message.answer(
         text,
-        reply_markup=get_queues_reply_menu(sessions, subjects, page=1, group_coursework=False),
+        reply_markup=get_queues_reply_menu(sessions, subjects, page=page, group_coursework=False),
     )
 
 
@@ -388,9 +392,13 @@ async def refresh_coursework_queues_list(message: Message, state: FSMContext, co
     )
 
 
-@router.message(F.text.in_({"🔙 До категорій", "🔙 До черг", "🔙 До списку черг"}), not_admin_state_filter)
+@router.message(F.text.in_({"🔙 До категорій", "🔙 До черг", "🔙 До списку черг", '🔙 До моїх черг'}), not_admin_state_filter)
 async def back_to_queues_list(message: Message, state: FSMContext, conn, subjects):
-    await state.clear()
+    sid = (await state.get_data()).get('session_id')
+    origin = queue_navigation.return_to(conn, message.from_user.id, sid) if sid else {}
+    if message.text == '🔙 До моїх черг' or (message.text != '🔙 До категорій' and origin.get('source') == 'my'):
+        await my_queues(message, state, conn, subjects, page=origin.get('page', 1))
+        return
     await view_all_queues(message, state, conn, subjects)
 
 
@@ -405,6 +413,11 @@ async def select_queue_by_button(message: Message, state: FSMContext, conn, subj
             reply_markup=get_queue_categories_reply_menu(len(lessons), len(consults), len(coursework)),
         )
         return
+    current = await state.get_state()
+    data = await state.get_data()
+    if current in (StudentFlow.browsing_my_queues.state, StudentFlow.browsing_queues.state, StudentFlow.browsing_coursework_queues.state):
+        queue_navigation.remember(conn, message.from_user.id, session['id'],
+            'my' if current == StudentFlow.browsing_my_queues.state else 'all', data.get('page', 1))
     await state.clear()
     await state.update_data(session_id=session["id"])
     await open_queue_screen(message, conn, subjects, session["id"])

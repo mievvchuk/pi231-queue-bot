@@ -70,10 +70,10 @@ def get_schedule_reply_menu() -> ReplyKeyboardMarkup:
     ])
 
 
-def get_queue_view_reply_menu(is_admin: bool = False, can_edit_labs: bool = False) -> ReplyKeyboardMarkup:
+def get_queue_view_reply_menu(is_admin: bool = False, can_edit_labs: bool = False, back_text: str = '🔙 До черг') -> ReplyKeyboardMarkup:
     """Основні кнопки екрану перегляду черги (для старости/адміна додається швидкий перехід до керування чергою)."""
     rows = [
-        ["🔙 До черг", '🏠 Головне меню'],
+        [back_text, '🏠 Головне меню'],
     ]
     if is_admin:
         rows.append(["⚡ Режим адміна"])
