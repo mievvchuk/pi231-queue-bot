@@ -384,7 +384,7 @@ async def admin_users(request):
     restrictions.expire_due_restrictions(request[REQ_CONTEXT]['conn'])
     conn = request[REQ_CONTEXT]['conn']
     protected = admins.get_owner_ids(conn) | {row['telegram_id'] for row in admins.list_admins(conn)}
-    rows = conn.execute('SELECT id, telegram_id, full_name, is_blocked, banned_until FROM users ORDER BY full_name').fetchall()
+    rows = users.sort_users(conn.execute('SELECT id, telegram_id, full_name, is_blocked, banned_until FROM users').fetchall())
     return web.json_response({'users': [{**dict(row), 'protected': row['telegram_id'] in protected} for row in rows]})
 
 

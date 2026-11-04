@@ -18,18 +18,16 @@ from .common import (
 
 
 async def admin_list_users_start(message: Message, state: FSMContext, conn):
-    from .presentation import show_users_page
+    from .presentation import show_users_list
     await state.clear()
-    await show_users_page(message, state, conn, page=1)
+    await show_users_list(message, state, conn)
 
 
 
 async def admin_paginate_users(message: Message, state: FSMContext, conn):
-    from .presentation import show_users_page
-    data = await state.get_data()
-    page = data.get("users_page", 1)
-    page = (page - 1) if message.text == "⬅️" else (page + 1)
-    await show_users_page(message, state, conn, page=page)
+    from .presentation import show_users_list
+    # Old arrow buttons refresh the full list instead of hiding any users.
+    await show_users_list(message, state, conn)
 
 
 
@@ -53,10 +51,8 @@ async def admin_open_user_card(message: Message, state: FSMContext, conn):
 
 
 async def admin_back_to_users(message: Message, state: FSMContext, conn):
-    from .presentation import show_users_page
-    data = await state.get_data()
-    page = data.get("users_page", 1)
-    await show_users_page(message, state, conn, page=page)
+    from .presentation import show_users_list
+    await show_users_list(message, state, conn)
 
 
 
@@ -115,17 +111,9 @@ async def admin_finish_search_user(message: Message, state: FSMContext, conn):
         )
         return
 
-    lines = [f"🔍 <b>Результати пошуку:</b> ({len(results)})", ""]
-    for idx, u in enumerate(results[:10], 1):
-        lines.append(f"{idx}. {html.escape(u['full_name'])}")
-    if len(results) > 10:
-        lines.append("")
-        lines.append(f"... та ще {len(results) - 10} знайдених користувачів.")
+    from .presentation import send_user_rows
+    await send_user_rows(message, results, f"🔍 <b>Результати пошуку:</b> ({len(results)})", '🔙 До користувачів')
 
-    user_buttons = [f"👤 #{u['id']} {u['full_name']}" for u in results[:8]]
-    row_pairs = [user_buttons[i:i + 2] for i in range(0, len(user_buttons), 2)]
-    row_pairs.append(["🔙 До користувачів"])
-    await message.answer("\n".join(lines), reply_markup=make_reply_keyboard(row_pairs))
 
 
 
@@ -242,7 +230,7 @@ async def admin_ask_delete_user(message: Message, state: FSMContext, conn):
 
 
 async def admin_confirm_delete_user(message: Message, state: FSMContext, conn):
-    from .presentation import format_user_card, show_users_page
+    from .presentation import format_user_card, show_users_list
     data = await state.get_data()
     user_id = data.get("current_user_id")
     user = users.get_user_by_id(conn, user_id)
@@ -263,8 +251,7 @@ async def admin_confirm_delete_user(message: Message, state: FSMContext, conn):
         return
 
     await message.answer("✅ <b>Користувача успішно видалено!</b>")
-    page = data.get("users_page", 1)
-    await show_users_page(message, state, conn, page=page)
+    await show_users_list(message, state, conn)
 
 
 
@@ -279,7 +266,7 @@ async def show_blocked_list(message: Message, state: FSMContext, conn):
         await message.answer("Заблокованих користувачів немає.", reply_markup=get_admin_settings_menu(is_maintenance=is_maintenance_active(conn)))
         return
     rows = []
-    for u in blocked[:8]:
+    for u in blocked:
         tg_id_str = f" (ID: {u['telegram_id']})" if u["telegram_id"] and u["telegram_id"] > 0 else ""
         rows.append([f"🟢 Розблокувати: {u['full_name']}{tg_id_str}"])
     rows.append(["🔙 Назад"])
