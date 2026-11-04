@@ -39,6 +39,60 @@ async def data(app, uid=100):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize('back', ['🔙 Назад', '🔙 До адміністраторів'])
+async def test_admin_list_returns_to_management_then_settings_without_queue_context(conn, app, back):
+    for text in ('⚡ Адмін-панель', 'Ще для адміна', '⚙️ Налаштування', '👥 Адміністратори', '📋 Список адміністраторів'):
+        await send(app, text)
+    storage_key = StorageKey(bot_id=5,chat_id=100,user_id=100)
+    assert await app[0].storage.get_state(storage_key) == admin.AdminManageState.viewing_admins.state
+    await send(app, back)
+    assert await app[0].storage.get_state(storage_key) == admin.AdminManageState.in_admins_menu.state
+    await send(app, '🔙 До налаштувань')
+    assert await app[0].storage.get_state(storage_key) == admin.AdminPanelState.in_settings_menu.state
+    assert not any('Потрібно знову обрати чергу' in str(c) for c in app[1].call_args_list)
+
+
+@pytest.mark.asyncio
+async def test_admin_add_remove_and_cancel_preserve_the_management_return_path(conn, app, make_user):
+    from queue_bot.services import admins
+    make_user(2, 'Адмін Другий')
+    for text in ('👥 Адміністратори', '➕ Додати адміністратора', '🔙 Назад'):
+        await send(app, text)
+    storage_key = StorageKey(bot_id=5,chat_id=100,user_id=100)
+    assert await app[0].storage.get_state(storage_key) == admin.AdminManageState.in_admins_menu.state
+    await send(app, '➕ Додати адміністратора')
+    await send(app, '2')
+    assert admins.is_admin(conn, 2)
+    assert await app[0].storage.get_state(storage_key) == admin.AdminManageState.viewing_admins.state
+    await send(app, '🔙 Назад')
+    await send(app, '❌ Видалити адміністратора')
+    await send(app, '🔙 Назад')
+    assert await app[0].storage.get_state(storage_key) == admin.AdminManageState.in_admins_menu.state
+    await send(app, '❌ Видалити адміністратора')
+    await send(app, '❌ Видалити: Адмін Другий (2)')
+    assert not admins.is_admin(conn, 2)
+    assert await app[0].storage.get_state(storage_key) == admin.AdminManageState.viewing_admins.state
+    await send(app, '🔙 Назад')
+    await send(app, '🔙 Назад')
+    assert await app[0].storage.get_state(storage_key) == admin.AdminPanelState.in_settings_menu.state
+
+
+@pytest.mark.asyncio
+async def test_old_back_button_recovers_safely_after_admin_menu_state_was_lost(conn, app):
+    await send(app, '🔙 Назад')
+    assert await app[0].storage.get_state(StorageKey(bot_id=5,chat_id=100,user_id=100)) == admin.AdminPanelState.in_main_menu.state
+    assert 'Потрібно знову обрати чергу' not in str(app[1].call_args_list)
+
+
+@pytest.mark.asyncio
+async def test_old_report_button_cannot_reopen_removed_section(conn, app):
+    await send(app, '📊 Звіти та статистика')
+    buttons = [b.text for row in app[1].call_args[0][0].reply_markup.keyboard for b in row]
+    assert '📊 Звіти та статистика' not in buttons
+    assert 'прибрано' in str(app[1].call_args_list)
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize('uid,owner', [(100, True), (2, False)])
 async def test_compact_admin_menu_keeps_secondary_actions_and_owner_access(conn, app, make_user, uid, owner):
     from queue_bot.services import admins

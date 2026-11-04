@@ -25,16 +25,19 @@ async def admin_back_to_main_panel(message: Message, state: FSMContext, conn=Non
 async def admins_menu(message: Message, state: FSMContext, conn=None):
     admins.require_owner(conn, message.from_user.id)
     await state.clear()
+    await state.set_state(AdminManageState.in_admins_menu)
     rows = [
         ["📋 Список адміністраторів", "➕ Додати адміністратора"],
-        ["❌ Видалити адміністратора", "🔙 Назад"],
+        ["❌ Видалити адміністратора", "🔙 До налаштувань"],
     ]
     await message.answer("Керування адміністраторами. Оберіть дію на кнопках внизу 👇", reply_markup=make_reply_keyboard(rows))
 
 
 
-async def list_admins_message(message: Message, conn):
+async def list_admins_message(message: Message, conn, state: FSMContext):
     admins.require_owner(conn, message.from_user.id)
+    await state.clear()
+    await state.set_state(AdminManageState.viewing_admins)
     adm_list = admins.list_admins(conn)
     lines = ["👥 <b>Адміністратори:</b>"]
     for r in adm_list:
@@ -42,7 +45,7 @@ async def list_admins_message(message: Message, conn):
         lines.append(f"• <b>{html.escape(name)}</b> (<code>{r['telegram_id']}</code>)")
     rows = [
         ["➕ Додати адміністратора", "❌ Видалити адміністратора"],
-        ["🔙 Назад"],
+        ["🔙 До адміністраторів"],
     ]
     await message.answer("\n".join(lines), reply_markup=make_reply_keyboard(rows))
 
@@ -72,7 +75,7 @@ async def receive_admin_id(message: Message, state: FSMContext, conn):
     admins.add_admin(conn, message.from_user.id, new_admin_id)
     await state.clear()
     await message.answer(f"✅ Адміністратора з ID <code>{new_admin_id}</code> успішно додано!")
-    await list_admins_message(message, conn)
+    await list_admins_message(message, conn, state)
 
 
 
@@ -100,7 +103,7 @@ async def confirm_remove_admin_text(message: Message, state: FSMContext, conn):
     admins.remove_admin(conn, message.from_user.id, target_id)
     await state.clear()
     await message.answer(f"✅ Права адміністратора для ID <code>{target_id}</code> видалено.")
-    await list_admins_message(message, conn)
+    await list_admins_message(message, conn, state)
 
 
 
@@ -283,6 +286,7 @@ async def admin_category_settings(message: Message, state: FSMContext, conn=None
     admins.require_owner(conn, message.from_user.id)
     from queue_bot.services.maintenance import is_maintenance_active
     is_maint = is_maintenance_active(conn) if conn else False
+    await state.clear()
     await state.set_state(AdminPanelState.in_settings_menu)
     await message.answer(
         "⚙️ <b>Налаштування (Тільки для власника)</b>\n\nОберіть розділ нижче 👇",

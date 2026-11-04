@@ -8,7 +8,6 @@ from queue_bot import config
 from queue_bot.handlers.common import (
     get_admin_polls_menu,
     get_admin_reply_menu,
-    get_admin_reports_menu,
     get_reply_menu,
 )
 from queue_bot.services import polls, queues
@@ -181,7 +180,7 @@ def test_new_grouped_keyboards(conn):
     assert admin_texts == ['📋 Черги та студенти', '📅 Розклад і заміни', 'Ще для адміна']
     from queue_bot.handlers.common import get_admin_more_menu
     more_admin = [b.text for row in get_admin_more_menu().keyboard for b in row]
-    assert {'🗳 Опитування', '📊 Звіти та статистика', '👥 Список групи', '⚙️ Налаштування', '👤 Режим студента'} <= set(more_admin)
+    assert {'🗳 Опитування', '👥 Список групи', '⚙️ Налаштування', '👤 Режим студента'} <= set(more_admin)
     assert '⚙️ Налаштування' not in [b.text for row in get_admin_more_menu(is_owner=False).keyboard for b in row]
 
     polls_kb = get_admin_polls_menu()
@@ -190,11 +189,7 @@ def test_new_grouped_keyboards(conn):
     assert "📡 Активні опитування" in polls_texts
     assert "📦 Історія опитувань" in polls_texts
 
-    reports_kb = get_admin_reports_menu()
-    reports_texts = [btn.text for row in reports_kb.keyboard for btn in row]
-    assert "📈 Загальна статистика" in reports_texts
-    assert "📚 Звіти за предметами" in reports_texts
-    assert "📥 Завантажити звіт (PDF)" in reports_texts
+    assert '📊 Звіти та статистика' not in more_admin
 
 
 @pytest.mark.asyncio
