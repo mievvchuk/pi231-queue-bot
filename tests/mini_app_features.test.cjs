@@ -205,6 +205,7 @@ test('public grades remain visible and read-only in another students row',async(
   const nodes=descendants(features.page('journal'));
   assert.equal(nodes.filter(n=>String(n.attrs.class||'').includes('journal-grade')).length,3);
   assert.ok(!nodes.some(n=>n.tag==='input'&&String(n.attrs['aria-label']||'').startsWith('Коваль Андрій,')));
+  assert.equal(nodes.find(n=>n.tag==='th'&&n.attrs.scope==='row').textContent,'Петренко Іван');
   assert.equal(nodes.filter(n=>n.tag==='input'&&String(n.attrs.class||'').includes('journal-input')).length,3);
 });
 
