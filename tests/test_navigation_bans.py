@@ -39,6 +39,32 @@ async def data(app, uid=100):
 
 
 @pytest.mark.asyncio
+async def test_full_user_list_has_ukrainian_order_without_pages_and_survives_card_return(conn, app):
+    names = ['Антоненко Іван', 'Бондар Іван', 'Василенко Іван', 'Гнатюк Іван', 'Денисюк Іван',
+             'Емець Андрій', 'Євчук Михайло', 'Жук Іван', 'Зінченко Іван',
+             'Іваненко Іван', 'Їжакевич Іван', 'Йовенко Іван']
+    for name in reversed(names):
+        users.admin_create_placeholder(conn, 100, name)
+    await send(app, '📋 Список користувачів')
+    method = app[1].call_args[0][0]
+    text = method.text
+    assert all(name in text for name in names)
+    assert text.index('Емець Андрій') < text.index('Євчук Михайло') < text.index('Жук Іван')
+    assert 'Сторінка' not in text
+    buttons = [b.text for row in method.reply_markup.keyboard for b in row]
+    assert len([b for b in buttons if b.startswith('👤 #')]) == len(names) + 2
+    assert '⬅️' not in buttons and '➡️' not in buttons
+    selected = next(b for b in buttons if 'Євчук Михайло' in b)
+    await send(app, selected)
+    await send(app, '🔙 До користувачів')
+    assert all(name in app[1].call_args[0][0].text for name in names)
+    await send(app, '🔍 Знайти користувача')
+    await send(app, 'Іван')
+    found = [b.text for row in app[1].call_args[0][0].reply_markup.keyboard for b in row if b.text.startswith('👤 #')]
+    assert len(found) == len(users.search_users(conn, 'Іван')) > 8
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize('back', ['🔙 Назад', '🔙 До адміністраторів'])
 async def test_admin_list_returns_to_management_then_settings_without_queue_context(conn, app, back):
     for text in ('⚡ Адмін-панель', 'Ще для адміна', '⚙️ Налаштування', '👥 Адміністратори', '📋 Список адміністраторів'):

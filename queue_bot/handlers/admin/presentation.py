@@ -149,24 +149,31 @@ def format_user_card(user) -> str:
 
 
 
-async def show_users_page(message: Message, state: FSMContext, conn, page: int = 1):
-    users_list, current_page, total_pages = users.list_users(conn, page=page, per_page=8)
+async def send_user_rows(message, users_list, title, back_text):
+    user_buttons = [f"👤 #{u['id']} {u['full_name']}" for u in users_list]
+    row_pairs = [user_buttons[i:i + 2] for i in range(0, len(user_buttons), 2)]
+    markup = make_reply_keyboard(row_pairs + [[back_text]])
+    lines = [title, ''] + [f"{index}. {html.escape(user['full_name'])}" for index, user in enumerate(users_list, 1)]
+    # Send every name immediately, without page controls. Split only if a long
+    # roster exceeds Telegram's message limit; numbering stays continuous.
+    chunks, chunk = [], ''
+    for line in lines:
+        candidate = chunk + ('\n' if chunk else '') + line
+        if len(candidate.encode('utf-16-le')) // 2 > 3900:
+            chunks.append(chunk)
+            chunk = line
+        else:
+            chunk = candidate
+    if chunk:
+        chunks.append(chunk)
+    for index, text in enumerate(chunks):
+        await message.answer(text, reply_markup=markup if index == len(chunks) - 1 else None)
+
+
+async def show_users_list(message: Message, state: FSMContext, conn):
+    users_list = users.list_users(conn)
+    await state.set_state(AdminUserState.browsing_users)
     if not users_list:
         await message.answer("Користувачів у базі ще немає.", reply_markup=get_admin_users_menu())
         return
-
-    await state.set_state(AdminUserState.browsing_users)
-    await state.update_data(users_page=current_page)
-
-    lines = ["👥 <b>Користувачі</b>", ""]
-    for idx, u in enumerate(users_list, 1):
-        lines.append(f"{idx}. {html.escape(u['full_name'])}")
-    lines.append("")
-    lines.append(f"Сторінка {current_page}/{total_pages}")
-    text = "\n".join(lines)
-
-    user_buttons = [f"👤 #{u['id']} {u['full_name']}" for u in users_list]
-    row_pairs = [user_buttons[i:i + 2] for i in range(0, len(user_buttons), 2)]
-    markup = get_paginated_reply_keyboard(row_pairs, current_page, total_pages, back_text="🔙 В адмін-панель")
-    await message.answer(text, reply_markup=markup)
-
+    await send_user_rows(message, users_list, f"👥 <b>Користувачі</b> · Усього: {len(users_list)}", '🔙 В адмін-панель')

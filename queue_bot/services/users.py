@@ -1,11 +1,25 @@
 import re
 import sqlite3
+import unicodedata
 
 from queue_bot.storage.database import transaction
 from queue_bot.services import admins
 from queue_bot.services.errors import BotError
 
 NAME_PATTERN = re.compile(r"^[^\W\d_]+(?:['’\-][^\W\d_]+)*$")
+UKRAINIAN_ALPHABET = 'абвгґдеєжзиіїйклмнопрстуфхцчшщьюя'
+_LETTER_ORDER = {letter: index + 1 for index, letter in enumerate(UKRAINIAN_ALPHABET)}
+
+
+def ukrainian_name_key(name):
+    normalized = unicodedata.normalize('NFC', name).casefold()
+    return tuple(_LETTER_ORDER.get(char, 0 if char.isspace() else 100 + ord(char))
+                 for char in normalized if char not in "'’ʼ`")
+
+
+def sort_users(rows):
+    """The same Ukrainian ordering for SQLite, PostgreSQL and every user list."""
+    return sorted(rows, key=lambda row: (ukrainian_name_key(row['full_name']), row['id']))
 
 
 def validate_full_name(text: str) -> str:
@@ -93,7 +107,7 @@ def list_blocked_users(conn):
     """Повертає список заблокованих студентів."""
     from queue_bot.services.restrictions import expire_due_restrictions
     expire_due_restrictions(conn)
-    return conn.execute("SELECT * FROM users WHERE is_blocked ORDER BY LOWER(full_name), id").fetchall()
+    return sort_users(conn.execute("SELECT * FROM users WHERE is_blocked").fetchall())
 
 
 def get_or_create_user_by_name(conn, full_name: str):
@@ -110,19 +124,9 @@ def get_or_create_user_by_name(conn, full_name: str):
 
 # ---------- CRUD розділу «Користувачі» (з перевіркою прав та аудитом) ----------
 
-def list_users(conn, page: int = 1, per_page: int = 8) -> tuple[list, int, int]:
-    """Повертає користувачів з алфавітним сортуванням та пагінацією."""
-    total = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
-    if total == 0:
-        return [], 1, 1
-    total_pages = max(1, (total + per_page - 1) // per_page)
-    page = max(1, min(page, total_pages))
-    offset = (page - 1) * per_page
-    rows = conn.execute(
-        "SELECT * FROM users ORDER BY LOWER(full_name), id LIMIT ? OFFSET ?",
-        (per_page, offset),
-    ).fetchall()
-    return rows, page, total_pages
+def list_users(conn) -> list:
+    """Return the complete roster in Ukrainian alphabetical order."""
+    return sort_users(conn.execute('SELECT * FROM users').fetchall())
 
 
 def search_users(conn, query: str) -> list:
@@ -130,10 +134,10 @@ def search_users(conn, query: str) -> list:
     clean = query.strip().lower()
     if not clean:
         return []
-    return conn.execute(
-        "SELECT * FROM users WHERE LOWER(full_name) LIKE ? ORDER BY LOWER(full_name), id",
+    return sort_users(conn.execute(
+        "SELECT * FROM users WHERE LOWER(full_name) LIKE ?",
         (f"%{clean}%",),
-    ).fetchall()
+    ).fetchall())
 
 
 def admin_create_placeholder(conn, actor_id: int, full_name: str):

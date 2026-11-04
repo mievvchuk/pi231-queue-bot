@@ -39,6 +39,20 @@ async def post(client, section, data, uid=100):
 
 
 @pytest.mark.asyncio
+async def test_group_returns_every_user_in_ukrainian_alphabetical_order(admin_client, conn):
+    expected = ['Гнатюк Іван', 'Ґалаган Іван', 'Денисюк Іван', 'Емець Іван', 'Євчук Михайло',
+                'Жук Іван', 'Зінченко Іван', 'Іваненко Іван', 'Їжакевич Іван', 'Йовенко Іван']
+    for name in reversed(expected):
+        users.admin_create_placeholder(conn, 100, name)
+    for path in ('/api/miniapp/admin/users?mode=admin', '/api/miniapp/admin/manage/group?mode=admin'):
+        result = await admin_client.get(path, headers=headers(100))
+        assert result.status == 200
+        rows = (await result.json())['users']
+        assert len(rows) == len(expected) + 3
+        assert [row['full_name'] for row in rows if row['full_name'] in expected] == expected
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize('section', ['subjects', 'group', 'history', 'replacements', 'saturdays', 'owner', 'admins', 'bugs', 'proposals', 'polls'])
 async def test_admin_sections_require_signed_current_role_and_admin_mode(admin_client, conn, section):
     path = '/api/miniapp/admin/manage/' + section
