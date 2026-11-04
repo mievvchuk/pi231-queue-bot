@@ -126,11 +126,11 @@ const deferred = () => {
   return { resolve, reject, promise };
 };
 
-const journalData = (group=false) => ({period:'2026-2027:1',periods:['2026-2027:1'],group,can_review:group,can_set_dates:group,
+const journalData = (group=false) => ({period:'2026-2027:1',periods:['2026-2027:1'],group,can_set_dates:group,
   viewer_id:1,subjects:[{key:'кпз',name:'КПЗ',labs:[{number:1,parts:1},{number:2,parts:1},{number:3,parts:1}]}],students:[{id:1,name:'Петренко Іван'},{id:2,name:'Коваль Андрій'}],dates:[],
-  records:[5,2,3].map((grade,i)=>({id:i+1,user_id:1,subject_key:'кпз',subject_name:'КПЗ',student_name:'Петренко Іван',kind:'lab',number:i+1,part:1,can_edit:true,grade,status:'pending',revision:0,note:''}))});
+  records:[5,2,3].map((grade,i)=>({id:i+1,user_id:1,subject_key:'кпз',subject_name:'КПЗ',student_name:'Петренко Іван',kind:'lab',number:i+1,part:1,can_edit:true,grade,revision:0,note:''}))});
 
-test('journal renders grades, filters and an explicit pending status',async()=>{
+test('journal renders grades without any approval status',async()=>{
   const data=journalData();
   const {features}=setup(async()=>data);
   await features.open('journal');
@@ -140,7 +140,7 @@ test('journal renders grades, filters and an explicit pending status',async()=>{
   assert.match(grades[0].attrs.class,/grade-five/);
   assert.match(grades[1].attrs.class,/grade-low/);
   assert.doesNotMatch(grades[2].attrs.class,/grade-low|grade-five/);
-  assert.match(page.textContent,/чекає підтвердження/i);
+  assert.doesNotMatch(page.textContent,/підтвердж|виправлення/i);
   assert.equal(descendants(page).filter(n=>n.tag==='table').length,1);
   assert.match(page.textContent,/Коваль Андрій/);
   assert.match(page.textContent,/Дати ще не вказані/);
@@ -149,24 +149,22 @@ test('journal renders grades, filters and an explicit pending status',async()=>{
   assert.match(css,/grade-low\s*\{[^}]*color:\s*#fff;[^}]*background:\s*#000;/);
 });
 
-test('journal admin approval submits the exact displayed revision and keeps the group period',async()=>{
+test('admin edits another students grade inline in group mode without approval',async()=>{
   const calls=[];
   const data=journalData(true);
+  data.records.forEach(r=>{r.user_id=2;r.student_name='Коваль Андрій';});
   const {features,S,panels}=setup(async(path,body)=>{calls.push([path,body]);return body?{message:'Збережено'}:data;});
   S.mode='admin';
   await features.open('journal',false,'?period=2026-2027:1&scope=group');
-  const page=features.page('journal');
-  const cell=descendants(page).find(n=>n.tag==='button'&&String(n.attrs['aria-label']||'').includes('оцінка 1: 5'));
-  assert.ok(cell);cell.events.click();
-  const button=descendants(panels.at(-1)).find(n=>n.tag==='button'&&n.textContent==='Підтвердити');
-  assert.ok(button);
-  button.events.click();
-  const form=descendants(panels.at(-1)).find(n=>n.tag==='form');
-  await form.events.submit({preventDefault(){}});
+  const nodes=descendants(features.page('journal'));
+  assert.ok(!nodes.some(n=>n.tag==='button'&&/Підтвердити|виправлення/.test(n.textContent)));
+  const cell=nodes.find(n=>n.tag==='input'&&n.attrs['aria-label']==='Коваль Андрій, ЛР 1, оцінка 1');
+  assert.ok(cell);
+  cell.value='3';
+  await cell.events.change({target:cell});
+  assert.equal(panels.length,0);
   assert.equal(calls[1][0],'/journal');
-  assert.equal(calls[1][1].revision,0);
-  assert.equal(calls[1][1].record_id,1);
-  assert.equal(calls[1][1].status,'approved');
+  assert.deepEqual([calls[1][1].action,calls[1][1].user_id,calls[1][1].record_id,calls[1][1].revision,calls[1][1].grade],['submit',2,1,0,3]);
   assert.match(calls[2][0],/period=2026-2027%3A1&scope=group/);
 });
 
@@ -206,8 +204,8 @@ test('public grades remain visible and read-only in another students row',async(
   await features.open('journal');
   const nodes=descendants(features.page('journal'));
   assert.equal(nodes.filter(n=>String(n.attrs.class||'').includes('journal-grade')).length,3);
-  assert.equal(nodes.filter(n=>n.tag==='span'&&String(n.attrs.class||'').includes('journal-cell cell-pending')).length,3);
-  assert.ok(!nodes.some(n=>n.tag==='button'&&String(n.attrs['aria-label']||'').startsWith('Коваль Андрій,')));
+  assert.ok(!nodes.some(n=>n.tag==='input'&&String(n.attrs['aria-label']||'').startsWith('Коваль Андрій,')));
+  assert.equal(nodes.filter(n=>n.tag==='input'&&String(n.attrs.class||'').includes('journal-input')).length,3);
 });
 
 test("an old feature response cannot overwrite the newly opened feature", async () => {

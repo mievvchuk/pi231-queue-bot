@@ -1480,7 +1480,6 @@ window.createPI231Features = function (H) {
       await send('/journal', values, ctx, false);
       if(current(ctx.token,ctx.epoch,ctx.key))await open('journal',true,query());
     };
-    const labels={pending:'Чекає підтвердження',approved:'Підтверджено',rejected:'Повернуто на виправлення'};
     const period=select(rows(data.periods).map(p=>[p,p.replace(':',' · семестр ')]),data.period);
     period.addEventListener('change',()=>open('journal',false,query(data.group,period.value)));
     const subjects=rows(data.subjects);
@@ -1494,21 +1493,8 @@ window.createPI231Features = function (H) {
     const search=input({type:'search',required:false,placeholder:'Прізвище або ім’я','aria-label':'Пошук студента'});
     const tables=el('div',{class:'journal-tables'});
     const tone = value => value===undefined||value===''?'':Number(value)===5?' grade-five':Number(value)<3?' grade-low':'';
-    const grade = (value,status) => el('span',{class:'journal-grade'+tone(value),'aria-label':'Оцінка '+value+' із 5. '+labels[status]},String(value));
-    const mark = record => record&&record.status!=='approved'?el('small',{class:'journal-status-mark','aria-hidden':'true'},record.status==='pending'?'?':'!'):null;
-    const reviewRecord=(record,status)=>{
-      const note=text({required:status==='rejected',maxlength:500});
-      sheet(status==='approved'?'Підтвердити оцінку?':'Повернути на виправлення',record.student_name+' · '+record.subject_name+' · '+record.grade+' із 5').append(form([field('Коментар адміністратора',note)],status==='approved'?'Підтвердити':'Повернути',ctx=>save({action:'review',record_id:record.id,revision:record.revision,status,note:note.value},ctx)));
-    };
-    const editCell=(student,subject,column,record)=>{
-      const score=input({type:'number',min:0,max:5,step:0.1,value:record?.grade??'',placeholder:'Від 0 до 5'});
-      const note=text({required:false,maxlength:500});note.value=record?.note||'';
-      const panel=sheet(student.name,subject.name+' · '+column.title+' · оцінка '+column.part);
-      if(record)panel.append(badge(labels[record.status]),record.review_note?el('p',{},'Коментар: '+record.review_note):null);
-      panel.append(form([field('Оцінка',score),field('Примітка',note)],'Зберегти',ctx=>save({action:'submit',period:data.period,user_id:student.id,subject_key:subject.key,kind:column.kind,number:column.number,part:column.part,grade:Number(score.value),note:note.value,...(record?{record_id:record.id,revision:record.revision}:{})},ctx)));
-      if(data.can_review&&record?.status==='pending')panel.append(el('div',{class:'button-row'},btn('Підтвердити',()=>reviewRecord(record,'approved'),'button primary'),btn('На виправлення',()=>reviewRecord(record,'rejected'),'button secondary')));
-    };
-    // Own row: the grade is typed straight into the cell and saved on change, no dialog.
+    const grade = value => el('span',{class:'journal-grade'+tone(value),'aria-label':'Оцінка '+value+' із 5'},String(value));
+    // Grades are typed straight into the cell and saved on change, no dialog or approval.
     const saveInline=async(student,subject,column,record,box)=>{
       const raw=box.value.trim().replace(',','.');
       const restore=()=>{box.value=record?.grade??'';};
@@ -1554,14 +1540,12 @@ window.createPI231Features = function (H) {
           if(column.kind==='average'){const a=data.averages?.[student.id]?.[subject.key]?.[column.number];return el('td',{class:'journal-average'},a&&a.average!==null?a.average.toFixed(2):'—');}
           const record=rows(data.records).find(r=>r.user_id===student.id&&r.subject_key===subject.key&&r.kind===column.kind&&r.number===column.number&&(r.part||1)===column.part);
           const configured=subject.labs?.find(l=>l.number===column.number)?.parts||1;
-          const editable=record?record.can_edit:((student.id===data.viewer_id||data.can_review)&&!column.legacy&&(column.kind==='attestation'||column.part<=configured));
-          const cls='journal-cell'+(record?' cell-'+record.status:' cell-empty');
-          if(editable&&!data.group&&student.id===data.viewer_id)return el('td',{},el('span',{class:cls},
-            el('input',{class:'journal-input'+tone(record?.grade),'data-cell':[subject.key,column.kind,column.number,column.part].join(':'),type:'text',inputmode:'decimal',autocomplete:'off',maxlength:4,value:record?.grade??'','aria-label':column.title+', оцінка '+column.part,
-              onchange:e=>saveInline(student,subject,column,record,e.target),onkeydown:e=>{if(e.key==='Enter')e.target.blur();}}),mark(record)));
-          const content=record?[grade(record.grade,record.status),mark(record)]:el('span',{'aria-label':'Оцінки ще немає'},'—');
-          const node=editable?el('button',{class:cls,type:'button','aria-label':student.name+', '+column.title+', оцінка '+column.part+(record?': '+record.grade:' — додати'),onclick:()=>editCell(student,subject,column,record)},content):el('span',{class:cls},content);
-          return el('td',{},node);
+          const editable=record?record.can_edit:((student.id===data.viewer_id||data.group)&&!column.legacy&&column.part<=configured);
+          const cls='journal-cell'+(record?'':' cell-empty');
+          if(editable)return el('td',{},el('span',{class:cls},
+            el('input',{class:'journal-input'+tone(record?.grade),'data-cell':[student.id,subject.key,column.kind,column.number,column.part].join(':'),type:'text',inputmode:'decimal',autocomplete:'off',maxlength:4,value:record?.grade??'','aria-label':(data.group?student.name+', ':'')+column.title+', оцінка '+column.part,
+              onchange:e=>saveInline(student,subject,column,record,e.target),onkeydown:e=>{if(e.key==='Enter')e.target.blur();}})));
+          return el('td',{},el('span',{class:cls},record?grade(record.grade):el('span',{'aria-label':'Оцінки ще немає'},'—')));
         }))));
         return el('section',{class:'journal-subject'},el('h2',{},subject.name),
           el('div',{class:'journal-table-scroll',role:'region',tabindex:0,'aria-label':'Таблиця оцінок: '+subject.name},el('table',{class:'journal-table'},el('caption',{class:'screen-reader-only'},subject.name+' — журнал групи'),head,body)),
@@ -1587,10 +1571,9 @@ window.createPI231Features = function (H) {
       const subject=select(subjects.map(s=>[s.key,s.name]),subjectFilter.value||undefined),number=input({type:'number',min:1,max:100,step:1,value:1}),due=input({type:'date',required:false});
       sheet('Дата атестації','Порожня дата прибирає попередню дату.').append(form([field('Предмет',subject),field('Номер атестації',number),field('Дата',due)],'Зберегти дату',ctx=>save({action:'date',period:data.period,subject_key:subject.value,number:Number(number.value),due_date:due.value},ctx)));
     },'button secondary'));
-    return [card(small(data.group?'Режим перевірки: натисни на клітинку, щоб підтвердити або повернути оцінку.':'Впиши оцінку прямо в клітинку свого рядка — вона збережеться сама, а адміністратор потім її підтвердить.'),
+    return [card(small(data.group?'Редагування групи: можна змінити оцінку будь-якого студента прямо в клітинці.':'Впиши оцінку прямо в клітинку свого рядка — вона збережеться сама.'),
       field('Навчальний період',period),field('Студент',search),
-      small('? — чекає підтвердження. ! — повернуто на виправлення.'),
-      S.data?.me?.is_admin?btn(data.group?'Завершити перевірку':'Перевірка адміністратора',()=>{if(!data.group)S.mode='admin';open('journal',false,query(!data.group));},'button secondary'):null),summary,tables,pager,dates];
+      S.data?.me?.is_admin?btn(data.group?'Завершити редагування':'Редагувати оцінки групи',()=>{if(!data.group)S.mode='admin';open('journal',false,query(!data.group));},'button secondary'):null),summary,tables,pager,dates];
   }
 
 

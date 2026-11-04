@@ -1161,11 +1161,6 @@ small {
 .journal-table thead .journal-name { z-index: 5; }
 .journal-table thead small { display: block; font-size: 10px; font-weight: 400; }
 .journal-cell { display: inline-flex; position: relative; align-items: center; justify-content: center; min-height: 44px; min-width: 48px; border: 1px solid transparent; border-radius: 10px; background: transparent; color: inherit; padding: 0; }
-button.journal-cell { cursor: pointer; }
-button.journal-cell:focus-visible { outline: 2px solid var(--accent, #647a1e); outline-offset: 1px; }
-.journal-cell.cell-pending { border-style: dashed; border-color: var(--accent, #647a1e); }
-.journal-cell.cell-rejected { border-color: #c62828; }
-.journal-status-mark { position: absolute; top: -3px; right: 0; font-weight: 800; padding: 0 3px; background: var(--surface-solid, var(--surface, #fff)); border-radius: 3px; }
 .journal-cell .journal-grade { min-width: 42px; min-height: 42px; padding: 4px; font-size: 22px; border-radius: 8px; }
 .journal-own-row > .journal-name { box-shadow: inset 3px 0 var(--accent, #647a1e); }
 @media (max-width: 600px) { .journal-table .journal-name { width: 150px; min-width: 150px; max-width: 150px; font-size: 12px; } }
@@ -1182,3 +1177,5 @@ button.journal-cell:focus-visible { outline: 2px solid var(--accent, #647a1e); o
 .journal-pager-step { min-width: 44px; min-height: 44px; padding: 0 12px; }
 .journal-pager-page { min-width: 40px; min-height: 40px; border: 1px solid var(--line, #8885); border-radius: 10px; background: transparent; color: inherit; font: inherit; font-weight: 700; cursor: pointer; }
 .journal-pager-page.active { border-color: var(--accent, #647a1e); background: var(--accent, #647a1e); color: #fff; }
+.journal-input.grade-five { color: #c62828; background: #ffebee; }
+.journal-input.grade-low { color: #fff; background: #000; }
