@@ -1,4 +1,4 @@
-"""Student submissions and explicit administrator review, independent of queue order."""
+"""Students enter their own grades; administrators may edit anyone's. No approval step."""
 import json
 import math
 import re
@@ -126,8 +126,7 @@ def submit(conn, uid, subjects, data, *, admin_mode=False):
             if duplicate:
                 raise BotError('Запис з таким предметом і номером уже є. Відредагуйте його.')
             conn.execute("""UPDATE journal_cells SET period = ?, subject_key = ?, subject_name = ?,
-                kind = ?, number = ?, part = ?, grade = ?, note = ?, status = 'pending',
-                review_note = '', reviewed_by = NULL, revision = revision + 1,
+                kind = ?, number = ?, part = ?, grade = ?, note = ?, revision = revision + 1,
                 updated_at = CURRENT_TIMESTAMP WHERE id = ?""",
                 (period, subject['key'], subject['name'], kind, number, part, grade, note, record_id))
         else:
@@ -142,25 +141,6 @@ def submit(conn, uid, subjects, data, *, admin_mode=False):
                 (record_id, target_id, period, subject['key'], subject['name'], kind, number, part, grade, note))
         _audit(conn, record_id, uid, 'submit')
     return record_id
-
-
-def review(conn, uid, data):
-    admins.require_admin(conn, uid)
-    status = data.get('status')
-    if status not in ('approved', 'rejected'):
-        raise BotError('Оберіть підтвердження або повернення на виправлення.')
-    note = _text(data.get('note', ''))
-    if status == 'rejected' and not note:
-        raise BotError('Вкажіть, що студенту потрібно виправити.')
-    with transaction(conn):
-        row = _record(conn, data.get('record_id'))
-        _revision(row, data.get('revision'))
-        if row['status'] != 'pending':
-            raise BotError('Запис уже перевірений. Оновіть журнал.')
-        conn.execute('''UPDATE journal_cells SET status = ?, review_note = ?, reviewed_by = ?,
-            revision = revision + 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?''',
-            (status, note, uid, row['id']))
-        _audit(conn, row['id'], uid, status)
 
 
 def set_date(conn, uid, subjects, data):
@@ -198,11 +178,11 @@ def view(conn, uid, subjects, *, group=False, period=None):
         ORDER BY r.subject_name, r.kind, r.number, r.part, r.id''', (period,)).fetchall()]
     records.sort(key=lambda r: (users.ukrainian_name_key(r['student_name']), r['subject_key'], r['kind'], r['number'], r['part']))
     for record in records:
-        record.pop('reviewed_by', None)
+        for field in ('reviewed_by', 'status', 'review_note'):
+            record.pop(field, None)
         record['can_edit'] = group or record['user_id'] == actor['id']
         if not record['can_edit']:
             record.pop('note', None)
-            record.pop('review_note', None)
     periods = {current_period(), period}
     periods.update(row['period'] for row in conn.execute('SELECT DISTINCT period FROM journal_cells').fetchall())
     subject_rows = catalog(subjects)
@@ -215,7 +195,7 @@ def view(conn, uid, subjects, *, group=False, period=None):
     averages = {str(student['id']): {subject['key']: summary(subject, [r for r in records if r['user_id'] == student['id'] and r['subject_key'] == subject['key']])
                                      for subject in subject_rows} for student in students}
     return {'period': period, 'periods': sorted(periods, reverse=True), 'subjects': subject_rows, 'averages': averages,
-            'records': records, 'group': group, 'can_review': group, 'viewer_id': actor['id'],
+            'records': records, 'group': group, 'viewer_id': actor['id'],
             'can_set_dates': group and admins.is_owner(conn, uid),
             'students': [{'id': row['id'], 'name': row['full_name']} for row in students],
             'dates': [dict(row) for row in conn.execute('SELECT subject_key, number, due_date FROM journal_dates WHERE period = ?', (period,)).fetchall()]}

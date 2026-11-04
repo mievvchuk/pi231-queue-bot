@@ -18,10 +18,6 @@ async def handle(request):
     if action == 'submit':
         journal.submit(ctx['conn'], uid, ctx['subjects'], data, admin_mode=request[api.REQ_ADMIN])
         message = 'Оцінку збережено.'
-    elif action == 'review':
-        api.require_admin(request)
-        journal.review(ctx['conn'], uid, data)
-        message = 'Результат перевірки збережено.'
     elif action == 'date':
         api.require_admin(request)
         journal.set_date(ctx['conn'], uid, ctx['subjects'], data)

@@ -39,7 +39,7 @@ def summary(subject, cells):
     grades = {1: [], 2: []}
     for cell in cells:
         work = works.get(cell['number'])
-        if cell['kind'] == 'lab' and work and cell['status'] != 'rejected':
+        if cell['kind'] == 'lab' and work:
             grades[work['attestation']].append(cell['grade'])
 
     def stats(values, attestations):
