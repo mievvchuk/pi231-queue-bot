@@ -460,9 +460,18 @@ class PGConnectionWrapper:
         self.raw.commit()
 
     def execute(self, sql: str, params: tuple = ()):
+        try:
+            return self._execute(sql, params)
+        except Exception as error:
+            error.add_note('SQL template (without bound parameter values): ' + sql)
+            raise
+
+    def _execute(self, sql: str, params: tuple = ()):
         self._ensure_connected()
-        # Замінюємо ? на %s для psycopg
-        pg_sql = sql.replace("?", "%s")
+        # SQLite SQL uses literal percent signs (LIKE, modulo, format strings).
+        # Escape these before introducing psycopg placeholders, even for an
+        # empty parameter tuple: psycopg still parses the query in that case.
+        pg_sql = sql.replace('%', '%%').replace('?', '%s')
         is_insert = pg_sql.strip().upper().startswith("INSERT INTO")
         lastrowid = None
 

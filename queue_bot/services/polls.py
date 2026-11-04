@@ -549,7 +549,8 @@ async def check_expired_polls(bot: Bot, conn) -> int:
                 await close_poll_and_summarize(bot, conn, p["id"])
                 closed_count += 1
         except Exception as e:
-            log.warning(f"Error checking expiry for poll #{p['id']}: {e}")
+            from queue_bot.services import diagnostics
+            await diagnostics.report(e, bot=bot, conn=conn, context={'source':'worker', 'operation':'poll_expiry', 'poll_id':p['id']})
 
     return closed_count
 
@@ -561,5 +562,6 @@ async def start_polls_watcher(bot: Bot, conn, interval_sec: int = 15) -> None:
         try:
             await check_expired_polls(bot, conn)
         except Exception as e:
-            log.exception(f"Unexpected error in polls watcher: {e}")
+            from queue_bot.services import diagnostics
+            await diagnostics.report(e, bot=bot, conn=conn, context={'source':'worker', 'operation':'polls_watcher'})
         await asyncio.sleep(interval_sec)

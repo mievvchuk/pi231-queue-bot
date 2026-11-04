@@ -321,14 +321,14 @@ async def test_maintenance_enabled_while_body_waits_blocks_completion(client, co
     assert queues.get_user_position(conn, 1, sid) == 1
 
 
-def test_mini_app_entry_lives_in_more_without_expanding_main_menu(conn, monkeypatch):
+def test_mini_app_is_not_duplicated_in_chat_keyboards(conn, monkeypatch):
     from queue_bot.handlers.common import get_reply_menu, get_student_more_menu
     monkeypatch.setattr(config, 'MINI_APP_URL', '', raising=False)
     before = [b.text for row in get_reply_menu(conn, 100).keyboard for b in row]
     monkeypatch.setattr(config, 'MINI_APP_URL', 'https://example.invalid/app/')
     after = [b.text for row in get_reply_menu(conn, 100).keyboard for b in row]
     assert after == before == ['Черги', '📅 Розклад', 'Ще']
-    assert '📱 Мініапка' in [b.text for row in get_student_more_menu(conn, 100).keyboard for b in row]
+    assert '📱 Мініапка' not in [b.text for row in get_student_more_menu(conn, 100).keyboard for b in row]
 
 
 @pytest.mark.parametrize('url', ['http://example.com/app/', 'https://user:password@example.com/app/', 'javascript:alert(1)', 'https://example.com/app/#bad'])

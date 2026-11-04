@@ -151,9 +151,15 @@ async def guard(request, handler):
         response = web.json_response({'error': str(error)}, status=status)
     except web.HTTPException:
         raise
-    except Exception:
-        log.exception('Mini App request failed: %s %s', request.method, request.path)
-        response = web.json_response({'error': 'Не вдалося виконати дію. Оновіть екран і спробуйте знову.'}, status=500)
+    except Exception as error:
+        from queue_bot.services import diagnostics
+        ctx = request.get(REQ_CONTEXT, {})
+        route = request.match_info.route.resource
+        record = await diagnostics.report(error, bot=ctx.get('bot'), conn=ctx.get('conn'),
+            telegram_id=request.get(REQ_UID), context={'source':'mini_app', 'method':request.method,
+                'route':getattr(route, 'canonical', 'unknown')})
+        response = web.json_response({'error': diagnostics.explanation(error) + f' Код помилки: {record["code"]}.',
+                                      'error_code':record['code']}, status=500)
     response.headers['Cache-Control'] = 'no-store'
     response.headers['X-Content-Type-Options'] = 'nosniff'
     return response

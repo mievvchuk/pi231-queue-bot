@@ -30,8 +30,9 @@ async def main():
         if config.MINI_APP_URL:
             try:
                 await bot.set_chat_menu_button(menu_button=MenuButtonWebApp(text='Мініапка', web_app=WebAppInfo(url=config.MINI_APP_URL)))
-            except Exception:
-                logging.exception('Could not configure Mini App menu; inline launch is still available')
+            except Exception as error:
+                from queue_bot.services import diagnostics
+                await diagnostics.report(error, bot=bot, conn=conn, context={'source':'startup', 'operation':'mini_app_menu'})
         from queue_bot.services.updates import check_and_broadcast_updates
         from queue_bot.services.schedule_notifier import start_schedule_notifier
         from queue_bot.services.polls import start_polls_watcher
@@ -46,8 +47,9 @@ async def main():
             try:
                 await dp.start_polling(bot, close_bot_session=False)
                 break
-            except Exception:
-                logging.exception('Telegram polling failed; retrying in %s seconds', config.POLLING_RETRY_SECONDS)
+            except Exception as error:
+                from queue_bot.services import diagnostics
+                await diagnostics.report(error, bot=bot, conn=conn, context={'source':'worker', 'operation':'telegram_polling'})
                 await asyncio.sleep(config.POLLING_RETRY_SECONDS)
     finally:
         prepare_shutdown(runner)

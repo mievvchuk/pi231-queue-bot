@@ -107,8 +107,10 @@ async def deliver(bot, conn, subjects, *, now=None):
                 if event['kind'] == 'finish_reminder':
                     conn.execute("UPDATE lesson_attendance SET deadline = ? WHERE id = ? AND revision = ? AND state = 'serving' AND deadline IS NULL", (now + attendance.RESPONSE_SECONDS, row['id'], row['revision']))
             continue
-        except Exception:
-            log.exception('Attendance delivery failed for entry %s; retrying', row['entry_id'])
+        except Exception as error:
+            from queue_bot.services import diagnostics
+            await diagnostics.report(error, bot=bot, conn=conn, telegram_id=row['telegram_id'],
+                context={'source':'worker', 'operation':'attendance_delivery', 'entry_id':row['entry_id'], 'session_id':row['session_id']})
             continue
         with transaction(conn):
             attendance._lock(conn, row['session_id'])
@@ -123,11 +125,13 @@ async def watch_lessons(bot, conn, subjects, interval=5):
         try:
             from queue_bot.services.lesson_scheduler import sync_schedule
             sync_schedule(conn, subjects)
-        except Exception:
-            log.exception('Could not read the effective timetable; retrying')
+        except Exception as error:
+            from queue_bot.services import diagnostics
+            await diagnostics.report(error, bot=bot, conn=conn, context={'source':'worker', 'operation':'lesson_schedule'})
         try:
             attendance.tick(conn)
             await deliver(bot, conn, subjects)
-        except Exception:
-            log.exception('Lesson watcher failed; retrying')
+        except Exception as error:
+            from queue_bot.services import diagnostics
+            await diagnostics.report(error, bot=bot, conn=conn, context={'source':'worker', 'operation':'lesson_tick'})
         await asyncio.sleep(interval)
