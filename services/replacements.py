@@ -10,6 +10,22 @@ def get_today_key() -> str:
     return datetime.now(UK_TZ).strftime("%Y-%m-%d")
 
 
+def fill_old_subject(conn, item: dict, schedule_data: dict | None = None, *, force: bool = False) -> None:
+    """Доповнює «Було» базовим предметом, не вигадуючи його з прізвища на фото."""
+    if item.get("old_subject") and not force:
+        return
+    from datetime import date
+    from services import schedule
+
+    data = schedule_data if schedule_data is not None else schedule.load_schedule_data(config.SCHEDULE_PATH)
+    planned = schedule.get_planned_schedule(conn, data, date.fromisoformat(item["date"]))
+    subjects = list(dict.fromkeys(
+        lesson["subject"] for lesson in planned
+        if lesson["number"] == int(item["lesson_number"]) and lesson.get("subject")
+    ))
+    item["old_subject"] = ", ".join(subjects) if subjects else "Пари за базовим розкладом немає (додаткова пара)"
+
+
 def get_replacements(conn, date: str | None = None, group_name: str = "ПІ-231", include_archived: bool = False) -> list[dict]:
     """Отримує заміни з бази даних: на конкретну дату або всі активні від сьогодні."""
     arch_sql = "" if include_archived else "AND (is_archived = FALSE OR is_archived IS NULL)"
@@ -29,7 +45,14 @@ def get_replacements(conn, date: str | None = None, group_name: str = "ПІ-231"
             (group_name, today_str),
         ).fetchall()
 
-    return [dict(r) for r in rows]
+    items = [dict(r) for r in rows]
+    missing = [item for item in items if not item.get("old_subject") and not item.get("is_archived")]
+    if missing:
+        from services import schedule
+        data = schedule.load_schedule_data(config.SCHEDULE_PATH)
+        for item in missing:
+            fill_old_subject(conn, item, data)
+    return items
 
 
 def get_archived_replacements(conn, group_name: str = "ПІ-231", limit: int = 30) -> list[dict]:
@@ -57,6 +80,8 @@ def archive_previous_replacements(conn, before_date: str, group_name: str = "П�
 
 def save_replacement(conn, item: dict, auto_archive_previous: bool = True) -> bool:
     """Зберігає заміну в базу даних. За замовчуванням архівує заміни за попередні дати."""
+    item = dict(item)
+    fill_old_subject(conn, item)
     date_val = item["date"]
     grp = item.get("group_name") or item.get("group", "ПІ-231")
     if auto_archive_previous:
