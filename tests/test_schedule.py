@@ -130,8 +130,63 @@ def test_lesson_number_and_expansions():
     assert expand_teacher("Когут") == "Когут В.С."
 
 
+@pytest.mark.parametrize("lessons, expected", [
+    ("1-2", [1]), ("3-4", [2]), ("5-6", [3]), ("7-8", [4]),
+    ("9-10", [5]), ("9 – 10", [5]), ("9—10", [5]),
+    ("7–10", [4, 5]), ("1-10", [1, 2, 3, 4, 5]),
+    ("7-8, 9-10", [4, 5]),
+])
+def test_all_lesson_ranges(lessons, expected):
+    from services.recognition import normalize_lesson_pairs
+    assert normalize_lesson_pairs(None, lessons) == expected
+
+
+@pytest.mark.asyncio
+async def test_recognized_replacements_through_fifth_pair(conn, monkeypatch):
+    from unittest.mock import AsyncMock, MagicMock
+    import json
+    import config
+    from services import recognition
+
+    monkeypatch.setattr(config, "RECOGNITION_API_KEY", "test-key")
+    monkeypatch.setattr(config, "RECOGNITION_PROVIDER", "openai")
+    rows = [
+        {"lessons": "1–2", "newSubject": "Проект інтерфейсів", "teacher": "Атаман", "room": "243a"},
+        {"lessons": "5–6", "newSubject": "ЛМВ", "teacher": "Кондратюк", "room": "231"},
+        {"lessons": "7–10", "newSubject": "Основи національного спротиву", "teacher": "Овчарук", "room": "111"},
+        # A repeated fifth-pair row must not duplicate the expanded range.
+        {"lessons": "9-10", "newSubject": "Основи національного спротиву", "teacher": "Овчарук", "room": "111"},
+    ]
+    result = {"date": "2026-11-06", "confidence": 0.95, "replacements": rows}
+    response = MagicMock(status=200)
+    response.json = AsyncMock(return_value={"choices": [{"message": {"content": json.dumps(result)}}]})
+    request = MagicMock()
+    request.__aenter__ = AsyncMock(return_value=response)
+    session = MagicMock()
+    session.post.return_value = request
+    session_context = MagicMock()
+    session_context.__aenter__ = AsyncMock(return_value=session)
+    monkeypatch.setattr(recognition.aiohttp, "ClientSession", lambda: session_context)
+
+    recognized = await recognition.recognize_replacements_from_image(b"test-image", conn=conn)
+    assert [r["lesson_number"] for r in recognized["replacements"]] == [1, 3, 4, 5]
+    for item in recognized["replacements"]:
+        replacements.save_replacement(conn, item)
+    base = {"friday": [{"pair": 2, "subject": "Архітектура та проєкт ПЗ"}]}
+    dt = datetime.date(2026, 11, 6)
+    actual, _ = schedule.get_actual_schedule(conn, base, dt)
+    assert [lesson["number"] for lesson in actual] == [1, 2, 3, 4, 5]
+    assert actual[1]["is_replacement"] is False
+    assert actual[4]["lessons"] == "9-10"
+    assert actual[4]["teacher"] == "Овчарук"
+    assert actual[4]["room"] == "111"
+    text = schedule.format_schedule_for_date(conn, base, dt)
+    assert "5 пара</b> (14:50–16:10) ⚠️" in text
+    assert text.count("Основи національного спротиву") == 2
+
+
 def test_admin_schedule_keyboards():
-    from handlers.common import get_admin_reply_menu, get_admin_schedule_menu, get_schedule_reply_menu
+    from handlers.common import get_admin_reply_menu, get_admin_schedule_menu, get_admin_schedule_tools_menu, get_schedule_reply_menu
 
     student_sch_menu = get_schedule_reply_menu()
     student_sch_texts = [btn.text for row in student_sch_menu.keyboard for btn in row]
@@ -147,12 +202,21 @@ def test_admin_schedule_keyboards():
 
     sch_menu = get_admin_schedule_menu()
     sch_button_texts = [btn.text for row in sch_menu.keyboard for btn in row]
-    assert "📥 Отримати schedule.json" in sch_button_texts
-    assert "📤 Завантажити розклад" in sch_button_texts
+    assert "📸 Додати заміни (фото)" in sch_button_texts
+    assert "🔄 Активні заміни" in sch_button_texts
+    assert "⚙️ Додатково про розклад" in sch_button_texts
+    assert len(sch_button_texts) == 5
+    assert "📥 Отримати schedule.json" not in sch_button_texts
+    assert "🗑 Очистити всі заміни" not in sch_button_texts
     assert "🏢 Робоча субота" in sch_button_texts
-    assert "🗑 Очистити всі заміни" in sch_button_texts
-    assert "🟢 Статус системи" in sch_button_texts
     assert "🔙 В адмін-панель" in sch_button_texts
+    tools_texts = [btn.text for row in get_admin_schedule_tools_menu().keyboard for btn in row]
+    assert "📥 Отримати schedule.json" in tools_texts
+    assert "📤 Завантажити розклад" in tools_texts
+    assert "📦 Архів замін" in tools_texts
+    assert "🗑 Очистити всі заміни" in tools_texts
+    assert "🟢 Статус системи" in tools_texts
+    assert "🔙 До розкладу адміна" in tools_texts
 
 
 def test_replacement_correction_menus_and_helpers():
@@ -319,10 +383,10 @@ def test_next_working_day_calculation(conn):
 
 def test_auto_archive_previous_replacements(conn):
     from services import replacements
-    from handlers.common import get_admin_schedule_menu
+    from handlers.common import get_admin_schedule_tools_menu
 
     # Перевірка наявності кнопки архіву в меню
-    menu = get_admin_schedule_menu()
+    menu = get_admin_schedule_tools_menu()
     btn_texts = [btn.text for row in menu.keyboard for btn in row]
     assert "📦 Архів замін" in btn_texts
 

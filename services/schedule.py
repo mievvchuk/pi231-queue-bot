@@ -32,6 +32,14 @@ DAY_NAMES_UK = {
     "sunday": "Неділя",
 }
 
+PAIR_TIMES = {
+    1: ("08:30", "09:50"),
+    2: ("10:00", "11:20"),
+    3: ("11:50", "13:10"),
+    4: ("13:20", "14:40"),
+    5: ("14:50", "16:10"),
+}
+
 
 def load_schedule_data(path: str = "schedule.json") -> dict:
     if not os.path.exists(path):
@@ -75,6 +83,7 @@ def get_base_schedule_for_day(schedule_data: dict, day_key: str, w_type: str) ->
             continue
 
         pair_num = int(item.get("pair") or item.get("number") or 0)
+        start_time, end_time = PAIR_TIMES.get(pair_num, ("", ""))
         teachers_list = item.get("teachers")
 
         if isinstance(teachers_list, list) and teachers_list:
@@ -99,8 +108,8 @@ def get_base_schedule_for_day(schedule_data: dict, day_key: str, w_type: str) ->
             "teachers_raw": teachers_list if isinstance(teachers_list, list) else None,
             "room": room_display,
             "lessons": item.get("lessons", ""),
-            "startTime": item.get("startTime", ""),
-            "endTime": item.get("endTime", ""),
+            "startTime": item.get("startTime") or start_time,
+            "endTime": item.get("endTime") or end_time,
         })
 
     return filtered
@@ -150,15 +159,16 @@ def get_actual_schedule(conn, schedule_data: dict, dt: date, group_name: str = "
     base_numbers = {int(l.get("number", 0)) for l in base}
     for num, rep in sorted(rep_map.items()):
         if num not in base_numbers:
+            start_time, end_time = PAIR_TIMES.get(num, ("", ""))
             actual_lessons.append({
                 "number": num,
                 "subject": rep["new_subject"],
                 "teacher": rep.get("teacher"),
                 "teachers_raw": None,
                 "room": rep.get("room"),
-                "lessons": "",
-                "startTime": "",
-                "endTime": "",
+                "lessons": f"{num * 2 - 1}-{num * 2}",
+                "startTime": start_time,
+                "endTime": end_time,
                 "is_replacement": True,
             })
 
