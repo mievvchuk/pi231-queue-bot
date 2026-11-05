@@ -92,6 +92,22 @@ def expand_teacher(name: str | None) -> str | None:
     return cleaned
 
 
+def group_matches(raw_group: str, target_group: str) -> bool:
+    """Розрізняє ПІ-231 та КІ-231, підтримує спільні рядки ПІ-231,232."""
+    def groups(text):
+        text = str(text).lower().translate(str.maketrans({
+            "п": "p", "і": "i", "к": "k", "м": "m", "т": "t", "е": "e", "а": "a",
+        }))
+        text = re.sub(r"\s+", "", text).replace("–", "-").replace("—", "-")
+        prefix = ""
+        found = set()
+        for name, number in re.findall(r"([a-zа-яіїєґ]+)?-?(\d{3,4})(?!\d)", text):
+            prefix = name or prefix
+            found.add((prefix, number))
+        return found
+    return bool(groups(raw_group) & groups(target_group))
+
+
 async def recognize_replacements_from_image(image_bytes: bytes, group_name: str = "ПІ-231", conn=None) -> dict:
     """Розпізнає таблицю замін з фотографії через Groq або OpenAI API."""
     api_key = config.RECOGNITION_API_KEY
@@ -114,6 +130,11 @@ async def recognize_replacements_from_image(image_bytes: bytes, group_name: str 
     prompt = (
         f"Проаналізуй фотографію таблиці замін занять для групи '{group_name}'.\n"
         "Знайди рядок, де в стовпчику 'Група' вказано саме цю групу (або схоже написання: ПІ-231, ПI-231, PI-231).\n\n"
+        "Враховуй спільні рядки «ПІ-231,232»: вони стосуються обох груп. КІ-231 та інші спеціальності — інші групи.\n"
+        "Об'єднана комірка групи поширюється на всі рядки до її нижньої межі: порожня комірка під ПІ-231 може бути продовженням цієї групи.\n"
+        "Копіюй значення за стовпчиками: після № може бути прізвище відсутнього викладача, далі предмет заміни, викладач заміни, аудиторія.\n"
+        "Прізвище відсутнього викладача (наприклад Щуцький) НЕ є oldSubject і НЕ є викладачем заміни.\n"
+        "oldSubject заповнюй лише якщо на фото явно вказано попередній ПРЕДМЕТ; інакше null — його підставить бот із базового розкладу.\n"
         "ДУЖЕ ВАЖЛИВО щодо номерів пар:\n"
         "У стовпчику '№' зазначено номери уроків:\n"
         "- 1-2 це 1 пара (lessonNumber = 1)\n"
@@ -205,11 +226,15 @@ async def recognize_replacements_from_image(image_bytes: bytes, group_name: str 
         raise BotError("Низька впевненість розпізнавання. Будь ласка, надішліть більш чітке або рівне фото.")
 
     raw_replacements = result.get("replacements", [])
-    target_norm = group_name.strip().lower().replace(" ", "").replace("-", "").replace("і", "i")
+    from services import replacements, schedule
+    schedule_data = schedule.load_schedule_data(config.SCHEDULE_PATH)
+    current_group = group_name
     filtered = []
     for r in raw_replacements:
-        grp = str(r.get("group", "")).strip().lower().replace(" ", "").replace("-", "").replace("і", "i")
-        if grp == target_norm or not grp or "231" in grp:
+        grp = str(r.get("group") or "").strip()
+        if grp:
+            current_group = grp
+        if group_matches(current_group, group_name):
             subj_raw = str(r.get("newSubject", "")).strip()
             if subj_raw:
                 for pair_num in normalize_lesson_pairs(r.get("lessonNumber"), r.get("lessons", "")):
@@ -218,9 +243,11 @@ async def recognize_replacements_from_image(image_bytes: bytes, group_name: str 
                         "group_name": group_name,
                         "lesson_number": pair_num,
                         "new_subject": expand_subject(subj_raw),
+                        "old_subject": expand_subject(r["oldSubject"]) if r.get("oldSubject") else None,
                         "teacher": expand_teacher(r.get("teacher")),
                         "room": str(r.get("room")) if r.get("room") is not None else None,
                     }
+                    replacements.fill_old_subject(conn, item, schedule_data)
                     if item not in filtered:
                         filtered.append(item)
 

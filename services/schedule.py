@@ -121,10 +121,9 @@ def get_base_schedule(schedule_data: dict, dt: date) -> list[dict]:
     return get_base_schedule_for_day(schedule_data, day_key, w_type)
 
 
-def get_actual_schedule(conn, schedule_data: dict, dt: date, group_name: str = "ПІ-231") -> tuple[list[dict], list[dict]]:
+def get_planned_schedule(conn, schedule_data: dict, dt: date) -> list[dict]:
+    """Базові заняття на дату з урахуванням робочої суботи, без замін."""
     date_str = dt.isoformat()
-    replacements = get_replacements(conn, date=date_str, group_name=group_name)
-
     from services.working_days import get_working_saturday
     ws = get_working_saturday(conn, date_str) if conn else None
 
@@ -135,6 +134,12 @@ def get_actual_schedule(conn, schedule_data: dict, dt: date, group_name: str = "
     else:
         base = get_base_schedule(schedule_data, dt)
 
+    return base
+
+
+def get_actual_schedule(conn, schedule_data: dict, dt: date, group_name: str = "ПІ-231") -> tuple[list[dict], list[dict]]:
+    replacements = get_replacements(conn, date=dt.isoformat(), group_name=group_name)
+    base = get_planned_schedule(conn, schedule_data, dt)
     rep_map = {int(r["lesson_number"]): r for r in replacements}
     actual_lessons = []
 

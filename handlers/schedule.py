@@ -617,6 +617,7 @@ async def set_pair_number_handler(callback: CallbackQuery, conn):
         return
 
     reps[idx]["lesson_number"] = int(pair_str)
+    replacements.fill_old_subject(conn, reps[idx], force=True)
     await callback.answer(f"Встановлено {pair_str} пару!")
     text, kb = render_item_edit_menu(token, idx, reps[idx])
     await callback.message.edit_text(text, reply_markup=kb)
@@ -641,6 +642,7 @@ async def set_date_value_handler(callback: CallbackQuery, conn):
         return
 
     reps[idx]["date"] = date_str
+    replacements.fill_old_subject(conn, reps[idx], force=True)
     await callback.answer(f"Дату встановлено: {date_str}!")
     text, kb = render_item_edit_menu(token, idx, reps[idx])
     await callback.message.edit_text(text, reply_markup=kb)
@@ -692,6 +694,7 @@ async def add_replacement_item_handler(callback: CallbackQuery, conn):
         "room": "",
         "old_subject": "",
     }
+    replacements.fill_old_subject(conn, new_item)
     reps.append(new_item)
     idx = len(reps) - 1
 
@@ -735,6 +738,8 @@ async def process_field_value_text(message: Message, state: FSMContext, conn):
             val = normalize_date_input(val)
 
     reps[idx][field] = val
+    if field == "date":
+        replacements.fill_old_subject(conn, reps[idx], force=True)
     f_title = FIELD_NAMES_UK.get(field, field)
     await message.answer(f"✅ Поле <b>{f_title}</b> оновлено на: <b>{html.escape(str(val or '—'))}</b>")
 
