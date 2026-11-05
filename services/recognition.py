@@ -37,24 +37,31 @@ TEACHER_EXPANSIONS = {
 
 
 def normalize_lesson_pair(raw_num, lessons_str: str = "") -> int:
-    """Перетворює номери уроків (наприклад 1-2, 3-4, 5-6, 7-8) на номер пари (1, 2, 3, 4)."""
-    text = str(lessons_str or raw_num or "").strip()
-    if "1-2" in text:
-        return 1
-    if "3-4" in text:
-        return 2
-    if "5-6" in text:
-        return 3
-    if "7-8" in text:
-        return 4
-    if "9-10" in text:
-        return 5
+    """Повертає першу пару з діапазону уроків або номер пари 1–5."""
+    pairs = normalize_lesson_pairs(raw_num, lessons_str)
+    return pairs[0]
 
+
+def normalize_lesson_pairs(raw_num, lessons_str: str = "") -> list[int]:
+    """Розгортає діапазони уроків, зокрема 7–10 → [4, 5]."""
+    text = str(lessons_str or raw_num or "").strip()
+    ranges = re.findall(r"(?<!\d)(\d{1,2})\s*[-–—−]\s*(\d{1,2})(?!\d)", text)
+    pairs = set()
+    for start, end in ranges:
+        start, end = int(start), int(end)
+        if 1 <= start <= end <= 10:
+            pairs.update((lesson + 1) // 2 for lesson in range(start, end + 1))
+    if pairs:
+        return sorted(pairs)
+    return [_normalize_single_pair(raw_num)]
+
+
+def _normalize_single_pair(raw_num) -> int:
     try:
         val = int(raw_num)
         if val in (1, 2, 3, 4, 5):
             return val
-        if val in (5, 6):
+        if val == 6:
             return 3
         if val in (7, 8):
             return 4
@@ -114,7 +121,10 @@ async def recognize_replacements_from_image(image_bytes: bytes, group_name: str 
         "- 5-6 це 3 пара (lessonNumber = 3)\n"
         "- 7-8 це 4 пара (lessonNumber = 4)\n"
         "- 9-10 це 5 пара (lessonNumber = 5)\n\n"
-        "У полі 'lessonNumber' записуй саме НОМЕР ПАРИ (1, 2, 3, 4 тощо).\n"
+        "Збери ВСІ заміни групи до 5 пари включно: перевір усі рядки, продовження та об'єднані комірки.\n"
+        "Якщо предмет займає кілька пар (наприклад 7-10), створи окремі записи для 4 та 5 пари з тими самими предметом, викладачем і аудиторією.\n"
+        "Не пропускай 9-10 уроки, навіть якщо 5 пари немає в базовому розкладі.\n"
+        "У полі 'lessonNumber' записуй саме НОМЕР ПАРИ (1, 2, 3, 4, 5).\n"
         "У полі 'lessons' записуй текст зі стовпчика № (наприклад '5-6').\n"
         "У полі 'newSubject' записуй назву предмета (стовпчик 'Предмет'). Скорочення розшифруй (наприклад ЛМВ -> Людино-машинна взаємодія).\n"
         f"Визнач дату з шапки таблиці у форматі YYYY-MM-DD (наприклад '16 жовтня 2026' -> '2026-10-16').\n"
@@ -202,15 +212,17 @@ async def recognize_replacements_from_image(image_bytes: bytes, group_name: str 
         if grp == target_norm or not grp or "231" in grp:
             subj_raw = str(r.get("newSubject", "")).strip()
             if subj_raw:
-                pair_num = normalize_lesson_pair(r.get("lessonNumber"), r.get("lessons", ""))
-                filtered.append({
-                    "date": date_str,
-                    "group_name": group_name,
-                    "lesson_number": pair_num,
-                    "new_subject": expand_subject(subj_raw),
-                    "teacher": expand_teacher(r.get("teacher")),
-                    "room": str(r.get("room")) if r.get("room") is not None else None,
-                })
+                for pair_num in normalize_lesson_pairs(r.get("lessonNumber"), r.get("lessons", "")):
+                    item = {
+                        "date": date_str,
+                        "group_name": group_name,
+                        "lesson_number": pair_num,
+                        "new_subject": expand_subject(subj_raw),
+                        "teacher": expand_teacher(r.get("teacher")),
+                        "room": str(r.get("room")) if r.get("room") is not None else None,
+                    }
+                    if item not in filtered:
+                        filtered.append(item)
 
     if not filtered:
         raise BotError(f"Для групи {group_name} замін на фото не знайдено.")

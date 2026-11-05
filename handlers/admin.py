@@ -26,6 +26,7 @@ from handlers.common import (
     get_admin_reply_menu,
     get_admin_reports_menu,
     get_admin_schedule_menu,
+    get_admin_schedule_tools_menu,
     get_admin_settings_menu,
     get_admin_students_menu,
     get_admin_subjects_menu,
@@ -639,18 +640,25 @@ async def admin_delete_subject_confirmed(message: Message, state: FSMContext, co
 
 
 @router.message(F.text == "📅 Розклад і заміни", StateFilter("*"))
+@router.message(F.text == "🔙 До розкладу адміна", StateFilter("*"))
 async def admin_category_schedule(message: Message, state: FSMContext):
     await state.clear()
     await state.set_state(AdminPanelState.in_schedule_menu)
     await message.answer(
-        "📅 <b>Керування розкладом та замінами</b>\n\n"
-        "• <b>📸 Додати заміни (фото)</b> — надіслати скріншот/фото таблиці замін для автоматичного розпізнавання та розсилки групі\n"
-        "• <b>🔄 Активні заміни</b> — переглянути поточні збережені заміни\n"
-        "• <b>🏢 Робоча субота</b> — призначити суботу навчальним днем за розкладом іншого дня\n"
-        "• <b>📦 Архів замін</b> — переглянути історію попередніх замін\n"
-        "• <b>📥 Отримати / 📤 Завантажити розклад</b> — редагування базового файлу <code>schedule.json</code>\n"
-        "• <b>🗑 Очистити всі заміни</b> — видалити поточні заміни пар",
+        "📅 <b>Розклад і заміни</b>\n\n"
+        "Додайте фото замін, перегляньте активні заміни або налаштуйте робочу суботу.\n"
+        "Архів, файл розкладу та інші дії — у меню «⚙️ Додатково про розклад».",
         reply_markup=get_admin_schedule_menu(),
+    )
+
+
+@router.message(F.text == "⚙️ Додатково про розклад", StateFilter("*"))
+async def admin_schedule_tools(message: Message, state: FSMContext):
+    await state.clear()
+    await state.set_state(AdminPanelState.in_schedule_menu)
+    await message.answer(
+        "⚙️ <b>Додаткові дії з розкладом</b>\n\nОберіть потрібну дію нижче.",
+        reply_markup=get_admin_schedule_tools_menu(),
     )
 
 
