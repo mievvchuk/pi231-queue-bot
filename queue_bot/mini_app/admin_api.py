@@ -156,8 +156,7 @@ async def manage(request):
             confirmed = [dict(date=item['date'], no_replacements=not item['replacements'],
                               message=format_no_replacements(item['date']) if not item['replacements'] else '')
                          for item in confirmed_results(conn) if item['date'] >= replacements.get_today_key()]
-            return response({'confirmed': confirmed, 'active': project(replacements.get_replacements(conn, group_name=config.STUDENT_GROUP)),
-                             'archived': project(replacements.get_archived_replacements(conn, config.STUDENT_GROUP))})
+            return response({'confirmed': confirmed, 'active': project(replacements.get_replacements(conn, group_name=config.STUDENT_GROUP))})
         if section == 'saturdays':
             active, archived = working_days.split_working_saturdays(conn)
             project = lambda rows: [{'date': r['date'], 'source_day': r['replaces_day'], 'week_type': r['week_type'],
@@ -245,7 +244,7 @@ async def manage(request):
             checked(request)
             return response({'draft': draft})
         if action == 'clear':
-            replacements.clear_replacements(conn, config.STUDENT_GROUP)
+            raise BotError('Масове очищення замін вимкнено. Скористайтеся редагуванням результату в боті.')
         elif action == 'save':
             items = data.get('items')
             if not isinstance(items, list) or not 1 <= len(items) <= 50:

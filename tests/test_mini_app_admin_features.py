@@ -333,3 +333,13 @@ async def test_stale_mini_app_form_cannot_mutate_archived_saturday(admin_client,
     assert result.status==400
     row=working_days.get_working_saturday(conn,'2026-10-31')
     assert row and row['replaces_day']=='monday' and row['week_type']=='denominator'
+
+
+
+@pytest.mark.asyncio
+async def test_bulk_replacement_clear_is_unavailable(admin_client, conn):
+    from queue_bot.services import replacements
+    replacements.save_replacement(conn, dict(date='2026-11-09', group_name='ПІ-231', lesson_number=1, new_subject='Збережена заміна'))
+    response = await post(admin_client, 'replacements', {'action': 'clear'})
+    assert response.status == 400
+    assert len(replacements.get_replacements(conn, date='2026-11-09')) == 1

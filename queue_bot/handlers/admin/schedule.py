@@ -25,9 +25,8 @@ async def admin_category_schedule(message: Message, state: FSMContext):
         "Заміни надходять автоматично з каналу й застосовуються після підтвердження. Відредагувати їх можна до або після збереження.\n\n"
         "• <b>🔄 Активні заміни</b> — переглянути поточні збережені заміни\n"
         "• <b>🏢 Робоча субота</b> — призначити суботу навчальним днем за розкладом іншого дня\n"
-        "• <b>📦 Архів замін</b> — переглянути історію попередніх замін\n"
         "• <b>📥 Отримати / 📤 Завантажити розклад</b> — редагування базового файлу <code>schedule.json</code>\n"
-        "• <b>🗑 Очистити всі заміни</b> — видалити поточні заміни пар",
+        "\nПопередні заміни архівуються автоматично після підтвердження даних на наступну дату.",
         reply_markup=get_admin_schedule_menu(),
     )
 
@@ -60,18 +59,6 @@ async def admin_upload_schedule_action(message: Message):
         "3. <b>Надішліть збережений файл <code>schedule.json</code> прямо сюди в чат як документ 📄.</b>\n\n"
         "Бот автоматично валідує формат JSON і миттєво оновить розклад для всієї групи!"
     )
-
-
-
-async def admin_clear_replacements_action(message: Message, conn):
-    from queue_bot.handlers.schedule import request_clear_replacements
-    await request_clear_replacements(message, conn)
-
-
-
-async def admin_status_action(message: Message, conn):
-    from queue_bot.handlers.schedule import show_bot_status
-    await show_bot_status(message, conn)
 
 
 

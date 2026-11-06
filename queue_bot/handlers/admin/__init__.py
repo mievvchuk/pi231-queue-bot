@@ -5,7 +5,7 @@ from .guards import AdminOnly, _is_admin_filter, admin_state_filter
 from .presentation import get_open_session, get_admin_queue_menu, get_admin_student_menu, open_admin_queue_manager, open_admin_student_list, open_admin_student_manager, format_user_card, show_users_list
 from .panels import admin_quick_manage_from_student_view, admin_switch_to_student_queue_view, admin_panel_open, admin_more_panel, admin_reports_removed, permanent_queue_notice, admin_category_queues, admin_category_students
 from .subjects import admin_view_subjects_menu, admin_add_teacher_start, admin_add_teacher_subject_picked, admin_add_teacher_name_received, admin_add_new_subject_start, admin_add_new_subject_name_received, admin_add_new_subject_teacher_received, admin_rename_subject_start, admin_rename_subject_picked, admin_rename_subject_name_received, admin_remove_teacher_start, admin_remove_teacher_subject_picked, admin_remove_teacher_confirmed, admin_delete_subject_start, admin_delete_subject_picked, admin_delete_subject_confirmed
-from .schedule import admin_category_schedule, admin_add_replacement_photo_hint, admin_export_schedule_action, admin_upload_schedule_action, admin_clear_replacements_action, admin_status_action, admin_working_saturday_btn, render_working_saturday_panel, admin_set_working_saturday_day, admin_pick_working_saturday_day, admin_parity_working_saturday, admin_set_parity_working_saturday, admin_cancel_working_saturday, admin_view_working_saturday_schedule, admin_other_working_saturdays, admin_goto_working_saturday, admin_back_working_saturday, admin_broadcast_working_saturday_prompt, admin_broadcast_working_saturday_send
+from .schedule import admin_category_schedule, admin_add_replacement_photo_hint, admin_export_schedule_action, admin_upload_schedule_action, admin_working_saturday_btn, render_working_saturday_panel, admin_set_working_saturday_day, admin_pick_working_saturday_day, admin_parity_working_saturday, admin_set_parity_working_saturday, admin_cancel_working_saturday, admin_view_working_saturday_schedule, admin_other_working_saturdays, admin_goto_working_saturday, admin_back_working_saturday, admin_broadcast_working_saturday_prompt, admin_broadcast_working_saturday_send
 from .users import admin_category_users
 from .users import admin_list_users_start, admin_paginate_users, admin_open_user_card, admin_back_to_users, admin_start_add_user, admin_finish_add_user, admin_start_search_user, admin_finish_search_user, admin_ask_edit_name, admin_receive_new_name, admin_confirm_new_name, admin_toggle_user_block, admin_ask_delete_user, admin_confirm_delete_user, show_blocked_list, unblock_student_click
 from .settings import admin_category_settings
@@ -46,8 +46,6 @@ router.message(F.text == '📅 Розклад і заміни', StateFilter('*')
 router.message(F.text == '📸 Додати заміни (фото)', StateFilter('*'))(admin_add_replacement_photo_hint)
 router.message(F.text == '📥 Отримати schedule.json', StateFilter('*'))(admin_export_schedule_action)
 router.message(F.text == '📤 Завантажити розклад', StateFilter('*'))(admin_upload_schedule_action)
-router.message(F.text == '🗑 Очистити всі заміни', StateFilter('*'))(admin_clear_replacements_action)
-router.message(F.text == '🟢 Статус системи', StateFilter('*'))(admin_status_action)
 router.message(F.text == '🏢 Робоча субота', StateFilter('*'))(admin_working_saturday_btn)
 router.callback_query(F.data.startswith('ws_set:'))(admin_set_working_saturday_day)
 router.callback_query(F.data.startswith('ws_pick:'))(admin_pick_working_saturday_day)
@@ -128,3 +126,4 @@ router.message(AdminManageState.confirming_broadcast, F.text)(perform_broadcast)
 router.message(F.text == '🛠 Увімкнути техроботи', StateFilter('*'))(start_maintenance_prompt)
 router.message(AdminManageState.entering_maintenance_time, F.text)(process_maintenance_time_entry)
 router.message(F.text == '🟢 Вимкнути техроботи', StateFilter('*'))(disable_maintenance)
+

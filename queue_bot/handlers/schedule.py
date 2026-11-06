@@ -152,40 +152,6 @@ async def show_replacements(message: Message, conn):
     await message.answer('\n\n'.join(lines), reply_markup=markup)
 
 
-@router.message(_private_only, Command("clear_replacements"), StateFilter("*"))
-async def request_clear_replacements(message: Message, conn):
-    if not admins.is_admin(conn, message.from_user.id):
-        raise BotError("Очищати заміни можуть лише адміністратори.")
-
-    markup = InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(text="✅ Так, очистити всі", callback_data="clear_rep:yes"),
-                InlineKeyboardButton(text="❌ Скасувати", callback_data="clear_rep:no"),
-            ]
-        ]
-    )
-    await message.answer("Видалити всі збережені заміни для групи?", reply_markup=markup)
-
-
-@router.callback_query(F.data == "clear_rep:no")
-async def cancel_clear_replacements(callback: CallbackQuery):
-    await callback.answer("Скасовано.")
-    await callback.message.edit_text("❌ Очищення замін скасовано.")
-
-
-@router.callback_query(F.data == "clear_rep:yes")
-async def confirm_clear_replacements(callback: CallbackQuery, conn):
-    if not admins.is_admin(conn, callback.from_user.id):
-        await callback.answer("У вас немає прав адміністратора.", show_alert=True)
-        return
-
-    count = replacements.clear_replacements(conn, group_name=config.STUDENT_GROUP)
-    admins.log_action(conn, callback.from_user.id, "clear_replacements", f"deleted={count}")
-    await callback.answer("Заміни очищено!")
-    await callback.message.edit_text(f"✅ Успішно видалено замін: <b>{count}</b>.")
-
-
 FIELD_NAMES_UK = {
     "lesson_number": "Номер пари",
     "new_subject": "Новий предмет",
@@ -747,42 +713,6 @@ async def process_field_value_text(message: Message, state: FSMContext, conn):
     await message.answer(text, reply_markup=kb)
 
 
-# ---------- Статус системи ----------
-
-@router.message(Command("status"), StateFilter("*"))
-async def show_bot_status(message: Message, conn):
-    from queue_bot import __version__ as BOT_VERSION
-    from queue_bot.services import maintenance, updates
-    from zoneinfo import ZoneInfo
-    from datetime import datetime
-
-    uids = updates.get_active_user_ids(conn)
-    reps = replacements.get_replacements(conn, group_name=config.STUDENT_GROUP)
-    is_maint = maintenance.is_maintenance_active(conn)
-    end_t = maintenance.get_maintenance_end_time(conn)
-
-    maint_status = f"🔴 Увімкнено (до {end_t})" if is_maint else "🟢 Вимкнено (штатний режим)"
-    now_str = datetime.now(ZoneInfo(config.TIMEZONE)).strftime("%d.%m.%Y %H:%M:%S")
-
-    prov = "Вимкнено"
-    if config.RECOGNITION_API_KEY:
-        _, model, provider = config.recognition_settings()
-        prov = html.escape(f'{provider} ({model})')
-
-    text = (
-        f"🟢 <b>Статус системи</b>\n\n"
-        f"• <b>Версія бота:</b> <code>{BOT_VERSION}</code>\n"
-        f"• <b>Група:</b> {html.escape(config.STUDENT_GROUP)}\n"
-        f"• <b>Режим техробіт:</b> {maint_status}\n"
-        f"• <b>База даних:</b> Підключено (OK)\n"
-        f"• <b>Активних користувачів:</b> {len(uids)}\n"
-        f"• <b>Збережених замін:</b> {len(reps)}\n"
-        f"• <b>Серверний час:</b> <code>{now_str}</code> ({config.TIMEZONE})\n"
-        f"• <b>Розпізнавання фото:</b> {prov}"
-    )
-    await message.answer(text)
-
-
 # ---------- Завантаження та вивантаження файлу розкладу ----------
 
 @router.message(_private_only, Command("get_schedule"), StateFilter("*"))
@@ -853,39 +783,6 @@ async def handle_document_upload(message: Message, conn):
                 f"⚠️ <b>Помилка у файлі JSON:</b> {html.escape(str(e))}\n\n"
                 "Перевірте структуру файлу або скористайтеся /get_schedule як шаблоном."
             )
-
-
-@router.message(_private_only, F.text == "📦 Архів замін", StateFilter("*"))
-@router.message(_private_only, Command("archived_replacements"), StateFilter("*"))
-async def show_archived_replacements(message: Message, conn):
-    if not admins.is_admin(conn, message.from_user.id):
-        return
-    items = replacements.get_archived_replacements(conn, group_name=config.STUDENT_GROUP, limit=30)
-    if not items:
-        await message.answer(
-            f"📦 <b>Архів замін для групи {html.escape(config.STUDENT_GROUP)}:</b>\n\n"
-            "Архів порожній. Попередніх заархівованих замін ще немає."
-        )
-        return
-
-    by_date = {}
-    for it in items:
-        by_date.setdefault(it["date"], []).append(it)
-
-    lines = [f"📦 <b>Архів попередніх замін ({html.escape(config.STUDENT_GROUP)}):</b>\n"]
-    for d, reps_list in by_date.items():
-        lines.append(f"📅 <b>Дата: {d}</b>")
-        for r in reps_list:
-            old_s = f" (було: {r['old_subject']})" if r.get("old_subject") else ""
-            t_info = f", викл. {r['teacher']}" if r.get("teacher") else ""
-            r_info = f", ауд. {r['room']}" if r.get("room") else ""
-            lines.append(f"• Пара №{r['lesson_number']}: <b>{html.escape(r['new_subject'])}</b>{old_s}{t_info}{r_info}")
-        lines.append("")
-
-    lines.append("<i>💡 Попередні заміни автоматично архівуються при збереженні замін на новий робочий день.</i>")
-    await message.answer("\n".join(lines))
-
-
 
 
 @router.callback_query(F.data.startswith('ch_yes:') | F.data.startswith('ch_no:'))

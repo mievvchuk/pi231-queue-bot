@@ -172,3 +172,22 @@ async def test_replacements_menu_shows_empty_date_and_edit_button(conn, monkeypa
     assert 'На 09.11.2026 замін немає для ПІ-231.' in message.answer.call_args.args[0]
     assert 'надішліть фотографію' not in message.answer.call_args.args[0]
     assert message.answer.call_args.kwargs['reply_markup'].inline_keyboard[0][0].callback_data == 'ch_edit:828'
+
+
+@pytest.mark.asyncio
+async def test_next_date_confirmation_archives_previous_even_if_new_date_has_no_replacements(conn, monkeypatch):
+    from queue_bot.handlers.schedule import confirm_channel_import
+    from queue_bot.services import updates, replacements
+    monkeypatch.setattr(config, 'OWNER_ID', 100)
+    replacements.save_replacement(conn, dict(date='2026-11-09', group_name='ПІ-231', lesson_number=1, new_subject='Попередня заміна'))
+    channel.set_state(conn, 'channel_draft:replacements_xpk:830', dict(date='2026-11-10', replacements=[], status='pending', source='https://t.me/replacements_xpk/830'))
+    assert len(replacements.get_replacements(conn, date='2026-11-09')) == 1
+    monkeypatch.setattr(updates, 'broadcast_message_to_users', AsyncMock())
+    monkeypatch.setattr(updates, 'get_active_user_ids', lambda _: [])
+    callback = MagicMock(data='ch_yes:830', from_user=MagicMock(id=100), answer=AsyncMock())
+    callback.message.edit_text = AsyncMock()
+    await confirm_channel_import(callback, conn)
+    import asyncio
+    await asyncio.sleep(0)
+    assert replacements.get_replacements(conn, date='2026-11-09') == []
+    assert replacements.get_archived_replacements(conn)[0]['new_subject'] == 'Попередня заміна'

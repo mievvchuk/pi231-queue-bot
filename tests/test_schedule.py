@@ -184,8 +184,8 @@ def test_admin_schedule_keyboards():
     assert "📥 Отримати schedule.json" in sch_button_texts
     assert "📤 Завантажити розклад" in sch_button_texts
     assert "🏢 Робоча субота" in sch_button_texts
-    assert "🗑 Очистити всі заміни" in sch_button_texts
-    assert "🟢 Статус системи" in sch_button_texts
+    assert "🗑 Очистити всі заміни" not in sch_button_texts
+    assert "🟢 Статус системи" not in sch_button_texts
     assert "🔙 В адмін-панель" in sch_button_texts
 
 
@@ -355,10 +355,10 @@ def test_auto_archive_previous_replacements(conn):
     from queue_bot.services import replacements
     from queue_bot.handlers.common import get_admin_schedule_menu
 
-    # Перевірка наявності кнопки архіву в меню
+    # Архівування працює автоматично, без кнопки в меню
     menu = get_admin_schedule_menu()
     btn_texts = [btn.text for row in menu.keyboard for btn in row]
-    assert "📦 Архів замін" in btn_texts
+    assert "📦 Архів замін" not in btn_texts
 
     # 1. Додаємо заміну на четвер (2026-10-15)
     replacements.save_replacement(conn, {
@@ -460,6 +460,7 @@ async def test_open_schedule_menu_time_of_day_switch(conn):
         await open_schedule_menu(message, state, conn)
         text = message.answer.call_args[0][0]
         assert "на завтра" in text
+
 
 
 

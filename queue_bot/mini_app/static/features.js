@@ -1024,21 +1024,6 @@ window.createPI231Features = function (H) {
         el("p", { class: "notice" }, item.message)),
       el("h2", {}, "Активні заміни"),
       list(rows(data.active), replacementCard),
-      rows(data.active).length
-        ? btn(
-            "Очистити активні заміни",
-            () =>
-              confirm(
-                "Очистити активні заміни?",
-                "Вони більше не впливатимуть на розклад.",
-                path,
-                { action: "clear" },
-              ),
-            "text-button danger",
-          )
-        : null,
-      el("h2", {}, "Архів"),
-      list(rows(data.archived), replacementCard),
       card(
         el("h2", {}, "Файл розкладу"),
         H.download
