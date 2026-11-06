@@ -889,7 +889,7 @@ async def show_archived_replacements(message: Message, conn):
 
 @router.callback_query(F.data.startswith('ch_yes:') | F.data.startswith('ch_no:'))
 async def confirm_channel_import(callback: CallbackQuery, conn):
-    from services.channel_import import get_state, set_state
+    from services.channel_import import get_state, set_state, format_no_replacements
     from db import transaction
     if callback.from_user.id != config.OWNER_ID or not admins.is_admin(conn, callback.from_user.id):
         await callback.answer('Тільки для власника бота.', show_alert=True)
@@ -917,7 +917,7 @@ async def confirm_channel_import(callback: CallbackQuery, conn):
         set_state(conn, key, draft)
         admins.log_action(conn, callback.from_user.id, 'confirm_channel_import', draft['source'])
     text = (replacements.format_replacements_broadcast(draft['replacements'], draft['date'])
-            if draft['replacements'] else f'📅 {draft["date"]}\nЗамін немає для {html.escape(config.STUDENT_GROUP)}.')
+            if draft['replacements'] else format_no_replacements(draft['date']))
     await callback.answer('Підтверджено')
     await callback.message.edit_text('✅ Підтверджено.\n\n' + text)
     from services.updates import broadcast_message_to_users, get_active_user_ids

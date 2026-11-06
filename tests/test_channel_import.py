@@ -28,7 +28,7 @@ async def test_poll_persists_draft_and_does_not_repeat(conn, monkeypatch):
     await channel.poll_once(bot, conn, None)
     assert recognize.await_count == 1
     assert bot.send_message.await_count == 1
-    assert 'Замін немає для ПІ-231' in bot.send_message.call_args.args[1]
+    assert 'На 09.11.2026 замін немає для ПІ-231.' in bot.send_message.call_args.args[1]
     assert channel.get_state(conn, 'channel_draft:replacements_xpk:828')['status'] == 'pending'
     assert conn.execute('SELECT COUNT(*) FROM replacements').fetchone()[0] == 0
 
@@ -76,6 +76,7 @@ async def test_confirm_empty_clears_date_once(conn, monkeypatch):
     assert channel.get_state(conn, 'channel_draft:replacements_xpk:828')['status'] == 'confirmed'
     await confirm_channel_import(callback, conn)
     assert broadcast.await_count == 1
+    assert broadcast.call_args.args[2] == "На 09.11.2026 замін немає для ПІ-231."
 
 
 @pytest.mark.asyncio

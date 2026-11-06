@@ -17,6 +17,11 @@ from services import recognition
 log = logging.getLogger(__name__)
 
 
+def format_no_replacements(date_str):
+    day = datetime.date.fromisoformat(date_str).strftime("%d.%m.%Y")
+    return f"На {day} замін немає для {html.escape(config.STUDENT_GROUP)}."
+
+
 def get_state(conn, key):
     row = conn.execute('SELECT value FROM bot_state WHERE key = ?', (key,)).fetchone()
     return json.loads(row['value']) if row else None
@@ -85,7 +90,7 @@ async def poll_once(bot, conn, session):
             from services.replacements import format_replacement
             text = (f'📷 <a href="{post["url"]}">Новий допис із замінами</a>\n'
                     f'📅 {html.escape(draft["date"])}\n\n')
-            text += '\n\n'.join(format_replacement(r) for r in draft['replacements']) if draft['replacements'] else f'Замін немає для {html.escape(config.STUDENT_GROUP)}.'
+            text += '\n\n'.join(format_replacement(r) for r in draft['replacements']) if draft['replacements'] else format_no_replacements(draft['date'])
             text += '\n\nПідтвердити цей результат і сповістити студентів?'
             keyboard = InlineKeyboardMarkup(inline_keyboard=[[
                 InlineKeyboardButton(text='✅ Підтвердити', callback_data=f'ch_yes:{post["id"]}'),
