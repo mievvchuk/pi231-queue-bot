@@ -884,3 +884,41 @@ async def show_archived_replacements(message: Message, conn):
     lines.append("<i>💡 Попередні заміни автоматично архівуються при збереженні замін на новий робочий день.</i>")
     await message.answer("\n".join(lines))
 
+
+
+
+@router.callback_query(F.data.startswith('ch_yes:') | F.data.startswith('ch_no:'))
+async def confirm_channel_import(callback: CallbackQuery, conn):
+    from services.channel_import import get_state, set_state
+    from db import transaction
+    if callback.from_user.id != config.OWNER_ID or not admins.is_admin(conn, callback.from_user.id):
+        await callback.answer('Тільки для власника бота.', show_alert=True)
+        return
+    action, post_id = callback.data.split(':', 1)
+    key = f'channel_draft:{config.REPLACEMENTS_CHANNEL}:{post_id}'
+    draft = get_state(conn, key)
+    if not draft or draft['status'] != 'pending':
+        await callback.answer('Результат уже оброблено або застарів.', show_alert=True)
+        return
+    if action == 'ch_no':
+        draft['status'] = 'rejected'
+        set_state(conn, key, draft)
+        await callback.answer('Відхилено')
+        await callback.message.edit_text('❌ Результат із каналу відхилено. Розклад не змінено.')
+        return
+    # No await inside the transaction: concurrent callbacks cannot apply twice.
+    with transaction(conn):
+        replacements.archive_previous_replacements(conn, draft['date'], group_name=config.STUDENT_GROUP)
+        conn.execute('DELETE FROM replacements WHERE date = ? AND group_name = ?',
+                     (draft['date'], config.STUDENT_GROUP))
+        for item in draft['replacements']:
+            replacements.save_replacement(conn, item, auto_archive_previous=False)
+        draft['status'] = 'confirmed'
+        set_state(conn, key, draft)
+        admins.log_action(conn, callback.from_user.id, 'confirm_channel_import', draft['source'])
+    text = (replacements.format_replacements_broadcast(draft['replacements'], draft['date'])
+            if draft['replacements'] else f'📅 {draft["date"]}\nЗамін немає для {html.escape(config.STUDENT_GROUP)}.')
+    await callback.answer('Підтверджено')
+    await callback.message.edit_text('✅ Підтверджено.\n\n' + text)
+    from services.updates import broadcast_message_to_users, get_active_user_ids
+    asyncio.create_task(broadcast_message_to_users(callback.bot, get_active_user_ids(conn), text))

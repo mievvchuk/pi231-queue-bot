@@ -81,6 +81,9 @@ async def main() -> None:
     from services.polls import start_polls_watcher
     asyncio.create_task(start_polls_watcher(bot, conn))
 
+    from services.channel_import import watch_channel
+    asyncio.create_task(watch_channel(bot, conn))
+
     # Стійкий цикл polling: бот автоматично відновлює роботу при тимчасових мережевих збоях
     while True:
         try:
@@ -92,5 +95,6 @@ async def main() -> None:
 
 if __name__ == "__main__":
     asyncio.run(main())
+
 
 

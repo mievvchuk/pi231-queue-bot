@@ -41,3 +41,8 @@ OWNER_ID = int(os.getenv("OWNER_ID", "5937915430"))
 def get_initial_admin_ids() -> list[int]:
     raw = os.getenv("INITIAL_ADMIN_IDS", str(OWNER_ID))
     return [int(part) for part in raw.replace(" ", "").split(",") if part.isdigit()]
+
+
+# Public channel ingestion; no Telegram user session is required.
+REPLACEMENTS_CHANNEL = os.getenv("REPLACEMENTS_CHANNEL", "replacements_xpk").strip("@ ")
+CHANNEL_POLL_SECONDS = max(60, int(os.getenv("CHANNEL_POLL_SECONDS", "300")))

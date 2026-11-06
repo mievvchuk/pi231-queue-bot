@@ -108,7 +108,7 @@ def group_matches(raw_group: str, target_group: str) -> bool:
     return bool(groups(raw_group) & groups(target_group))
 
 
-async def recognize_replacements_from_image(image_bytes: bytes, group_name: str = "ПІ-231", conn=None) -> dict:
+async def recognize_replacements_from_image(image_bytes: bytes, group_name: str = "ПІ-231", conn=None, *, allow_empty: bool = False) -> dict:
     """Розпізнає таблицю замін з фотографії через Groq або OpenAI API."""
     api_key = config.RECOGNITION_API_KEY
     if not api_key or config.RECOGNITION_PROVIDER == "disabled":
@@ -126,7 +126,7 @@ async def recognize_replacements_from_image(image_bytes: bytes, group_name: str 
         now_dt = datetime.now(ZoneInfo(config.TIMEZONE)).date()
         next_work_date = (now_dt + timedelta(days=1)).strftime("%Y-%m-%d")
 
-    b64_image = base64.b64encode(image_bytes).decode("utf-8")
+    images = image_bytes if isinstance(image_bytes, list) else [image_bytes]
     prompt = (
         f"Проаналізуй фотографію таблиці замін занять для групи '{group_name}'.\n"
         "Знайди рядок, де в стовпчику 'Група' вказано саме цю групу (або схоже написання: ПІ-231, ПI-231, PI-231).\n\n"
@@ -169,6 +169,13 @@ async def recognize_replacements_from_image(image_bytes: bytes, group_name: str 
         'Якщо для групи замін немає або рядок не знайдено, поверни replacements: [].'
     )
 
+    prompt += (
+        "\nУсі зображення належать одному допису: перевір кожну сторінку. "
+        "Додай tableReadable: true лише якщо це чітка таблиця замін, яку можна перевірити повністю; "
+        "інакше false. Додай noReplacements: true лише коли таблиці прочитані повністю "
+        "і для цільової групи справді немає замін. Нечітке фото не означає відсутність замін."
+    )
+
     if api_key.startswith("gsk_"):
         url = "https://api.groq.com/openai/v1/chat/completions"
         model_name = "qwen/qwen3.8-27b"
@@ -190,10 +197,10 @@ async def recognize_replacements_from_image(image_bytes: bytes, group_name: str 
                 "role": "user",
                 "content": [
                     {"type": "text", "text": prompt},
-                    {
+                    *[{
                         "type": "image_url",
-                        "image_url": {"url": f"data:image/jpeg;base64,{b64_image}"},
-                    },
+                        "image_url": {"url": "data:image/jpeg;base64," + base64.b64encode(img).decode("ascii")},
+                    } for img in images],
                 ],
             }
         ],
@@ -218,6 +225,12 @@ async def recognize_replacements_from_image(image_bytes: bytes, group_name: str 
         raise BotError(f"Не вдалося обробити зображення: {e}")
 
     date_str = result.get("date")
+    if allow_empty:
+        from datetime import date
+        try:
+            date.fromisoformat(str(date_str))
+        except ValueError:
+            raise BotError("Не вдалося визначити дату таблиці. Потрібна ручна перевірка фото.")
     if not date_str or not re.match(r"^\d{4}-\d{2}-\d{2}$", str(date_str).strip()):
         date_str = next_work_date
 
@@ -251,7 +264,7 @@ async def recognize_replacements_from_image(image_bytes: bytes, group_name: str 
                     if item not in filtered:
                         filtered.append(item)
 
-    if not filtered:
+    if not filtered and not (allow_empty and result.get("tableReadable") is True and result.get("noReplacements") is True and confidence >= 0.8 and not raw_replacements):
         raise BotError(f"Для групи {group_name} замін на фото не знайдено.")
 
     return {
@@ -259,3 +272,4 @@ async def recognize_replacements_from_image(image_bytes: bytes, group_name: str 
         "confidence": confidence,
         "replacements": filtered,
     }
+
