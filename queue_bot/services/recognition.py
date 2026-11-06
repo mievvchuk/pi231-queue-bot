@@ -92,7 +92,7 @@ async def recognize_replacements_from_image(image_bytes: bytes, group_name: str 
     return await recognize_replacements_from_images([image_bytes], group_name=group_name, conn=conn)
 
 
-async def recognize_replacements_from_images(images: list[bytes], group_name: str = "ПІ-231", conn=None) -> dict:
+async def recognize_replacements_from_images(images: list[bytes], group_name: str = "ПІ-231", conn=None, *, allow_empty: bool = False) -> dict:
     """Recognize one table split across one or two photos in one API request."""
     if (not isinstance(images, (list, tuple)) or not 1 <= len(images) <= 2
             or any(not isinstance(part, bytes) or not part for part in images)):
@@ -158,6 +158,13 @@ async def recognize_replacements_from_images(images: list[bytes], group_name: st
         'scheduleOverrides у прикладі заповнюй лише за реальною приміткою; без неї поверни []. Якщо рядок групи не знайдено, replacements: [], але загальні scheduleOverrides все одно заповни.'
     )
 
+    if allow_empty:
+        prompt += (
+            "\nДодай tableReadable: true лише коли таблицю та всі примітки прочитано повністю; інакше false. "
+            "Додай noReplacements: true лише коли для цільової групи немає замін, включно із загальними примітками. "
+            "Нечітке фото не означає відсутність замін. Дату бери з таблиці; якщо не прочитано — date=null."
+        )
+
     url, model_name, provider_name = config.recognition_settings()
 
     headers = {
@@ -202,6 +209,12 @@ async def recognize_replacements_from_images(images: list[bytes], group_name: st
     if not isinstance(result, dict):
         raise BotError('ШІ повернув некоректний формат таблиці. Повторіть розпізнавання.')
     date_str = result.get("date")
+    if allow_empty:
+        from datetime import date
+        try:
+            date.fromisoformat(str(date_str))
+        except ValueError:
+            raise BotError("Не вдалося визначити дату таблиці. Потрібна ручна перевірка фото.")
     if not date_str or not re.match(r"^\d{4}-\d{2}-\d{2}$", str(date_str).strip()):
         date_str = next_work_date
 
@@ -235,7 +248,7 @@ async def recognize_replacements_from_images(images: list[bytes], group_name: st
                 })
 
     filtered = resolve_header_notes(result, date_str, group_name, filtered)
-    if not filtered:
+    if not filtered and not (allow_empty and result.get("tableReadable") is True and result.get("noReplacements") is True and confidence >= 0.8 and not raw_replacements):
         raise BotError(f"Для групи {group_name} замін на фото не знайдено.")
 
     return {
@@ -243,3 +256,4 @@ async def recognize_replacements_from_images(images: list[bytes], group_name: st
         "confidence": confidence,
         "replacements": filtered,
     }
+

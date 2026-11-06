@@ -238,7 +238,8 @@
       "set_pair_number_handler",
       "set_date_value_handler",
       "delete_replacement_item_handler",
-      "add_replacement_item_handler"
+      "add_replacement_item_handler",
+      "confirm_channel_import"
     ]
   },
   {

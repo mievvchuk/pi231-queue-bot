@@ -140,3 +140,8 @@ def validate_runtime():
         raise RuntimeError('Set RECOGNITION_API_KEY or disable recognition')
     if GROUP_CHAT_ID and not GROUP_CHAT_ID.lstrip('-').isdigit():
         raise RuntimeError('GROUP_CHAT_ID must be a Telegram chat ID')
+
+
+# Public channel ingestion; no Telegram user session is required.
+REPLACEMENTS_CHANNEL = os.getenv("REPLACEMENTS_CHANNEL", "replacements_xpk").strip("@ ")
+CHANNEL_POLL_SECONDS = integer("CHANNEL_POLL_SECONDS", 300, 60, 86400)
