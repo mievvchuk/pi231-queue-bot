@@ -125,10 +125,7 @@ async def poll_once(bot, conn, session):
                     f'📅 {html.escape(draft["date"])}\n\n')
             text += '\n\n'.join(format_replacement(r) for r in draft['replacements']) if draft['replacements'] else format_no_replacements(draft['date'])
             text += '\n\nПідтвердити цей результат і сповістити студентів?'
-            keyboard = InlineKeyboardMarkup(inline_keyboard=[[
-                InlineKeyboardButton(text='✅ Підтвердити', callback_data=f'ch_yes:{post["id"]}'),
-                InlineKeyboardButton(text='❌ Відхилити', callback_data=f'ch_no:{post["id"]}'),
-            ]])
+            keyboard = approval_keyboard(post['id'])
             await bot.send_message(config.OWNER_ID, text, reply_markup=keyboard)
             draft['notified'] = True
             set_state(conn, key, draft)
@@ -157,3 +154,50 @@ async def watch_channel(bot, conn):
                     except Exception:
                         log.exception('Could not notify owner')
             await asyncio.sleep(config.CHANNEL_POLL_SECONDS)
+
+
+def approval_keyboard(post_id, *, confirmed=False):
+    rows = [] if confirmed else [[
+        InlineKeyboardButton(text='✅ Підтвердити', callback_data=f'ch_yes:{post_id}'),
+        InlineKeyboardButton(text='❌ Скасувати', callback_data=f'ch_no:{post_id}'),
+    ]]
+    rows.append([InlineKeyboardButton(text='✏️ Редагувати', callback_data=f'ch_edit:{post_id}')])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def confirmed_results(conn, date_str=None):
+    if conn is None:
+        return []
+    records = []
+    for row in conn.execute('SELECT key, value FROM bot_state WHERE key LIKE ?',
+                            (f'channel_draft:{config.REPLACEMENTS_CHANNEL}:%',)).fetchall():
+        draft = json.loads(row['value'])
+        if draft.get('status') == 'confirmed' and (date_str is None or draft['date'] == date_str):
+            records.append(dict(draft, post_id=row['key'].rsplit(':', 1)[1]))
+    return sorted(records, key=lambda d: (d['date'], int(d['post_id'])), reverse=True)
+
+
+def parse_edit(text):
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    if not lines:
+        raise BotError('Вкажіть дату та заміни або слово «немає».')
+    try:
+        day = datetime.datetime.strptime(lines[0], '%d.%m.%Y').date().isoformat()
+    except ValueError:
+        raise BotError('Перший рядок — дата у форматі ДД.ММ.РРРР.')
+    if len(lines) == 2 and lines[1].casefold() == 'немає':
+        return dict(date=day, replacements=[])
+    if len(lines) < 2:
+        raise BotError('Після дати додайте заміни або слово «немає».')
+    items = []
+    for line in lines[1:]:
+        fields = [part.strip() for part in line.split('|')]
+        if len(fields) != 4 or not fields[0].isdigit() or not 1 <= int(fields[0]) <= 6 or not fields[1]:
+            raise BotError('Кожна заміна: номер пари | предмет | викладач | аудиторія. Для порожнього поля вкажіть «-».')
+        number = int(fields[0])
+        if any(item['lesson_number'] == number for item in items):
+            raise BotError('Номер пари не має повторюватися.')
+        items.append(dict(date=day, group_name=config.STUDENT_GROUP, lesson_number=number,
+                          new_subject=fields[1], teacher=fields[2] if fields[2] != '-' else '',
+                          room=fields[3] if fields[3] != '-' else '', old_subject=None))
+    return dict(date=day, replacements=items)

@@ -52,8 +52,9 @@ async def open_schedule_menu(message: Message, state: FSMContext, conn):
     now = datetime.datetime.now(ZoneInfo(config.TIMEZONE))
 
     if now.hour >= 15:
-        target_dt = schedule.get_tomorrow_date()
-        date_heading = f"на завтра ({target_dt.strftime('%d.%m.%Y')})"
+        target_dt = working_days.get_next_working_day(conn, now.date())
+        period = "на завтра" if target_dt == now.date() + datetime.timedelta(days=1) else "на наступний навчальний день"
+        date_heading = f"{period} ({target_dt.strftime('%d.%m.%Y')})"
     else:
         target_dt = schedule.get_current_date()
         date_heading = f"на сьогодні ({target_dt.strftime('%d.%m.%Y')})"
@@ -135,26 +136,20 @@ async def show_base_schedule(message: Message):
 @router.message(_private_only, F.text.in_({"🔄 Заміни", "🔄 Активні заміни"}), StateFilter("*"))
 @router.message(Command("replacements"), StateFilter("*"))
 async def show_replacements(message: Message, conn):
+    from queue_bot.services.channel_import import confirmed_results, approval_keyboard, format_no_replacements
+    results = [r for r in confirmed_results(conn) if r['date'] >= replacements.get_today_key()]
+    markup = None
+    if results and message.chat.type == 'private' and message.from_user.id == config.OWNER_ID:
+        markup = approval_keyboard(results[0]['post_id'], confirmed=True)
     items = replacements.get_replacements(conn, group_name=config.STUDENT_GROUP)
-    if not items:
-        is_priv = getattr(message.chat, "type", "private") == "private"
-        admin_hint = (
-            "\n<i>(Щоб додати заміну, надішліть фотографію таблиці замін у чат)</i>"
-            if is_priv and admins.is_admin(conn, message.from_user.id)
-            else ""
-        )
-        await message.answer(
-            f"🔄 <b>Активні заміни для групи {html.escape(config.STUDENT_GROUP)}:</b>\n\n"
-            f"Замін ще немає.{admin_hint}"
-        )
-        return
-
-    text_parts = [f"🔄 <b>Активні заміни для групи {html.escape(config.STUDENT_GROUP)}:</b>\n"]
-    for it in items:
-        text_parts.append(replacements.format_replacement(it))
-        text_parts.append("────────────────")
-
-    await message.answer("\n\n".join(text_parts))
+    lines = [f"🔄 <b>Актуальні заміни для групи {html.escape(config.STUDENT_GROUP)}:</b>\n"]
+    for result in results:
+        if not result['replacements'] and not any(item['date'] == result['date'] for item in items):
+            lines.append(format_no_replacements(result['date']))
+    lines.extend(replacements.format_replacement(item) for item in items)
+    if len(lines) == 1:
+        lines.append('Підтверджених даних про заміни ще немає. Бот перевіряє канал автоматично.')
+    await message.answer('\n\n'.join(lines), reply_markup=markup)
 
 
 @router.message(_private_only, Command("clear_replacements"), StateFilter("*"))
@@ -895,7 +890,7 @@ async def show_archived_replacements(message: Message, conn):
 
 @router.callback_query(F.data.startswith('ch_yes:') | F.data.startswith('ch_no:'))
 async def confirm_channel_import(callback: CallbackQuery, conn):
-    from queue_bot.services.channel_import import get_state, set_state, format_no_replacements
+    from queue_bot.services.channel_import import get_state, set_state, format_no_replacements, approval_keyboard
     from queue_bot.storage.database import transaction
     if callback.from_user.id != config.OWNER_ID or not admins.is_admin(conn, callback.from_user.id):
         await callback.answer('Тільки для власника бота.', show_alert=True)
@@ -903,17 +898,27 @@ async def confirm_channel_import(callback: CallbackQuery, conn):
     action, post_id = callback.data.split(':', 1)
     key = f'channel_draft:{config.REPLACEMENTS_CHANNEL}:{post_id}'
     draft = get_state(conn, key)
-    if not draft or draft['status'] != 'pending':
+    if not draft or (draft['status'] != 'pending' and not draft.get('edit')):
         await callback.answer('Результат уже оброблено або застарів.', show_alert=True)
         return
     if action == 'ch_no':
-        draft['status'] = 'rejected'
+        if draft['status'] != 'confirmed':
+            draft['status'] = 'rejected'
+        draft.pop('edit', None)
         set_state(conn, key, draft)
         await callback.answer('Відхилено')
         await callback.message.edit_text('❌ Результат із каналу відхилено. Розклад не змінено.')
         return
+    was_confirmed = draft['status'] == 'confirmed'
+    previous_date = draft['date']
+    edited = draft.pop('edit', None)
+    if edited:
+        draft.update(edited)
     # No await inside the transaction: concurrent callbacks cannot apply twice.
     with transaction(conn):
+        if was_confirmed and previous_date != draft['date']:
+            conn.execute('DELETE FROM replacements WHERE date = ? AND group_name = ?',
+                         (previous_date, config.STUDENT_GROUP))
         replacements.archive_previous_replacements(conn, draft['date'], group_name=config.STUDENT_GROUP)
         conn.execute('DELETE FROM replacements WHERE date = ? AND group_name = ?',
                      (draft['date'], config.STUDENT_GROUP))
@@ -924,7 +929,69 @@ async def confirm_channel_import(callback: CallbackQuery, conn):
         admins.log_action(conn, callback.from_user.id, 'confirm_channel_import', draft['source'])
     text = (replacements.format_replacements_broadcast(draft['replacements'], draft['date'])
             if draft['replacements'] else format_no_replacements(draft['date']))
+    if was_confirmed:
+        text = '✏️ <b>Виправлення попередніх даних</b>\n\n' + text
     await callback.answer('Підтверджено')
-    await callback.message.edit_text('✅ Підтверджено.\n\n' + text)
+    await callback.message.edit_text('✅ Підтверджено.\n\n' + text,
+                                     reply_markup=approval_keyboard(post_id, confirmed=True))
     from queue_bot.services.updates import broadcast_message_to_users, get_active_user_ids
     asyncio.create_task(broadcast_message_to_users(callback.bot, get_active_user_ids(conn), text))
+
+
+class ChannelEditState(StatesGroup):
+    waiting_for_text = State()
+
+
+@router.callback_query(F.data.startswith('ch_edit:'))
+async def edit_channel_result(callback: CallbackQuery, state: FSMContext, conn):
+    from queue_bot.services.channel_import import get_state
+    if callback.from_user.id != config.OWNER_ID or not admins.is_admin(conn, callback.from_user.id):
+        await callback.answer('Тільки для власника бота.', show_alert=True)
+        return
+    post_id = callback.data.split(':', 1)[1]
+    draft = get_state(conn, f'channel_draft:{config.REPLACEMENTS_CHANNEL}:{post_id}')
+    if not draft:
+        await callback.answer('Дані не знайдено.', show_alert=True)
+        return
+    value = draft.get('edit') or draft
+    lines = [datetime.date.fromisoformat(value['date']).strftime('%d.%m.%Y')]
+    lines += [f"{r['lesson_number']} | {r['new_subject']} | {r.get('teacher') or '-'} | {r.get('room') or '-'}" for r in value['replacements']]
+    if not value['replacements']:
+        lines.append('немає')
+    await state.set_state(ChannelEditState.waiting_for_text)
+    await state.update_data(channel_post_id=post_id)
+    await callback.answer()
+    await callback.message.answer('✏️ Надішліть виправлені дані одним повідомленням. Перший рядок — дата, далі кожна пара: '
+                                  '<b>номер | предмет | викладач | аудиторія</b>. Якщо замін немає — слово «немає».\n'
+                                  'Щоб скасувати, надішліть /cancel.\n\n<code>' + html.escape('\n'.join(lines)) + '</code>')
+
+
+@router.message(_private_only, ChannelEditState.waiting_for_text, F.text)
+async def save_channel_edit(message: Message, state: FSMContext, conn):
+    from queue_bot.services.channel_import import get_state, set_state, parse_edit, approval_keyboard, format_no_replacements
+    if message.from_user.id != config.OWNER_ID or not admins.is_admin(conn, message.from_user.id):
+        await state.clear()
+        return
+    if message.text.strip().lower() in {'/cancel', 'скасувати'}:
+        await state.clear()
+        await message.answer('Редагування скасовано. Збережені дані не змінено.')
+        return
+    try:
+        edited = parse_edit(message.text)
+    except BotError as error:
+        await message.answer(html.escape(str(error)))
+        return
+    post_id = (await state.get_data())['channel_post_id']
+    key = f'channel_draft:{config.REPLACEMENTS_CHANNEL}:{post_id}'
+    draft = get_state(conn, key)
+    if not draft:
+        await state.clear()
+        await message.answer('Дані не знайдено.')
+        return
+    draft['edit'] = edited
+    set_state(conn, key, draft)
+    await state.clear()
+    text = ('\n\n'.join(replacements.format_replacement(r) for r in edited['replacements'])
+            if edited['replacements'] else format_no_replacements(edited['date']))
+    await message.answer('✏️ <b>Перевірте виправлення перед збереженням:</b>\n\n' + text,
+                         reply_markup=approval_keyboard(post_id))

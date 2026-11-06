@@ -364,3 +364,14 @@ async def test_home_cards_show_only_current_users_remaining_labs(client, conn):
     outsider = await (await client.get('/api/miniapp/bootstrap', headers=headers(100))).json()
     card = next(q for q in outsider['queues'] if q['id'] == sid)
     assert card['my_labs'] is None and card['my_planned_minutes'] is None
+
+
+
+@pytest.mark.asyncio
+async def test_schedule_exposes_confirmed_empty_result_only_on_its_date(client, conn):
+    from queue_bot.services.channel_import import set_state
+    set_state(conn, 'channel_draft:replacements_xpk:828', dict(date='2026-11-09', replacements=[], status='confirmed'))
+    result = await (await client.get('/api/miniapp/schedule?date=2026-11-09', headers=headers())).json()
+    assert result['replacement_status'] == 'На 09.11.2026 замін немає для ПІ-231.'
+    other = await (await client.get('/api/miniapp/schedule?date=2026-11-10', headers=headers())).json()
+    assert other['replacement_status'] is None

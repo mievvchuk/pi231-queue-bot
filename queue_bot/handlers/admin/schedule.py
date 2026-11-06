@@ -22,7 +22,7 @@ async def admin_category_schedule(message: Message, state: FSMContext):
     await state.set_state(AdminPanelState.in_schedule_menu)
     await message.answer(
         "📅 <b>Керування розкладом та замінами</b>\n\n"
-        "• <b>📸 Додати заміни (фото)</b> — надіслати скріншот/фото таблиці замін для автоматичного розпізнавання та розсилки групі\n"
+        "Заміни надходять автоматично з каналу й застосовуються після підтвердження. Відредагувати їх можна до або після збереження.\n\n"
         "• <b>🔄 Активні заміни</b> — переглянути поточні збережені заміни\n"
         "• <b>🏢 Робоча субота</b> — призначити суботу навчальним днем за розкладом іншого дня\n"
         "• <b>📦 Архів замін</b> — переглянути історію попередніх замін\n"
@@ -427,6 +427,7 @@ async def admin_broadcast_working_saturday_send(callback: CallbackQuery, conn):
         f"• Помилок: <b>{errors}</b>"
     )
     await render_working_saturday_panel(callback, conn, sat_date)
+
 
 
 

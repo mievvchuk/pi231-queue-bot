@@ -152,7 +152,11 @@ async def manage(request):
                 return web.json_response(schedule.load_schedule_data(), headers={'Content-Disposition': 'attachment; filename="schedule.json"'})
             keys = ('date', 'lesson_number', 'old_subject', 'new_subject', 'teacher', 'room')
             project = lambda rows: [{k: row.get(k) for k in keys} for row in rows]
-            return response({'active': project(replacements.get_replacements(conn, group_name=config.STUDENT_GROUP)),
+            from queue_bot.services.channel_import import confirmed_results, format_no_replacements
+            confirmed = [dict(date=item['date'], no_replacements=not item['replacements'],
+                              message=format_no_replacements(item['date']) if not item['replacements'] else '')
+                         for item in confirmed_results(conn) if item['date'] >= replacements.get_today_key()]
+            return response({'confirmed': confirmed, 'active': project(replacements.get_replacements(conn, group_name=config.STUDENT_GROUP)),
                              'archived': project(replacements.get_archived_replacements(conn, config.STUDENT_GROUP))})
         if section == 'saturdays':
             active, archived = working_days.split_working_saturdays(conn)
@@ -330,3 +334,4 @@ def setup(app):
     app.router.add_post('/api/miniapp/admin/manage/{section}', manage)
     from .poll_api import setup as poll_setup
     poll_setup(app)
+

@@ -310,6 +310,10 @@ async def timetable(request):
         raise BotError('Оберіть правильну дату.')
     lessons, replacements = schedule.get_actual_schedule(request[REQ_CONTEXT]['conn'], schedule.load_schedule_data(), dt, config.STUDENT_GROUP)
     working_day = working_days.get_working_saturday(request[REQ_CONTEXT]['conn'], dt.isoformat())
+    from queue_bot.services.channel_import import confirmed_results, format_no_replacements
+    confirmed = confirmed_results(request[REQ_CONTEXT]['conn'], dt.isoformat())
+    replacement_status = (format_no_replacements(dt.isoformat())
+                          if confirmed and not replacements and not confirmed[0]['replacements'] else None)
     # Expose timetable fields only, not DB metadata (PG created_at is a datetime).
     public_replacements = [{key: item.get(key) for key in
         ('date', 'lesson_number', 'old_subject', 'new_subject', 'teacher', 'room')}
@@ -318,7 +322,7 @@ async def timetable(request):
         'week_type': (working_day.get('week_type') if working_day else None) or schedule.get_week_type(dt),
         'source_day': schedule.DAY_NAMES_UK[working_day['replaces_day']] if working_day else None,
         'working_day_archived': bool(working_day and working_days.is_saturday_archived(dt.isoformat())),
-        'lessons': lessons, 'slots': schedule.get_day_slots(lessons), 'replacements': public_replacements})
+        'replacement_status': replacement_status, 'lessons': lessons, 'slots': schedule.get_day_slots(lessons), 'replacements': public_replacements})
 
 
 async def admin_queue(request):
@@ -411,3 +415,4 @@ def setup(app):
     app.router.add_post(prefix+'/admin/entries/{eid}', admin_entry)
     app.router.add_get(prefix+'/admin/users', admin_users)
     app.router.add_post(prefix+'/admin/users/{user_id}', admin_user)
+

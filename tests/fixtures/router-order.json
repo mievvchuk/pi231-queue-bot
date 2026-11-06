@@ -223,7 +223,8 @@
       "export_schedule_file",
       "handle_document_upload",
       "show_archived_replacements",
-      "show_archived_replacements"
+      "show_archived_replacements",
+      "save_channel_edit"
     ],
     "callback_query": [
       "cancel_clear_replacements",
@@ -239,7 +240,8 @@
       "set_date_value_handler",
       "delete_replacement_item_handler",
       "add_replacement_item_handler",
-      "confirm_channel_import"
+      "confirm_channel_import",
+      "edit_channel_result"
     ]
   },
   {

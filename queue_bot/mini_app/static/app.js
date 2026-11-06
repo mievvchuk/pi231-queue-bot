@@ -1507,6 +1507,7 @@
                   (day.working_day_archived ? " · Завершено" : ""),
               )
             : null,
+          day.replacement_status ? el("p", { class: "notice" }, day.replacement_status) : null,
           !day.lessons.length
             ? el("p", { class: "notice" }, "Занять немає.")
             : null,
@@ -1624,6 +1625,7 @@
           ? weekView()
           : data
             ? [
+                data.replacement_status ? el("p", { class: "notice" }, data.replacement_status) : null,
                 !data.lessons.length
                   ? el("p", { class: "notice" }, "На обрану дату занять немає.")
                   : null,
@@ -2188,8 +2190,11 @@
   window.setInterval(() => {
     if(document.visibilityState === 'visible' && S.queue && !S.busy && !S.loading && !document.querySelector('.sheet')) void load();
   }, 15000);
+  window.setInterval(() => {
+    if (document.visibilityState === 'visible' && S.tab === 'schedule' && !S.busy && !S.loading && !document.querySelector('.sheet')) void refreshSchedule();
+  }, 60000);
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible') {features?.tick?.(); if(S.queue && !S.busy && !S.loading && !document.querySelector('.sheet')) void load();}
+    if (document.visibilityState === 'visible') {if(S.tab === 'schedule' && !S.busy && !S.loading && !document.querySelector('.sheet')) void refreshSchedule(); features?.tick?.(); if(S.queue && !S.busy && !S.loading && !document.querySelector('.sheet')) void load();}
   });
   theme();
   tg?.onEvent?.("themeChanged", theme);
@@ -2238,3 +2243,4 @@
   }
   void startApp();
 })();
+

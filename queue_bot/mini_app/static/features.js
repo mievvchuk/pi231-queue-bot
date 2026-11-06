@@ -1013,34 +1013,15 @@ window.createPI231Features = function (H) {
     );
   }
   function replacementsPage(data) {
-    const path = adminPath("admin-replacements"),
-      files = input({
-        type: "file",
-        multiple: true,
-        accept: "image/jpeg,image/png,image/webp",
-      });
+    const path = adminPath("admin-replacements");
     const scheduleFile = input({
       type: "file",
       accept: "application/json,.json",
     });
     return [
-      card(
-        el(
-          "p",
-          { class: "notice" },
-          "Завантаж 1–2 фото. Після розпізнавання перевір кожну заміну перед збереженням.",
-        ),
-        form([field("Фото замін", files)], "Розпізнати", async (ctx) => {
-          const selected = [...files.files];
-          if (selected.length < 1 || selected.length > 2)
-            throw new Error("Обери одне або два фото.");
-          const images = await Promise.all(selected.map(readImage));
-          if (!current(ctx.token, ctx.epoch, ctx.key)) return;
-          const result = await api(path, { action: "recognize", images });
-          if (current(ctx.token, ctx.epoch, ctx.key))
-            replacementDraft(result.draft || {});
-        }),
-      ),
+      card(el("p", { class: "notice" }, "Заміни надходять автоматично з каналу. Підтвердження й редагування до та після збереження доступні у чаті з ботом.")),
+      rows(data.confirmed).filter((item) => item.no_replacements).map((item) =>
+        el("p", { class: "notice" }, item.message)),
       el("h2", {}, "Активні заміни"),
       list(rows(data.active), replacementCard),
       rows(data.active).length
@@ -1680,3 +1661,4 @@ window.createPI231Features = function (H) {
     tick: () => { if(S.feature==='admin-saturdays' && allowed('admin-saturdays') && !state.loading && !state.error) saturdayTicker?.(); },
   };
 };
+

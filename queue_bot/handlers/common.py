@@ -162,7 +162,7 @@ def get_admin_polls_menu() -> ReplyKeyboardMarkup:
 def get_admin_schedule_menu() -> ReplyKeyboardMarkup:
     """Вкладене меню адміна: Розклад і заміни."""
     return make_reply_keyboard([
-        ["📸 Додати заміни (фото)", "🔄 Активні заміни"],
+        ["🔄 Активні заміни"],
         ["🏢 Робоча субота", "📦 Архів замін"],
         ["📥 Отримати schedule.json", "📤 Завантажити розклад"],
         ["🗑 Очистити всі заміни", "🟢 Статус системи"],
@@ -990,4 +990,5 @@ async def notify_swap_wishes(
                         await bot.send_message(e["telegram_id"], text, reply_markup=kb)
 
     return matched_candidates
+
 

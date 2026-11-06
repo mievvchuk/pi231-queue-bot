@@ -234,6 +234,10 @@ def format_schedule_for_date(conn, schedule_data: dict, dt: date, group_name: st
         header = f"📅 <b>{day_uk}, {date_formatted}</b> ({w_type_uk})"
 
     lessons, replacements = get_actual_schedule(conn, schedule_data, dt, group_name)
+    from queue_bot.services.channel_import import confirmed_results, format_no_replacements
+    confirmed = confirmed_results(conn, dt.isoformat())
+    if confirmed and not replacements and not confirmed[0]['replacements']:
+        header += '\n✅ ' + format_no_replacements(dt.isoformat())
     if not lessons:
         return f"{header}\n\n🏖 <i>Занять немає (вихідний або вільний день).</i>"
 
@@ -274,3 +278,4 @@ def format_week_schedule(conn, schedule_data: dict, ref_date: date, group_name: 
         day_date = monday + timedelta(days=i)
         result.append(format_schedule_for_date(conn, schedule_data, day_date, group_name))
     return result
+
