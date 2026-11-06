@@ -14,18 +14,19 @@ window.createPI231Design = function (H) {
   const avatar = (name,cls='avatar-button') => btn(avatarFace('me',initials(name)),()=>navigate('profile'),cls);
   const studentNav = [['journal','Мої оцінки','journal-bookmark'],['queues','Черги','people'],['schedule','Розклад','calendar3'],['profile','Профіль','person']];
   const adminNav = [['admin','Огляд','grid','Робота'],['admin-history','Черги','people','Робота'],['admin-group','Студенти','person-lines-fill','Робота'],['admin-subjects','Предмети й викладачі','journal-bookmark','Навчання'],['admin-replacements','Розклад і заміни','calendar2-week','Навчання'],['admin-saturdays','Робочі суботи','calendar-check','Навчання'],['admin-polls','Опитування','bar-chart','Комунікації'],['admin-announcements','Оголошення','megaphone','Комунікації'],['admin-bugs','Звернення','chat-left-text','Система'],['owner','Налаштування','gear','Система']];
-  adminNav.splice(3,0,['journal','Електронний журнал','journal-bookmark','Навчання']);
+  adminNav.splice(3,0,['journal','Журнал групи','journal-bookmark','Навчання']);
   const go = key => {
     closeMenu();
     if(S.busy)return;
     if(key==='admin-announcements')return openFeature('owner');
     if(key==='appearance') return appearance();
     if(key==='swaps') return navigate('swaps');
+    if(key==='home')return isAdmin()?navigate('admin'):openFeature('journal');
     if(key==='journal' || key.startsWith('admin-') || key==='owner') return openFeature(key);
     navigate(key);
   };
   function switchMode() {
-    if(S.busy||S.loading)return;
+    if(S.busy||S.loading||!S.data?.me?.is_admin)return;
     S.mode=isAdmin()?'student':'admin';
     go(isAdmin()?'admin':'home');
   }
@@ -53,7 +54,7 @@ window.createPI231Design = function (H) {
         nav,
         el('div',{class:'sidebar-profile'},el('span',{class:'mini-avatar'},avatarFace('me',initials(S.data.me.name))),el('div',{},el('strong',{},S.data.me.name),el('small',{},admin?'Адміністратор':'Студент')),el('button',{type:'button','aria-label':'Оформлення',onclick:appearance},glyph('palette'))));
       const mobile=el('nav',{class:'bottom-nav','aria-label':'Основні розділи'});
-      const tabs=admin?adminNav.slice(0,3):studentNav;
+      const tabs=admin?[adminNav[0],adminNav[1],adminNav.find(n=>n[0]==='journal'),adminNav.find(n=>n[0]==='admin-group')]:studentNav;
       tabs.forEach(([key,label,name])=>mobile.append(el('button',{type:'button','data-page':key,onclick:()=>go(key)},glyph(name),el('span',{},label))));
       if(admin)mobile.append(el('button',{type:'button','aria-label':'Усі розділи',onclick:openMenu},glyph('grid'),el('span',{},'Ще')));
       shell=el('div',{class:'make-navigation'},aside,mobile);
@@ -68,7 +69,7 @@ window.createPI231Design = function (H) {
   function topbar(){
     const title=(isAdmin()?adminNav:studentNav).find(n=>n[0]===(S.feature||S.tab))?.[1]||'ПІ-231';
     return el('div',{class:'mobile-top'},btn([el('span',{class:'brand-mark'},avatarFace('bot','ПІ')),el('strong',{},title)],()=>go(isAdmin()?'admin':'home'),'brand-mini'),
-      el('div',{},el('button',{type:'button',class:'icon-button','aria-label':'Оформлення',onclick:appearance},glyph('palette')),avatar(S.data?.me.name)));
+      el('div',{},S.data.me.is_admin?el('button',{type:'button',class:'button secondary mobile-mode-switch','aria-label':isAdmin()?'Режим студента':'Режим адміністратора',onclick:switchMode},isAdmin()?'Адмін ↔':'Студент ↔'):null,el('button',{type:'button',class:'icon-button','aria-label':'Оформлення',onclick:appearance},glyph('palette')),avatar(S.data?.me.name)));
   }
   function homePage(){
     const lesson=S.data.next_lesson, own=ownQueues(), primary=own[0];
@@ -181,7 +182,7 @@ window.createPI231Design = function (H) {
     const settings=(name,title,description,action)=>btn([el('span',{class:'subject-icon'},glyph(name)),el('div',{},el('strong',{},title),el('small',{},description)),glyph('chevron-right')],action,'');
     return el('main',{class:'page make-profile'},heading('Telegram-профіль','Мій профіль'),card('profile-card',el('div',{class:'profile-avatar'},avatarFace('me',initials(name))),el('div',{},el('h2',{},name),el('p',{},'ПІ-231 · '+(isAdmin()?'Адміністратор':'Студент')),badge([glyph('shield-check'),' Telegram підтверджено'],'success'))),
       el('div',{class:'profile-grid'},card('',el('p',{class:'eyebrow'},'Мої записи'),el('div',{class:'stat-row'},el('div',{},el('strong',{},own.length),el('span',{},'Активних')),el('div',{},el('strong',{},S.data.swaps.length),el('span',{},'Запитів на обмін')))),
-      card('settings-list',settings('bar-chart','Опитування','Голосування групи',()=>go('polls')),settings('question-circle','Допомога','Як користуватися застосунком',()=>go('help')),settings('palette','Оформлення','Тема, колір та анімації',appearance),settings('arrow-left-right','Обміни','Запити та повторний обмін',()=>go('swaps')),settings('phone','Встановити PWA','Додати на головний екран',async()=>toast(await window.PI231PWA?.install()||'Скористайся меню браузера → Встановити застосунок.')),settings('chat-left-text','Звернення та відповіді','Повідомити про проблему',()=>openFeature('bugs')),settings('journal-bookmark','Мої пропозиції','Предмети та викладачі',()=>openFeature('proposals')))),
+      card('settings-list',S.data.me.is_admin?settings('shield-check',isAdmin()?'Режим студента':'Режим адміністратора','Перемкнути режим роботи',switchMode):null,settings('bar-chart','Опитування','Голосування групи',()=>go('polls')),settings('question-circle','Допомога','Як користуватися застосунком',()=>go('help')),settings('palette','Оформлення','Тема, колір та анімації',appearance),settings('arrow-left-right','Обміни','Запити та повторний обмін',()=>go('swaps')),settings('phone','Встановити PWA','Додати на головний екран',async()=>toast(await window.PI231PWA?.install()||'Скористайся меню браузера → Встановити застосунок.')),settings('chat-left-text','Звернення та відповіді','Повідомити про проблему',()=>openFeature('bugs')),settings('journal-bookmark','Мої пропозиції','Предмети та викладачі',()=>openFeature('proposals')))),
       own.length?el('div',{class:'queue-list'},own.map(queueRow)):null,
       !H.initData?button('Вийти з профілю',H.logout,'ghost','box-arrow-right'):null);
   }

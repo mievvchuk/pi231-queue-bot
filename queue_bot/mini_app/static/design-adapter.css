@@ -235,3 +235,19 @@ button:active:not(:disabled) { transform:scale(.97); }
  .personal-work > .button { min-width:110px; padding:10px 12px; }
  .personal-grade { font-size:18px; }
 }
+.group-journal-page { min-width:0; max-width:none; }
+.group-journal-page .journal-table-scroll { width:100%; overflow:auto; max-height:70vh; }
+.group-journal-page .journal-table thead th { position:sticky; top:0; z-index:3; background:var(--surface-solid); }
+.group-journal-page .journal-table .journal-name { position:sticky; left:0; z-index:2; background:var(--surface-solid); }
+.group-journal-page .journal-table thead .journal-name { z-index:4; }
+.mobile-mode-switch { width:auto!important; padding:8px 10px!important; font-size:11px!important; white-space:nowrap; }
+
+.group-journal-page .journal-table thead tr:nth-child(2) th { top:44px; z-index:3; }
+.group-journal-controls { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:12px 20px; padding:18px!important; }
+.group-journal-controls .field { margin:0; }
+.group-journal-controls > small { margin:0; }
+@media(max-width:700px){
+ .group-journal-controls { gap:10px; padding:16px!important; }
+ .group-journal-controls .field { grid-column:1/-1; gap:5px; }
+ .group-journal-controls > small { font-size:11px; }
+}

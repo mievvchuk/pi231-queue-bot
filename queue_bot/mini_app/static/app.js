@@ -10,6 +10,7 @@
     search: '',
     feature: null,
     mode: "student",
+    modeInitialized: false,
     data: null,
     queue: null,
     schedule: null,
@@ -471,6 +472,7 @@
         history.replaceState({},'',url);
       }
     }
+    if(key==='journal'&&isAdmin()&&!new URLSearchParams(query).has('scope'))query+=(query?'&':'?')+'scope=group';
     return features.open(key,force,query);
   }
   const presentation = {theme:'system',accent:'lime',reduced:false};
@@ -509,6 +511,10 @@
       const data = await api("/bootstrap");
       if (epoch !== S.epoch) return;
       S.data = data;
+      if(!S.modeInitialized){
+        S.mode=data.me.is_admin?'admin':'student';S.modeInitialized=true;
+        if(data.me.is_admin&&S.tab==='home')S.tab='admin';
+      }
       if (!data.me.is_admin) {
         S.mode = "student";
         if (S.tab === "admin") S.tab = "queues";

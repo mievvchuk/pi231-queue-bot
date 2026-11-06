@@ -82,7 +82,7 @@ function setup(enableDesign = false, featureStub = null) {
   // Export the existing closure only in this VM; production contains no test hooks.
   vm.runInContext(
     source.slice(0, source.indexOf('  document.addEventListener("keydown"')) +
-      "\nthis.appTest = {S, design, openInitialFeature, loadSchedule, loadWeek, navigate, adminPage, topbar, profilePage, loadAvatars, homePage, morePage, bottomnav, queuePage, queuesPage, rerender:()=>render(), setRender: fn => {render=fn;}, loginFailureMessage, attachLiquidLens: typeof attachLiquidLens === 'function' ? attachLiquidLens : null, installPressOptics: typeof installPressOptics === 'function' ? installPressOptics : null};\n})();",
+      "\nthis.appTest = {S, design, load, openInitialFeature, loadSchedule, loadWeek, navigate, adminPage, topbar, profilePage, loadAvatars, homePage, morePage, bottomnav, queuePage, queuesPage, rerender:()=>render(), setRender: fn => {render=fn;}, loginFailureMessage, attachLiquidLens: typeof attachLiquidLens === 'function' ? attachLiquidLens : null, installPressOptics: typeof installPressOptics === 'function' ? installPressOptics : null};\n})();",
     context,
   );
   const app = context.appTest;
@@ -604,3 +604,30 @@ for(const design of [false,true]) test('queue search combines type and personal 
   assert.equal(JSON.stringify(app.S.data.queues),original);
 });
 
+
+
+test('admin mode switch remains visible in mobile topbar and profile',()=>{
+  const {app}=setup(true,{open(){}});
+  app.S.mode='student';app.S.data.me.is_admin=true;
+  assert.ok(allNodes(app.design.topbar()).some(n=>n.tag==='button'&&n.attrs['aria-label']==='Режим адміністратора'));
+  assert.ok(allNodes(app.design.profilePage()).some(n=>n.tag==='button'&&n.textContent.includes('Режим адміністратора')));
+  app.S.data.me.is_admin=false;
+  assert.ok(!allNodes(app.design.topbar()).some(n=>n.attrs['aria-label']==='Режим адміністратора'));
+});
+
+test('bootstrap selects admin mode once and preserves deliberate student mode',async()=>{
+  const {app,context}=setup(false,{open(){}});
+  app.setRender(()=>{});app.S.tab='home';app.S.modeInitialized=false;
+  context.fetch=async url=>result(String(url).includes('/admin/users')?{users:[]}:{me:{name:'Власник',is_admin:true,is_registered:true},queues:[],swaps:[],today:'2026-11-06'});
+  await app.load();assert.equal(app.S.mode,'admin');assert.equal(app.S.tab,'admin');
+  app.S.mode='student';app.S.tab='queues';
+  await app.load();assert.equal(app.S.mode,'student');
+});
+
+test('admin journal entry requests full group scope',()=>{
+  const calls=[];const {app}=setup(true,{open:(...args)=>calls.push(args)});
+  app.S.mode='admin';app.S.data.me.is_admin=true;
+  const link=app.design.navigation().querySelectorAll('[data-page]').find(n=>n.dataset.page==='journal');
+  link.listeners.click();
+  assert.equal(calls[0][0],'journal');assert.match(calls[0][2],/scope=group/);
+});

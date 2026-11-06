@@ -714,3 +714,18 @@ test('personal grade editing preserves revision and cancellation never writes',a
   assert.equal(calls[1][1].revision,0);
   assert.equal(calls[1][1].note,'Уточнення');
 });
+
+test('admin subject selector keeps every student in the full grade table',async()=>{
+  const data=journalData(true);
+  data.subjects.push({key:'ml',name:'Машинне навчання',labs:[{number:1,parts:2}]});
+  data.students.push({id:3,name:'Новий Студент'});
+  const {features,S}=setup(async()=>data);S.mode='admin';
+  await features.open('journal',false,'?scope=group');
+  const page=features.page('journal');
+  const selector=descendants(page).find(n=>n.tag==='select'&&n.attrs['aria-label']==='Предмет журналу групи');
+  assert.ok(selector);selector.value='ml';selector.events.change();
+  const rows=descendants(page).filter(n=>n.tag==='th'&&n.attrs.scope==='row').map(n=>n.textContent);
+  assert.deepEqual(rows,['Петренко Іван','Коваль Андрій','Новий Студент']);
+  assert.match(page.textContent,/Машинне навчання/);
+  assert.equal(descendants(page).filter(n=>n.tag==='input'&&String(n.attrs.class||'').includes('journal-input')).length,6);
+});
