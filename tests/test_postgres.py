@@ -22,12 +22,12 @@ def test_postgres_grid_imports_v1_grades_and_keeps_independent_components(pg_con
     conn._init_schema()
     values={'period':'2026-2027:1','subject_key':key,'kind':'lab','number':1,'grade':5}
     journal.submit(conn,1,subjects,{**values,'record_id':old,'revision':0})
-    second=journal.submit(conn,1,subjects,{**values,'part':2,'grade':2})
-    journal.review(conn,100,{'record_id':second,'revision':0,'status':'approved'})
+    journal.submit(conn,1,subjects,{**values,'part':2,'grade':2})
     conn._init_schema()
     rows=journal.view(conn,1,subjects,period='2026-2027:1')['records']
-    assert [(r['part'],r['grade'],r['status']) for r in rows] == [(1,5,'pending'),(2,2,'approved')]
-    assert conn.execute('SELECT COUNT(*) FROM journal_cell_events').fetchone()[0] == 4
+    assert [(r['part'],r['grade']) for r in rows] == [(1,5),(2,2)]
+    assert all('status' not in row for row in rows)
+    assert conn.execute('SELECT COUNT(*) FROM journal_cell_events').fetchone()[0] == 3
     assert conn.execute('SELECT grade FROM journal_records WHERE id=?',(old,)).fetchone()[0] == 4
 
 
@@ -40,9 +40,7 @@ def test_postgres_free_slots_retirement_and_journal_survive_schema_restart(pg_co
     values = {'period':'2026-2027:1','subject_key':'програмування','kind':'lab','number':1,'grade':5}
     subjects = [{'id':1,'name':'Програмування','teachers':[]}]
     rid = journal.submit(conn,1,subjects,values)
-    journal.review(conn,100,{'record_id':rid,'revision':0,'status':'approved'})
-    journal.submit(conn,1,subjects,{**values,'record_id':rid,'revision':1,'grade':4.2})
-    journal.review(conn,100,{'record_id':rid,'revision':2,'status':'approved'})
+    journal.submit(conn,1,subjects,{**values,'record_id':rid,'revision':0,'grade':4.2})
     journal.set_date(conn,100,subjects,{**values,'due_date':'2026-12-01'})
     queues.leave_queue(conn,1,sid)
     users.admin_delete_user(conn,100,uid)
@@ -50,10 +48,10 @@ def test_postgres_free_slots_retirement_and_journal_survive_schema_restart(pg_co
     assert users.get_user(conn,1) is None
     assert queues.get_entries(conn,sid)[13]['user_id'] is None
     assert queues.get_history(conn,sid)[0]['status'] == 'left'
-    assert conn.execute('SELECT COUNT(*) FROM journal_cell_events').fetchone()[0] == 4
+    assert conn.execute('SELECT COUNT(*) FROM journal_cell_events').fetchone()[0] == 2
     users.register_user(conn,1,'Петренко Іван')
     data = journal.view(conn,1,subjects,period='2026-2027:1')
-    assert data['records'][0]['status'] == 'approved'
+    assert 'status' not in data['records'][0]
     assert data['records'][0]['grade'] == 4.2
     assert data['dates'][0]['due_date'] == '2026-12-01'
     queues.join_queue(conn,1,sid,position=14)
