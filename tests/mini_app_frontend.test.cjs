@@ -125,7 +125,8 @@ test('launch links require registration, ignore arbitrary feature names and reta
   app.S.fatal=null;
   context.location={search:'?page=owner'};
   await app.openInitialFeature();
-  assert.deepEqual(calls,[]);
+  assert.deepEqual(calls,['journal']);
+  calls.length=0;
   context.location={search:'?poll=12'};
   await app.openInitialFeature();
   assert.deepEqual(calls,['polls',12]);
@@ -602,3 +603,4 @@ for(const design of [false,true]) test('queue search combines type and personal 
   assert.equal(results().length,0);
   assert.equal(JSON.stringify(app.S.data.queues),original);
 });
+

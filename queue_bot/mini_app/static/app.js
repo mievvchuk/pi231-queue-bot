@@ -456,10 +456,22 @@
       S.avatarLoading = false;
     }
   }
-  function openFeature(key) {
+  function openFeature(key, force=false, query="") {
     if (S.busy || !features) return;
     if (key === "polls" || key === "help") S.tab = key;
-    return features.open(key);
+    if(typeof history!=='undefined'&&typeof location!=='undefined'&&typeof URL!=='undefined'){
+      const url=new URL(location.href);
+      if(key==='journal'){
+        const params=new URLSearchParams(query);
+        url.searchParams.set('page','journal');
+        for(const name of ['subject','period'])params.has(name)?url.searchParams.set(name,params.get(name)):url.searchParams.delete(name);
+        history.replaceState({},'',url);
+      }else if(url.searchParams.get('page')==='journal'){
+        for(const name of ['page','subject','period'])url.searchParams.delete(name);
+        history.replaceState({},'',url);
+      }
+    }
+    return features.open(key,force,query);
   }
   const presentation = {theme:'system',accent:'lime',reduced:false};
   try {
@@ -573,11 +585,15 @@
     }
   }
   function navigate(tab) {
-    if (tab === "polls" || tab === "help") {
+    if (tab === "polls" || tab === "help" || tab === "journal") {
       openFeature(tab);
       return;
     }
     if (S.busy || (S.loading && !S.scheduleLoading)) return;
+    if(typeof history!=='undefined'&&typeof location!=='undefined'){
+      const url=new URL(location.href);
+      if(url.searchParams.get('page')==='journal'){url.searchParams.delete('page');url.searchParams.delete('subject');url.searchParams.delete('period');history.replaceState({},'',url);}
+    }
     S.tab = tab;
     S.feature = null;
     S.queue = null;
@@ -2174,15 +2190,23 @@
     if (S.fatal || !S.data?.me.is_registered) return;
     const params = new URLSearchParams(location.search);
     if (params.get('page') === 'journal') {
-      await openFeature('journal');
+      await openFeature('journal',false,'?'+new URLSearchParams([...params].filter(([key])=>['subject','period'].includes(key))).toString());
       return;
     }
     const pid = params.get('poll');
     if (pid && /^[1-9][0-9]*$/.test(pid)) {
       await openFeature('polls');
       features.openPoll(Number(pid));
+      return;
     }
+    if(!isAdmin())await openFeature('journal');
   }
+  window.addEventListener?.('popstate',()=>{
+    if(!S.data?.me.is_registered||S.busy)return;
+    const params=new URLSearchParams(location.search);
+    if(params.get('page')==='journal')void openInitialFeature();
+    else navigate(isAdmin()?'admin':'home');
+  });
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape" && !S.busy) {closeSheet();design?.closeMenu();}
   });

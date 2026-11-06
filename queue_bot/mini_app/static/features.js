@@ -20,7 +20,7 @@ window.createPI231Features = function (H) {
     bugs: "Повідомити про помилку",
     polls: "Опитування",
     help: "Допомога",
-    journal: "Електронний журнал",
+    journal: "Мої оцінки",
     "admin-history": "Активні черги",
     "admin-group": "Група",
     "admin-subjects": "Предмети й викладачі",
@@ -1439,8 +1439,100 @@ window.createPI231Features = function (H) {
       btn("Повідомити про помилку", () => open("bugs"), "button secondary"),
     ];
   }
+  function personalJournalPage(data) {
+    const allSubjects=rows(data.subjects), viewer=data.viewer_id;
+    const coursework=allSubjects.filter(s=>/курсова|курсовий/i.test(s.name));
+    const kpz=allSubjects.find(s=>/конструювання/i.test(s.name));
+    const subjects=allSubjects.filter(s=>!kpz||!coursework.includes(s));
+    const params=new URLSearchParams(state.query||'');
+    let selected=subjects.some(s=>s.key===params.get('subject'))?params.get('subject'):'';
+    let editing=null;
+    const content=el('section',{class:'personal-journal','aria-label':'Мої оцінки'});
+    const own=()=>rows(data.records).filter(r=>r.user_id===viewer);
+    const recordsFor=key=>own().filter(r=>r.subject_key===key||(key===kpz?.key&&coursework.some(s=>s.key===r.subject_key)));
+    const period=select(rows(data.periods).map(p=>[p,p.replace(':',' · семестр ')]),data.period);
+    const query=key=>'?period='+encodeURIComponent(data.period)+(key?'&subject='+encodeURIComponent(key):'');
+    const route=key=>{
+      selected=key;editing=null;state.query=query(key);
+      if(typeof location!=='undefined'&&typeof history!=='undefined') {
+        const url=new URL(location.href);url.searchParams.set('page','journal');url.searchParams.set('period',data.period);
+        key?url.searchParams.set('subject',key):url.searchParams.delete('subject');
+        history.pushState({},'',url);
+      }
+      draw();
+      if(typeof window.scrollTo==='function')window.scrollTo(0,0);
+    };
+    period.addEventListener('change',()=>{
+      if(typeof location!=='undefined'&&typeof history!=='undefined'){
+        const url=new URL(location.href);url.searchParams.set('page','journal');url.searchParams.set('period',period.value);
+        selected?url.searchParams.set('subject',selected):url.searchParams.delete('subject');history.pushState({},'',url);
+      }
+      open('journal',true,'?period='+encodeURIComponent(period.value)+(selected?'&subject='+encodeURIComponent(selected):''));
+    });
+    const mark=value=>value==null?'Не внесено':String(value);
+    const works=subject=>{
+      const result=[];
+      const sources=[subject,...(subject.key===kpz?.key?coursework:[])];
+      for(const source of sources)for(const lab of rows(source.labs))for(let part=1;part<=lab.parts;part++)result.push({subject_key:source.key,kind:'lab',number:lab.number,part,title:(source===subject?(lab.title||'Лабораторна '+lab.number):source.name)+(lab.parts>1?' · оцінка '+part:''),optional:lab.optional_last&&part===lab.parts});
+      for(const r of recordsFor(subject.key))if(!result.some(w=>w.subject_key===r.subject_key&&w.kind===r.kind&&w.number===r.number&&w.part===(r.part||1)))
+        result.push({subject_key:r.subject_key,kind:r.kind,number:r.number,part:r.part||1,title:(r.kind==='lab'?'Лабораторна ':'Робота ')+r.number+' · попередній запис',legacy:true});
+      return result;
+    };
+    const itemFor=(subject,work)=>recordsFor(subject.key).find(r=>r.subject_key===work.subject_key&&r.kind===work.kind&&r.number===work.number&&(r.part||1)===work.part);
+    function workCard(subject,work,index) {
+      const record=itemFor(subject,work), editor=editing===index;
+      const cardView=el('article',{class:'personal-work'},
+        el('div',{class:'personal-work-heading'},el('div',{},el('h3',{},work.title),work.optional?small('За потреби'):null),
+          el('span',{class:record?'personal-grade':'personal-missing'},mark(record?.grade))));
+      if(record?.note)cardView.append(el('p',{class:'muted'},record.note));
+      if(editor) {
+        const grade=input({type:'number',inputmode:'decimal',min:0,max:5,step:'0.1',value:record?.grade??'', 'aria-label':'Оцінка від 0 до 5'});
+        const note=input({required:false,maxlength:500,value:record?.note||'',placeholder:'За бажанням'});
+        const editorForm=form([field('Оцінка від 0 до 5',grade),field('Примітка',note)],'Зберегти',async ctx=>{
+          const value=Number(String(grade.value).replace(',','.'));
+          if(String(grade.value).trim()===''||!Number.isFinite(value)||value<0||value>5)throw new Error('Введи оцінку від 0 до 5.');
+          await api('/journal',{action:'submit',period:data.period,user_id:viewer,subject_key:work.subject_key,kind:work.kind,number:work.number,part:work.part,grade:value,note:note.value.trim(),...(record?{record_id:record.id,revision:record.revision}:{})});
+          const fresh=await api('/journal'+query(selected));
+          if(!current(ctx.token,ctx.epoch,ctx.key))return;
+          Object.assign(data,fresh);editing=null;draw();toast('Оцінку збережено');
+        });
+        editorForm.append(btn('Скасувати',()=>{if(!S.busy){editing=null;draw();}},'button secondary'));
+        cardView.append(editorForm);
+      } else if(record?.can_edit!==false&&(!work.legacy||record))cardView.append(btn(record?'Редагувати':'Внести оцінку',()=>{editing=index;draw();},'button secondary'));
+      return cardView;
+    }
+    function draw() {
+      const subject=subjects.find(s=>s.key===selected);
+      const toolbar=el('div',{class:'personal-journal-toolbar'},subject?btn('← Усі предмети',()=>route(''),'button secondary'):small('Твої оцінки за предметами'),(rows(data.periods).length>1?field('Навчальний період',period):small(data.period.replace(':',' · семестр '))),H.isAdmin()?btn('Журнал групи',()=>open('journal',false,'?period='+encodeURIComponent(data.period)+'&scope=group'),'button secondary'):null);
+      if(!subject) {
+        const cards=subjects.map(s=>{
+          const ownRecords=recordsFor(s.key), configured=works(s), filled=configured.filter(w=>itemFor(s,w)).length;
+          const latest=[...ownRecords].sort((a,b)=>(Date.parse(b.updated_at||b.created_at)||0)-(Date.parse(a.updated_at||a.created_at)||0))[0];
+          return el('button',{type:'button',class:'personal-subject-card',onclick:()=>route(s.key)},el('h2',{},s.name),
+            small('Внесено оцінок: '+filled+' із '+configured.length),latest?el('p',{},'Остання оцінка: ',el('strong',{},String(latest.grade))):null,el('span',{class:'personal-subject-open'},'Відкрити →'));
+        });
+        content.replaceChildren(toolbar,el('div',{class:'personal-subject-grid'},...cards));
+        if(!subjects.length)content.append(el('p',{class:'notice'},'Предметів поки немає.'));
+        return;
+      }
+      const summary=data.averages?.[viewer]?.[subject.key];
+      const averages=el('div',{class:'personal-averages'},...[1,2].map(n=>{
+        const average=summary?.[String(n)];
+        const due=rows(data.dates).find(d=>d.subject_key===subject.key&&d.number===n)?.due_date;
+        return el('div',{},small('Атестація '+n),el('strong',{},average?.average!=null?Number(average.average).toFixed(2):'Не внесено'),due?small('Дата: '+due):null);
+      }));
+      const subjectNav=el('nav',{class:'personal-subject-nav','aria-label':'Мої предмети'},...subjects.map(s=>el('button',{type:'button','aria-current':s.key===selected?'page':null,onclick:()=>route(s.key)},s.name)));
+      const workList=works(subject);
+      content.replaceChildren(toolbar,el('div',{class:'personal-journal-layout'},subjectNav,el('div',{class:'personal-journal-detail'},
+        el('h2',{},subject.name),averages,el('div',{class:'personal-work-list'},...workList.map((w,index)=>workCard(subject,w,index))),
+        !workList.length?el('p',{class:'notice'},'Роботи для цього предмета ще не налаштовані.'):null)));
+    }
+    draw();return [content];
+  }
+
   let journalSubject='';
   function journalPage(data) {
+    if(!data.group)return personalJournalPage(data);
     const query = (review=data.group,period=data.period) => '?period='+encodeURIComponent(period)+(review?'&scope=group':'');
     const save = async (values, ctx) => {
       await send('/journal', values, ctx, false);
@@ -1569,7 +1661,7 @@ window.createPI231Features = function (H) {
   function page(key) {
     const main = el(
       "main",
-      { class: "feature-page" },
+      { class: "feature-page" + (key==='journal'?' personal-journal-page':'') },
       btn(
         "Назад",
         () => {
@@ -1582,7 +1674,7 @@ window.createPI231Features = function (H) {
         },
         "back-button",
       ),
-      el("div", { class: "page-title" }, el("h1", {}, titles[key] || "Розділ")),
+      el("div", { class: "page-title" }, el("h1", {}, key==='journal'&&state.data?.group?'Журнал групи':titles[key] || "Розділ")),
     );
     if (!allowed(key)) {
       main.append(

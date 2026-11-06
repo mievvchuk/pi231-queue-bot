@@ -130,23 +130,16 @@ const journalData = (group=false) => ({period:'2026-2027:1',periods:['2026-2027:
   viewer_id:1,subjects:[{key:'кпз',name:'КПЗ',labs:[{number:1,parts:1},{number:2,parts:1},{number:3,parts:1}]}],students:[{id:1,name:'Петренко Іван'},{id:2,name:'Коваль Андрій'}],dates:[],
   records:[5,2,3].map((grade,i)=>({id:i+1,user_id:1,subject_key:'кпз',subject_name:'КПЗ',student_name:'Петренко Іван',kind:'lab',number:i+1,part:1,can_edit:true,grade,revision:0,note:''}))});
 
-test('journal renders grades without any approval status',async()=>{
+test('personal journal opens a subject overview without roster tables',async()=>{
   const data=journalData();
+  data.subjects=Array.from({length:8},(_,i)=>({...data.subjects[0],key:'subject-'+i,name:'Предмет '+(i+1)}));
   const {features}=setup(async()=>data);
   await features.open('journal');
   const page=features.page('journal');
-  const grades=descendants(page).filter(n=>n.tag==='input'&&String(n.attrs.class||'').includes('journal-input'));
-  assert.deepEqual(grades.slice(0,3).map(n=>String(n.attrs.value)),['5','2','3']);
-  assert.match(grades[0].attrs.class,/grade-five/);
-  assert.match(grades[1].attrs.class,/grade-low/);
-  assert.doesNotMatch(grades[2].attrs.class,/grade-low|grade-five/);
-  assert.doesNotMatch(page.textContent,/підтвердж|виправлення/i);
-  assert.equal(descendants(page).filter(n=>n.tag==='table').length,1);
-  assert.match(page.textContent,/Коваль Андрій/);
-  assert.match(page.textContent,/Дати ще не вказані/);
-  assert.ok(!descendants(page).some(n=>n.tag==='button'&&n.textContent==='Підтвердити'));
-  const css=fs.readFileSync(path.join(__dirname,'../queue_bot/mini_app/static/app.css'),'utf8');
-  assert.match(css,/grade-low\s*\{[^}]*color:\s*#fff;[^}]*background:\s*#000;/);
+  assert.equal(descendants(page).filter(n=>n.attrs.class==='personal-subject-card').length,8);
+  assert.equal(descendants(page).filter(n=>n.tag==='table').length,0);
+  assert.doesNotMatch(page.textContent,/Коваль Андрій|Борги|Не здано/);
+  assert.match(page.textContent,/Внесено оцінок: 0 із 3/);
 });
 
 test('admin edits another students grade inline in group mode without approval',async()=>{
@@ -168,45 +161,38 @@ test('admin edits another students grade inline in group mode without approval',
   assert.match(calls[2][0],/period=2026-2027%3A1&scope=group/);
 });
 
-test('journal builds grouped columns and every roster row before any grades exist',async()=>{
+test('personal work editor saves only viewer grades and retains selected subject',async()=>{
   const data=journalData();data.records=[];
   data.subjects[0].labs=[{number:1,parts:5,attestation:1},{number:2,parts:1,attestation:2}];
-  data.averages={1:{'кпз':{'1':{average:4.5,filled:2,total:5},'2':{average:null,filled:0,total:1},all:{average:4.5,filled:2,total:6}}}};
   const calls=[];
   const {features,panels}=setup(async(path,body)=>{calls.push([path,body]);return body?{message:'Збережено'}:data;});
-  await features.open('journal');
+  await features.open('journal',false,'?period=2026-2027:1&subject='+encodeURIComponent('кпз'));
   const page=features.page('journal');
-  const nodes=descendants(page);
-  assert.ok(nodes.some(n=>n.tag==='th'&&n.attrs.colspan===5&&n.textContent==='ЛР 1'));
-  assert.deepEqual(nodes.filter(n=>n.tag==='th'&&n.attrs.scope==='colgroup').map(n=>n.textContent),['ЛР 1','Атестація 1','ЛР 2','Атестація 2']);
-  assert.deepEqual(nodes.filter(n=>n.tag==='td'&&String(n.attrs.class||'')==='journal-average').slice(0,2).map(n=>n.textContent),['4.50','—']);
-  assert.ok(nodes.some(n=>n.tag==='nav'&&String(n.attrs.class||'')==='journal-pager'));
-  assert.ok(!nodes.some(n=>n.tag==='select'&&nodes.some(o=>o.tag==='option'&&o.textContent==='Усі предмети')));
-  assert.ok(nodes.some(n=>n.tag==='th'&&n.attrs.scope==='row'&&n.textContent==='Коваль Андрій'));
-  const inputs=nodes.filter(n=>n.tag==='input'&&String(n.attrs.class||'').includes('journal-input'));
-  assert.equal(inputs.length,6);
-  assert.ok(!nodes.some(n=>String(n.attrs['aria-label']||'').startsWith('Коваль Андрій,')));
-  const fifth=inputs.find(n=>String(n.attrs['aria-label']||'')==='ЛР 1, оцінка 5');
-  fifth.value='4';
-  await fifth.events.change({target:fifth});
+  assert.equal(descendants(page).filter(n=>n.attrs.class==='personal-work').length,6);
+  assert.equal(descendants(page).filter(n=>n.tag==='table').length,0);
+  assert.match(page.textContent,/Не внесено/);
+  let work=descendants(page).filter(n=>n.attrs.class==='personal-work')[4];
+  descendants(work).find(n=>n.tag==='button'&&n.textContent==='Внести оцінку').events.click();
+  work=descendants(page).filter(n=>n.attrs.class==='personal-work')[4];
+  const grade=descendants(work).find(n=>n.tag==='input'&&n.attrs.type==='number');
+  grade.value='4';
+  const note=descendants(work).find(n=>n.tag==='input'&&n!==grade);note.value='';
+  await descendants(work).find(n=>n.tag==='form').events.submit({preventDefault(){}});
   assert.equal(panels.length,0);
   assert.equal(calls[1][1].grade,4);
-  assert.equal(calls[1][1].note,'');
   assert.equal(calls[1][1].part,5);
-  assert.equal(calls[1][1].number,1);
   assert.equal(calls[1][1].user_id,1);
+  assert.equal(descendants(page).filter(n=>n.attrs.class==='personal-work').length,6);
 });
 
-test('public grades remain visible and read-only in another students row',async()=>{
-  const data=journalData();
-  data.records.forEach(r=>{r.user_id=2;r.student_name='Коваль Андрій';r.can_edit=false;});
+test('personal journal excludes other students records from its work cards',async()=>{
+  const data=journalData();data.records.forEach(r=>{r.user_id=2;r.can_edit=false;});
   const {features}=setup(async()=>data);
-  await features.open('journal');
-  const nodes=descendants(features.page('journal'));
-  assert.equal(nodes.filter(n=>String(n.attrs.class||'').includes('journal-grade')).length,3);
-  assert.ok(!nodes.some(n=>n.tag==='input'&&String(n.attrs['aria-label']||'').startsWith('Коваль Андрій,')));
-  assert.equal(nodes.find(n=>n.tag==='th'&&n.attrs.scope==='row').textContent,'Петренко Іван');
-  assert.equal(nodes.filter(n=>n.tag==='input'&&String(n.attrs.class||'').includes('journal-input')).length,3);
+  await features.open('journal',false,'?subject='+encodeURIComponent('кпз'));
+  const page=features.page('journal');
+  assert.doesNotMatch(page.textContent,/Коваль Андрій/);
+  assert.equal(descendants(page).filter(n=>n.attrs.class==='personal-grade').length,0);
+  assert.equal(descendants(page).filter(n=>n.attrs.class==='personal-missing').length,3);
 });
 
 test("an old feature response cannot overwrite the newly opened feature", async () => {
@@ -686,4 +672,45 @@ test('arrow keys move focus between journal grade cells like a spreadsheet',asyn
   assert.equal(focused,null);
   press('ArrowLeft',box(0,2),{selectionStart:0,selectionEnd:0});
   assert.equal(focused.id,'0:1');
+});
+
+
+test('coursework remains editable inside its parent subject using its original key',async()=>{
+  const data=journalData();data.subjects[0].name='Конструювання програмного забезпечення';
+  data.subjects.push({key:'course',name:'Курсова робота з КПЗ',labs:[{number:1,parts:1}]});
+  const calls=[];
+  const {features}=setup(async(path,body)=>{calls.push([path,body]);return body?{}:data;});
+  await features.open('journal');
+  let page=features.page('journal');
+  assert.equal(descendants(page).filter(n=>n.attrs.class==='personal-subject-card').length,1);
+  descendants(page).find(n=>n.attrs.class==='personal-subject-card').events.click();
+  let card=descendants(page).find(n=>n.attrs.class==='personal-work'&&n.textContent.includes('Курсова робота'));
+  descendants(card).find(n=>n.tag==='button').events.click();
+  card=descendants(page).find(n=>n.attrs.class==='personal-work'&&n.textContent.includes('Курсова робота'));
+  descendants(card).find(n=>n.tag==='input'&&n.attrs.type==='number').value='5';
+  descendants(card).find(n=>n.tag==='input'&&n.attrs.type!=='number').value='';
+  await descendants(card).find(n=>n.tag==='form').events.submit({preventDefault(){}});
+  assert.equal(calls[1][1].subject_key,'course');
+  assert.equal(calls[1][1].user_id,1);
+});
+
+test('personal grade editing preserves revision and cancellation never writes',async()=>{
+  const data=journalData(),calls=[];
+  const {features}=setup(async(path,body)=>{calls.push([path,body]);return body?{}:data;});
+  await features.open('journal',false,'?subject='+encodeURIComponent('кпз'));
+  const page=features.page('journal');
+  let work=descendants(page).find(n=>n.attrs.class==='personal-work');
+  descendants(work).find(n=>n.tag==='button').events.click();
+  work=descendants(page).find(n=>n.attrs.class==='personal-work');
+  descendants(work).find(n=>n.tag==='button'&&n.textContent==='Скасувати').events.click();
+  assert.equal(calls.length,1);
+  work=descendants(page).find(n=>n.attrs.class==='personal-work');
+  descendants(work).find(n=>n.tag==='button').events.click();
+  work=descendants(page).find(n=>n.attrs.class==='personal-work');
+  descendants(work).find(n=>n.tag==='input'&&n.attrs.type==='number').value='4';
+  descendants(work).find(n=>n.tag==='input'&&n.attrs.type!=='number').value='Уточнення';
+  await descendants(work).find(n=>n.tag==='form').events.submit({preventDefault(){}});
+  assert.equal(calls[1][1].record_id,1);
+  assert.equal(calls[1][1].revision,0);
+  assert.equal(calls[1][1].note,'Уточнення');
 });

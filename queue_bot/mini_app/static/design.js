@@ -12,7 +12,7 @@ window.createPI231Design = function (H) {
   const initials = name => (name||'ПІ').split(' ').filter(Boolean).map(x=>x[0]).slice(0,2).join('');
   const subjectIcon = name => /машин/i.test(name)?'cpu':/інтернет/i.test(name)?'globe2':/курсов/i.test(name)?'mortarboard':/людин|людон/i.test(name)?'person-workspace':'code-slash';
   const avatar = (name,cls='avatar-button') => btn(avatarFace('me',initials(name)),()=>navigate('profile'),cls);
-  const studentNav = [['home','Головна','house-door'],['queues','Черги','people'],['schedule','Розклад','calendar3'],['journal','Електронний журнал','journal-bookmark'],['swaps','Обміни','arrow-left-right'],['polls','Опитування','bar-chart'],['help','Допомога','question-circle'],['profile','Профіль','person']];
+  const studentNav = [['journal','Мої оцінки','journal-bookmark'],['queues','Черги','people'],['schedule','Розклад','calendar3'],['profile','Профіль','person']];
   const adminNav = [['admin','Огляд','grid','Робота'],['admin-history','Черги','people','Робота'],['admin-group','Студенти','person-lines-fill','Робота'],['admin-subjects','Предмети й викладачі','journal-bookmark','Навчання'],['admin-replacements','Розклад і заміни','calendar2-week','Навчання'],['admin-saturdays','Робочі суботи','calendar-check','Навчання'],['admin-polls','Опитування','bar-chart','Комунікації'],['admin-announcements','Оголошення','megaphone','Комунікації'],['admin-bugs','Звернення','chat-left-text','Система'],['owner','Налаштування','gear','Система']];
   adminNav.splice(3,0,['journal','Електронний журнал','journal-bookmark','Навчання']);
   const go = key => {
@@ -53,9 +53,9 @@ window.createPI231Design = function (H) {
         nav,
         el('div',{class:'sidebar-profile'},el('span',{class:'mini-avatar'},avatarFace('me',initials(S.data.me.name))),el('div',{},el('strong',{},S.data.me.name),el('small',{},admin?'Адміністратор':'Студент')),el('button',{type:'button','aria-label':'Оформлення',onclick:appearance},glyph('palette'))));
       const mobile=el('nav',{class:'bottom-nav','aria-label':'Основні розділи'});
-      const tabs=admin?adminNav.slice(0,3):studentNav.slice(0,3).concat([studentNav.find(n=>n[0]==='profile')]);
+      const tabs=admin?adminNav.slice(0,3):studentNav;
       tabs.forEach(([key,label,name])=>mobile.append(el('button',{type:'button','data-page':key,onclick:()=>go(key)},glyph(name),el('span',{},label))));
-      mobile.append(el('button',{type:'button','aria-label':'Усі розділи',onclick:openMenu},glyph('grid'),el('span',{},'Ще')));
+      if(admin)mobile.append(el('button',{type:'button','aria-label':'Усі розділи',onclick:openMenu},glyph('grid'),el('span',{},'Ще')));
       shell=el('div',{class:'make-navigation'},aside,mobile);
     }
     shell.querySelectorAll('[data-page]').forEach(n=>{
@@ -181,7 +181,7 @@ window.createPI231Design = function (H) {
     const settings=(name,title,description,action)=>btn([el('span',{class:'subject-icon'},glyph(name)),el('div',{},el('strong',{},title),el('small',{},description)),glyph('chevron-right')],action,'');
     return el('main',{class:'page make-profile'},heading('Telegram-профіль','Мій профіль'),card('profile-card',el('div',{class:'profile-avatar'},avatarFace('me',initials(name))),el('div',{},el('h2',{},name),el('p',{},'ПІ-231 · '+(isAdmin()?'Адміністратор':'Студент')),badge([glyph('shield-check'),' Telegram підтверджено'],'success'))),
       el('div',{class:'profile-grid'},card('',el('p',{class:'eyebrow'},'Мої записи'),el('div',{class:'stat-row'},el('div',{},el('strong',{},own.length),el('span',{},'Активних')),el('div',{},el('strong',{},S.data.swaps.length),el('span',{},'Запитів на обмін')))),
-      card('settings-list',settings('palette','Оформлення','Тема, колір та анімації',appearance),settings('arrow-left-right','Обміни','Запити та повторний обмін',()=>go('swaps')),settings('phone','Встановити PWA','Додати на головний екран',async()=>toast(await window.PI231PWA?.install()||'Скористайся меню браузера → Встановити застосунок.')),settings('chat-left-text','Звернення та відповіді','Повідомити про проблему',()=>openFeature('bugs')),settings('journal-bookmark','Мої пропозиції','Предмети та викладачі',()=>openFeature('proposals')))),
+      card('settings-list',settings('bar-chart','Опитування','Голосування групи',()=>go('polls')),settings('question-circle','Допомога','Як користуватися застосунком',()=>go('help')),settings('palette','Оформлення','Тема, колір та анімації',appearance),settings('arrow-left-right','Обміни','Запити та повторний обмін',()=>go('swaps')),settings('phone','Встановити PWA','Додати на головний екран',async()=>toast(await window.PI231PWA?.install()||'Скористайся меню браузера → Встановити застосунок.')),settings('chat-left-text','Звернення та відповіді','Повідомити про проблему',()=>openFeature('bugs')),settings('journal-bookmark','Мої пропозиції','Предмети та викладачі',()=>openFeature('proposals')))),
       own.length?el('div',{class:'queue-list'},own.map(queueRow)):null,
       !H.initData?button('Вийти з профілю',H.logout,'ghost','box-arrow-right'):null);
   }
