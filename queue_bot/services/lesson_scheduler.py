@@ -17,12 +17,27 @@ def normalized(value):
 
 
 def subject_name(value):
-    key = normalized(value)
+    def key_for_name(name):
+        return normalized(name).replace('проект', 'проєкт')
+
     aliases = {
         'кпз': normalized('Конструювання програмного забезпечення'),
         'лмв': normalized('Людино-машинна взаємодія'),
+        'мн': normalized('Машинне навчання'),
+        'пі': normalized('Програмування в Інтернет'),
+        'атпз': normalized('Архітектура та проєкт ПЗ'),
+        'пікпс': normalized('Проєкт інтерфейсів користувача ПС'),
+        normalized('Проєкт інтерфейсів'): normalized('Проєкт інтерфейсів користувача ПС'),
         normalized('Проєкт інтерфейсів користувача'): normalized('Проєкт інтерфейсів користувача ПС'),
     }
+    key = key_for_name(value)
+    # Recognition displays both the expanded name and its acronym, e.g. «… (ЛМВ)».
+    # Ignore the suffix only when both parts identify the same known subject.
+    decorated = re.fullmatch(r'(.*?)\s*\(([^()]*)\)\s*', str(value or ''))
+    if decorated:
+        base, suffix = (key_for_name(part) for part in decorated.groups())
+        if aliases.get(base, base) == aliases.get(suffix, suffix):
+            return aliases.get(base, base)
     return aliases.get(key, key)
 
 

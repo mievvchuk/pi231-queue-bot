@@ -137,6 +137,67 @@ def test_replacement_moves_launch_to_actual_subject_and_cancels_old_run(conn, qu
     assert attendance.active_run(conn, other, now=at('2026-11-03T08:35:00'))
 
 
+@pytest.mark.parametrize('actual, expected', [
+    ('Людино-машинна взаємодія (ЛМВ)', 'Людино-машинна взаємодія'),
+    ('ЛМВ', 'Людино-машинна взаємодія'),
+    ('Конструювання програмного забезпечення (КПЗ)', 'Конструювання програмного забезпечення'),
+    ('Проект інтерфейсів', 'Проєкт інтерфейсів користувача ПС'),
+    ('Проєкт інтерфейсів', 'Проєкт інтерфейсів користувача ПС'),
+    ('Проєкт інтерфейсів користувача ПС (ПІКПС)', 'Проєкт інтерфейсів користувача ПС'),
+    ('Архітектура та проект ПЗ (АТПЗ)', 'Архітектура та проєкт ПЗ'),
+    ('Машинне навчання (МН)', 'Машинне навчання'),
+    ('Програмування в Інтернет (ПІ)', 'Програмування в Інтернет'),
+])
+def test_recognized_subject_names_match_queue_names(actual, expected):
+    from queue_bot.services.lesson_scheduler import subject_name
+    assert subject_name(actual) == subject_name(expected)
+
+
+def test_subject_qualifiers_are_not_discarded():
+    from queue_bot.services.lesson_scheduler import subject_name
+    assert subject_name('Людино-машинна взаємодія (курсова)') != subject_name('Людино-машинна взаємодія')
+    assert subject_name('Людино-машинна взаємодія (КПЗ)') != subject_name('Людино-машинна взаємодія')
+
+
+@pytest.mark.asyncio
+async def test_friday_replacement_starts_lmv_timer_at_1155_and_catches_up(conn, make_user):
+    subjects = [{'id': 2, 'name': 'Людино-машинна взаємодія',
+                 'teachers': [{'id': 1, 'name': 'Щуцький С.В.'}, {'id': 2, 'name': 'Кондратюк Є.С.'}]}]
+    make_user(1, 'Петренко Іван')
+    sid = queues.create_session(conn, 100, 2, 2)
+    wrong_teacher = queues.create_session(conn, 100, 2, 1)
+    queues.join_queue(conn, 1, sid)
+    queues.join_queue(conn, 1, wrong_teacher)
+    conn.execute('''INSERT INTO replacements(date, group_name, lesson_number, new_subject, teacher)
+                    VALUES (?, ?, ?, ?, ?)''',
+                 ('2026-11-06', 'ПІ-231', 3, 'Людино-машинна взаємодія (ЛМВ)', 'Кондратюк Є.С.'))
+    # Friday has no third pair in the base timetable; the replacement adds it.
+    sync_schedule(conn, subjects, now=at('2026-11-06T11:54:59'), schedule_data={})
+    assert attendance.active_run(conn, sid, now=at('2026-11-06T11:54:59')) is None
+    sync_schedule(conn, subjects, now=at('2026-11-06T11:55:00'), schedule_data={})
+    run = attendance.active_run(conn, sid, now=at('2026-11-06T11:55:00'))
+    assert run and run['ends_at'] == at('2026-11-06T13:10:00')
+    assert attendance.active_run(conn, wrong_teacher, now=at('2026-11-06T11:55:00')) is None
+    bot = AsyncMock()
+    await deliver(bot, conn, subjects, now=at('2026-11-06T11:55:01'))
+    assert bot.send_message.await_count == 1
+    sync_schedule(conn, subjects, now=at('2026-11-06T12:30:00'), schedule_data={})
+    assert attendance.active_run(conn, sid, now=at('2026-11-06T12:30:00'))['id'] == run['id']
+    assert conn.execute('SELECT COUNT(*) FROM lesson_runs').fetchone()[0] == 1
+
+
+def test_missed_replacement_launch_recovers_during_class(conn, make_user):
+    subjects = [{'id': 2, 'name': 'Людино-машинна взаємодія',
+                 'teachers': [{'id': 2, 'name': 'Кондратюк Є.С.'}]}]
+    make_user(1, 'Петренко Іван')
+    sid = queues.create_session(conn, 100, 2, 2)
+    queues.join_queue(conn, 1, sid)
+    data = {'friday': [{'pair': 3, 'subject': 'Людино-машинна взаємодія (ЛМВ)', 'teacher': 'Кондратюк Є.С.'}]}
+    sync_schedule(conn, subjects, now=at('2026-11-06T12:30:00'), schedule_data=data)
+    run = attendance.active_run(conn, sid, now=at('2026-11-06T12:30:00'))
+    assert run and run['ends_at'] == at('2026-11-06T13:10:00')
+
+
 def test_week_parity_working_saturday_and_timezone(conn, queue):
     # 3 November is ISO week 45 (numerator). Denominator-only must not start.
     data = {'tuesday': [{**DATA['tuesday'][0], 'week_type':'denominator'}]}
