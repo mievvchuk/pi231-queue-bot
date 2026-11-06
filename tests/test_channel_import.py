@@ -19,7 +19,7 @@ def test_album_and_untrusted_images():
 
 @pytest.mark.asyncio
 async def test_poll_persists_draft_and_does_not_repeat(conn, monkeypatch):
-    monkeypatch.setattr(channel, 'read_bounded', AsyncMock(return_value=b'image'))
+    monkeypatch.setattr(channel, 'read_bounded', AsyncMock(side_effect=lambda _, url, limit: b'page' if url.startswith('https://t.me/s/') else b'\xff\xd8\xffimage'))
     monkeypatch.setattr(channel, 'parse_posts', lambda *_: [dict(id=828, photos=['image'], url='https://t.me/replacements_xpk/828')])
     recognize = AsyncMock(return_value=dict(date='2026-11-09', replacements=[], confidence=.95))
     monkeypatch.setattr(recognition, 'recognize_replacements_from_images', recognize)
@@ -86,3 +86,29 @@ async def test_unauthorized_cannot_confirm(conn, monkeypatch):
     await confirm_channel_import(callback, conn)
     callback.answer.assert_awaited_once()
     assert callback.answer.call_args.kwargs['show_alert'] is True
+
+
+@pytest.mark.asyncio
+async def test_download_refreshes_embed_after_cdn_500(monkeypatch):
+    import aiohttp
+    error = aiohttp.ClientResponseError(MagicMock(), (), status=500)
+    page = b'''<div class="tgme_widget_message" data-post="replacements_xpk/828"><a class="tgme_widget_message_photo_wrap" style="background-image:url('https://cdn4.telesco.pe/file/new')"></a></div>'''
+    read = AsyncMock(side_effect=[error, page, b'\xff\xd8\xffimage'])
+    monkeypatch.setattr(channel, 'read_bounded', read)
+    monkeypatch.setattr(channel.asyncio, 'sleep', AsyncMock())
+    post = dict(id=828, photos=['https://cdn4.telesco.pe/file/old'], url='https://t.me/replacements_xpk/828')
+    assert await channel.download_post_images(None, post, 'replacements_xpk') == [b'\xff\xd8\xffimage']
+    assert read.call_args_list[-1].args[1] == 'https://cdn4.telesco.pe/file/new'
+
+
+@pytest.mark.asyncio
+async def test_cdn_failure_never_advances_cursor_or_calls_ocr(conn, monkeypatch):
+    monkeypatch.setattr(channel, 'read_bounded', AsyncMock(return_value=b'page'))
+    monkeypatch.setattr(channel, 'parse_posts', lambda *_: [dict(id=828, photos=['image'], url='https://t.me/replacements_xpk/828')])
+    monkeypatch.setattr(channel, 'download_post_images', AsyncMock(side_effect=BotError('CDN HTTP 500')))
+    recognize = AsyncMock()
+    monkeypatch.setattr(recognition, 'recognize_replacements_from_images', recognize)
+    with pytest.raises(BotError):
+        await channel.poll_once(MagicMock(send_message=AsyncMock()), conn, None)
+    assert channel.get_state(conn, 'channel_cursor:replacements_xpk') is None
+    recognize.assert_not_awaited()

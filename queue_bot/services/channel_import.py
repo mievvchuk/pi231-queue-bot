@@ -12,7 +12,8 @@ from bs4 import BeautifulSoup
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 from queue_bot import config
-from queue_bot.services import recognition
+from queue_bot.services import recognition, diagnostics
+from queue_bot.services.errors import BotError
 
 log = logging.getLogger(__name__)
 
@@ -54,7 +55,10 @@ def parse_posts(page, channel):
 
 
 async def read_bounded(session, url, limit):
-    async with session.get(url) as response:
+    async with session.get(url, headers={
+        'User-Agent': 'Mozilla/5.0 (compatible; PI231ScheduleBot/1.0)',
+        'Referer': 'https://t.me/',
+    }) as response:
         response.raise_for_status()
         data = bytearray()
         async for chunk in response.content.iter_chunked(65536):
@@ -62,6 +66,35 @@ async def read_bounded(session, url, limit):
             if len(data) > limit:
                 raise ValueError('Вміст перевищує допустимий розмір')
         return bytes(data)
+
+
+async def download_post_images(session, post, channel):
+    """Retry transient CDN failures, refreshing signed URLs from the post embed."""
+    current = post
+    for attempt in range(3):
+        try:
+            images = [await read_bounded(session, url, 15 * 1024 * 1024) for url in current['photos']]
+            # Do not send an HTML CDN error page to the vision model as a JPEG.
+            if any(not (image.startswith(b'\xff\xd8\xff') or image.startswith(b'\x89PNG\r\n\x1a\n')
+                        or (image.startswith(b'RIFF') and image[8:12] == b'WEBP')) for image in images):
+                raise BotError('Telegram CDN повернув файл, який не є зображенням.')
+            return images
+        except (aiohttp.ClientError, asyncio.TimeoutError, BotError) as error:
+            if isinstance(error, aiohttp.ClientResponseError) and error.status not in {403, 404, 408, 429, 500, 502, 503, 504}:
+                raise
+            if attempt == 2:
+                raise BotError(f'Не вдалося завантажити фото допису №{post["id"]} з Telegram CDN '
+                               f'після 3 спроб ({type(error).__name__}'
+                               f'{" HTTP " + str(error.status) if isinstance(error, aiohttp.ClientResponseError) else ""}).') from error
+            log.warning('Telegram photo download failed for post %s, attempt %s: %s',
+                        post['id'], attempt + 1, type(error).__name__)
+            await asyncio.sleep(2 * (attempt + 1))
+            try:
+                page = await read_bounded(session, post['url'] + '?embed=1&mode=tme', 4 * 1024 * 1024)
+                refreshed = parse_posts(page.decode('utf-8'), channel)
+                current = next((item for item in refreshed if item['id'] == post['id']), current)
+            except (aiohttp.ClientError, asyncio.TimeoutError, UnicodeError):
+                log.warning('Could not refresh Telegram photo URL for post %s', post['id'])
 
 
 async def poll_once(bot, conn, session):
@@ -80,7 +113,7 @@ async def poll_once(bot, conn, session):
         key = f'channel_draft:{channel}:{post["id"]}'
         draft = get_state(conn, key)
         if draft is None:
-            images = [await read_bounded(session, url, 15 * 1024 * 1024) for url in post['photos']]
+            images = await download_post_images(session, post, channel)
             result = await recognition.recognize_replacements_from_images(
                 images, config.STUDENT_GROUP, conn, allow_empty=True)
             datetime.date.fromisoformat(result['date'])
@@ -100,6 +133,7 @@ async def poll_once(bot, conn, session):
             draft['notified'] = True
             set_state(conn, key, draft)
         set_state(conn, cursor_key, post['id'])
+        log.info('Channel post %s processed; approval draft delivered', post['id'])
 
 
 async def watch_channel(bot, conn):
@@ -111,11 +145,14 @@ async def watch_channel(bot, conn):
                 if config.RECOGNITION_API_KEY and config.RECOGNITION_PROVIDER != 'disabled':
                     await poll_once(bot, conn, session)
                     set_state(conn, 'channel_last_error', None)
-            except Exception:
+            except Exception as error:
                 log.exception('Channel import failed; will retry without advancing cursor')
                 if not get_state(conn, 'channel_last_error'):
                     try:
-                        await bot.send_message(config.OWNER_ID, '⚠️ Не вдалося перевірити фото каналу. Повторю спробу автоматично. Це не означає, що замін немає.')
+                        reason = diagnostics.redact(str(error)) if isinstance(error, BotError) else type(error).__name__
+                        await bot.send_message(config.OWNER_ID, '⚠️ Не вдалося перевірити фото каналу.\n'
+                                               f'Причина: {html.escape(reason[:700])}\n'
+                                               'Повторю спробу автоматично. Це не означає, що замін немає.')
                         set_state(conn, 'channel_last_error', True)
                     except Exception:
                         log.exception('Could not notify owner')
