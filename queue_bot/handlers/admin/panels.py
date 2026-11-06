@@ -107,8 +107,7 @@ async def admin_category_queues(message: Message, state: FSMContext):
         "• <b>➕ Створити чергу</b> — відкрити нову чергу на пару або консультацію\n"
         "• <b>📝 Додати студента</b> — швидко вписати студента (або список) у чергу\n"
         "• <b>🔢 Змінити порядок</b> — посунути студента вище/нижче, задати номер або позначити «Здав»\n"
-        "• <b>📚 Предмети та викладачі</b> — перегляд, закріплення викладачів та створення предметів\n"
-        "• <b>📦 Історія</b> — переглянути завершені черги",
+        "• <b>📚 Предмети та викладачі</b> — перегляд, закріплення викладачів та створення предметів",
         reply_markup=get_admin_queues_menu(),
     )
 
@@ -123,3 +122,4 @@ async def permanent_queue_notice(message: Message, state: FSMContext, conn):
     admins.require_admin(conn, message.from_user.id)
     await message.answer('Черги постійні: запис доступний завжди. Закриття, завершення та повторне створення прибрано.')
     await admin_panel_open(message, state, conn)
+

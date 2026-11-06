@@ -343,3 +343,19 @@ async def test_bulk_replacement_clear_is_unavailable(admin_client, conn):
     response = await post(admin_client, 'replacements', {'action': 'clear'})
     assert response.status == 400
     assert len(replacements.get_replacements(conn, date='2026-11-09')) == 1
+
+
+@pytest.mark.asyncio
+async def test_admin_queue_list_excludes_closed_and_archived_without_deleting_records(admin_client, conn):
+    active = queues.create_session(conn, 100, 1, 1)
+    closed = queues.create_session(conn, 100, 2, 1)
+    archived = queues.create_session(conn, 100, 3, 1)
+    conn.execute("UPDATE queue_sessions SET status = 'closed' WHERE id = ?", (closed,))
+    conn.execute("UPDATE queue_sessions SET status = 'archived' WHERE id = ?", (archived,))
+    result = await admin_client.get('/api/miniapp/admin/manage/history?mode=admin', headers=headers(100))
+    assert result.status == 200
+    assert [item['id'] for item in (await result.json())['sessions']] == [active]
+    for sid in (closed, archived):
+        response = await admin_client.get(f'/api/miniapp/admin/manage/history?sid={sid}&mode=admin', headers=headers(100))
+        assert response.status == 400
+        assert queues.get_session(conn, sid) is not None

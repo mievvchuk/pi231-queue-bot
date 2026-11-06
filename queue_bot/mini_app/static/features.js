@@ -21,7 +21,7 @@ window.createPI231Features = function (H) {
     polls: "Опитування",
     help: "Допомога",
     journal: "Електронний журнал",
-    "admin-history": "Історія черг",
+    "admin-history": "Активні черги",
     "admin-group": "Група",
     "admin-subjects": "Предмети й викладачі",
     "admin-replacements": "Заміни",

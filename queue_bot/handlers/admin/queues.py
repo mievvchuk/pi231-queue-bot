@@ -6,7 +6,6 @@ from .common import (
     BotError,
     F,
     FSMContext,
-    HISTORY_MARK,
     Message,
     StateFilter,
     find_session_by_label,
@@ -474,58 +473,3 @@ async def student_remove_by_admin(message: Message, state: FSMContext, conn, sub
         await notify_next_students(message.bot, conn, subjects, session_id, removed_position=pos)
     await state.set_state(AdminOrderState.picking_student)
     await open_admin_student_list(message, conn, subjects, session_id, note="❌ <b>Запис видалено</b>")
-
-
-
-
-
-
-
-
-
-
-
-
-async def history_list(message: Message, state: FSMContext, conn, subjects):
-    await state.clear()
-    sessions = queues.list_sessions(conn, ("archived",))
-    if not sessions:
-        await message.answer("Історія порожня.", reply_markup=get_admin_queues_menu())
-        return
-    await state.set_state(AdminManageState.history_view)
-    await state.update_data(page=1)
-    page_sessions, cur_page, total_pages = paginate(sessions, 1, per_page=8)
-    rows = [[f"📦 №{s['id']} {queue_label(subjects, s)}"] for s in page_sessions]
-    markup = get_paginated_reply_keyboard(rows, cur_page, total_pages, back_text="🔙 Назад")
-    await message.answer("Історія черг. Оберіть чергу для перегляду деталей 👇", reply_markup=markup)
-
-
-
-async def admin_paginate_history(message: Message, state: FSMContext, conn, subjects):
-    sessions = queues.list_sessions(conn, ("archived",))
-    data = await state.get_data()
-    page = data.get("page", 1)
-    page = (page - 1) if message.text == "⬅️" else (page + 1)
-    await state.update_data(page=page)
-    page_sessions, cur_page, total_pages = paginate(sessions, page, per_page=8)
-    rows = [[f"📦 №{s['id']} {queue_label(subjects, s)}"] for s in page_sessions]
-    markup = get_paginated_reply_keyboard(rows, cur_page, total_pages, back_text="🔙 Назад")
-    await message.answer("Оберіть чергу з історії 👇", reply_markup=markup)
-
-
-
-async def history_details_view(message: Message, state: FSMContext, conn, subjects):
-    match = re.match(r"^📦 №(\d+)", message.text)
-    if not match:
-        return
-    session_id = int(match.group(1))
-    session = queues.get_session(conn, session_id)
-    if not session:
-        raise BotError("Чергу не знайдено.")
-    lines = [f"{html.escape(r['full_name'])} — {HISTORY_MARK.get(r['status'], r['status'])}" for r in queues.get_history(conn, session_id)]
-    header = format_queue(subjects, session, [])
-    body = "\n".join(lines) or "Записів немає."
-    text = header.replace("Черга порожня.", "") + body
-    rows = [["🔙 До списку історії", "🔙 Назад"]]
-    await message.answer(text, reply_markup=make_reply_keyboard(rows))
-

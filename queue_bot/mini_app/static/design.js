@@ -191,7 +191,7 @@ window.createPI231Design = function (H) {
     return el('main',{class:'page make-admin'},heading('Адміністрування · ПІ-231','Панель керування',button('Створити чергу',()=>openFeature('create'),'primary','plus-lg')),
       el('div',{class:'stats-grid'},stats.map(([n,label,i])=>card('stat-card',el('span',{class:'subject-icon'},glyph(i)),el('div',{},el('strong',{},n),el('p',{},label))))),
       el('div',{class:'dashboard-grid'},card('activity-card',el('div',{class:'section-heading'},el('h2',{},'Учасники активних черг'),badge('Зараз','success')),el('div',{class:'chart-bars'},qs.length?qs.slice(0,12).map(q=>el('div',{'aria-label':q.subject+': '+q.count},el('span',{style:'height:'+Math.max(5,q.count/max*100)+'%'},el('span',{class:'screen-reader-only'},q.count)),el('small',{},q.subject))):small('Активних черг немає.')),el('div',{class:'chart-labels'},el('span',{},'Поточні дані'),el('span',{},'Кількість учасників'))),
-      card('',el('div',{class:'section-heading'},el('h2',{},'Швидкі дії')),el('div',{class:'attention-list'},[['admin-history','Черги та історія','Учасники та історія здачі'],['admin-group','Студенти групи','Обмеження та тимчасові бани'],['admin-replacements','Розклад і заміни','Фото, розпізнавання й перевірка']].map(([key,title,text])=>btn([el('span',{class:'status-dot success'}),el('div',{},el('strong',{},title),el('small',{},text)),glyph('chevron-right')],()=>openFeature(key),''))))),
+      card('',el('div',{class:'section-heading'},el('h2',{},'Швидкі дії')),el('div',{class:'attention-list'},[['admin-history','Активні черги','Учасники та результати здачі'],['admin-group','Студенти групи','Обмеження та тимчасові бани'],['admin-replacements','Розклад і заміни','Автоматичні заміни й підтвердження']].map(([key,title,text])=>btn([el('span',{class:'status-dot success'}),el('div',{},el('strong',{},title),el('small',{},text)),glyph('chevron-right')],()=>openFeature(key),''))))),
       card('admin-table',adminNav.slice(1).filter(n=>!['owner','admin-announcements','admin-bugs'].includes(n[0])||S.data.me.is_owner).map(([key,label,name,group])=>btn([el('span',{class:'subject-icon'},glyph(name)),el('div',{},el('strong',{},label),el('small',{},group)),badge('Відкрити','neutral'),glyph('chevron-right')],()=>go(key),'admin-row'))),
       el('p',{class:'modebar'},'Режим адміністратора · Telegram ID доступні лише тут'));
   }
@@ -277,3 +277,4 @@ window.createPI231Design = function (H) {
   }
   return {navigation,topbar,homePage,queuesPage,profilePage,adminPage,queuePage,loginPage,lessonCard,appearance,decorate,glyph,heading,card,badge,button,closeMenu,joinWizard,helpPage,swapsPage,tick};
 };
+

@@ -58,7 +58,7 @@ class AdminManageState(StatesGroup):
     viewing_admins = State()
     add_admin_id = State()
     select_admin_to_remove = State()
-    history_view = State()
     entering_broadcast = State()
     confirming_broadcast = State()
     entering_maintenance_time = State()
+

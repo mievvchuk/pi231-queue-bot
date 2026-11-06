@@ -127,7 +127,7 @@ async def manage(request):
         if section == 'history':
             sessions = []
             from .payloads import names
-            for row in queues.list_sessions(conn, ('open', 'closed', 'archived')):
+            for row in queues.list_sessions(conn, ('open',)):
                 subject, teacher = names(catalog, row)
                 sessions.append({'id': row['id'], 'subject_id': row['subject_id'], 'teacher_id': row['teacher_id'], 'subject': subject, 'teacher': teacher, 'status': row['status'],
                                  'date': str(row['created_at']), 'type': row['queue_type']})
@@ -138,8 +138,9 @@ async def manage(request):
                     sid = api.integer(int(request.query['sid']))
                 except ValueError:
                     raise BotError('Некоректна черга.')
-                if not queues.get_session(conn, sid):
-                    raise BotError('Сесію не знайдено.')
+                session = queues.get_session(conn, sid)
+                if not session or session['status'] != 'open':
+                    raise BotError('Активну чергу не знайдено.')
                 entries = conn.execute('''SELECT e.id, e.user_id, e.position, e.status, e.created_at,
                     e.completed_at, e.lab_count, e.planned_minutes, e.labs_passed, e.selected_labs,
                     e.passed_labs, u.full_name FROM queue_entries e LEFT JOIN users u ON u.id = e.user_id
