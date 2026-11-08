@@ -81,3 +81,65 @@ def test_apostrophe_variants_match(conn, make_user):
     user_id = conn.execute("SELECT id FROM users WHERE telegram_id = 5").fetchone()["id"]
     data = dict(DATA, supervisors=[{"teacher_id": KONDRATIUK, "students": ["Дар`єв Даниїл"]}])
     assert coursework_priority.applies(conn, queues.get_session(conn, s), user_id, today=date(2026, 11, 10), data=data)
+
+
+def test_promote_existing_moves_already_queued_coursework_students_forward(conn, make_user):
+    for t, name in ((1, "Коваль Олена"), (2, "Петренко Іван"), (3, "Бондар Олег"), (4, "Шевчук Марія")):
+        make_user(t, name)
+    own = queues.create_session(conn, ADMIN, 2, KONDRATIUK, "ЛМВ")
+    other = queues.create_session(conn, ADMIN, 2, 3, "ЛМВ")  # Щуцький
+    for t in (1, 2, 3, 4):
+        queues.join_queue(conn, t, own)  # ще до тижня курсових — у звичайному порядку
+    for t in (1, 2):
+        queues.join_queue(conn, t, other)
+
+    changed = coursework_priority.promote_existing(conn, today=date(2026, 11, 9), data=DATA)
+
+    assert changed == 1
+    assert names(conn, own) == [
+        ("Петренко Іван", True), ("Шевчук Марія", True), ("Коваль Олена", False), ("Бондар Олег", False),
+    ]
+    assert names(conn, other) == [("Коваль Олена", False), ("Петренко Іван", False)]
+    assert coursework_priority.promote_existing(conn, today=date(2026, 11, 9), data=DATA) == 0
+
+
+def test_promote_existing_does_nothing_outside_dates(conn, make_user):
+    make_user(1, "Коваль Олена")
+    make_user(2, "Петренко Іван")
+    s = queues.create_session(conn, ADMIN, 2, KONDRATIUK, "ЛМВ")
+    queues.join_queue(conn, 1, s)
+    queues.join_queue(conn, 2, s)
+
+    assert coursework_priority.promote_existing(conn, today=date(2026, 11, 8), data=DATA) == 0
+    assert names(conn, s) == [("Коваль Олена", False), ("Петренко Іван", False)]
+
+
+@pytest.mark.asyncio
+async def test_watch_runs_once_per_day(conn, make_user, monkeypatch):
+    import asyncio
+    from datetime import datetime as real_datetime
+
+    class FixedDatetime(real_datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return real_datetime(2026, 11, 9, 0, 1, tzinfo=tz)
+
+    calls = []
+    monkeypatch.setattr(coursework_priority, "datetime", FixedDatetime)
+    monkeypatch.setattr(coursework_priority, "load", lambda path=None: DATA)
+    monkeypatch.setattr(coursework_priority, "promote_existing", lambda conn, **kw: calls.append(kw) or 0)
+
+    sleeps = 0
+
+    async def fake_sleep(_):
+        nonlocal sleeps
+        sleeps += 1
+        if sleeps >= 2:
+            raise asyncio.CancelledError
+
+    monkeypatch.setattr(asyncio, "sleep", fake_sleep)
+    with pytest.raises(asyncio.CancelledError):
+        await coursework_priority.watch(conn)
+
+    assert len(calls) == 1
+    assert conn.execute("SELECT 1 FROM bot_state WHERE key = 'coursework_promoted_2026-11-09'").fetchone()

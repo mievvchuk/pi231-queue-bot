@@ -192,9 +192,7 @@ def _place_coursework_first(conn, session_id: int, user_id: int) -> None:
     """Ставить студента з курсовою після тих, хто вже біля викладача, і після інших курсовиків."""
     _require_roster_user(conn, user_id)
     entries = get_entries(conn, session_id)
-    at_teacher = {row["entry_id"] for row in conn.execute(
-        "SELECT entry_id FROM lesson_attendance WHERE state IN ('called', 'serving') "
-        "AND run_id IN (SELECT id FROM lesson_runs WHERE active = 1)").fetchall()}
+    at_teacher = _at_teacher_ids(conn)
     index = 0
     for i, e in enumerate(entries):
         if e["id"] in at_teacher or e["coursework_priority"]:
@@ -208,6 +206,32 @@ def _place_coursework_first(conn, session_id: int, user_id: int) -> None:
     ids = [e["id"] for e in entries]
     ids.insert(index, new_id)
     _set_order(conn, session_id, ids)
+
+
+def _at_teacher_ids(conn) -> set[int]:
+    return {row["entry_id"] for row in conn.execute(
+        "SELECT entry_id FROM lesson_attendance WHERE state IN ('called', 'serving') "
+        "AND run_id IN (SELECT id FROM lesson_runs WHERE active = 1)").fetchall()}
+
+
+def promote_coursework(conn, session_id: int, is_coursework) -> bool:
+    """Курсовиків, які вже стоять у черзі, позначає й ставить наперед — після тих, хто біля викладача.
+    Між собою й серед решти порядок не змінюється. Повертає True, якщо черга змінилась."""
+    with transaction(conn):
+        entries = get_entries(conn, session_id)
+        at_teacher = _at_teacher_ids(conn)
+        head = [e for e in entries if e["id"] in at_teacher]
+        coursework = [e for e in entries if e["id"] not in at_teacher and e["user_id"] is not None
+                      and (e["coursework_priority"] or is_coursework(e["user_id"]))]
+        moved = {e["id"] for e in head + coursework}
+        order = [e["id"] for e in head + coursework] + [e["id"] for e in entries if e["id"] not in moved]
+        new_flags = [e["id"] for e in coursework if not e["coursework_priority"]]
+        if order == [e["id"] for e in entries] and not new_flags:
+            return False
+        for entry_id in new_flags:
+            conn.execute("UPDATE queue_entries SET coursework_priority = TRUE WHERE id = ?", (entry_id,))
+        _set_order(conn, session_id, order)
+        return True
 
 
 def _take_slot(conn, entry_id: int, user_id: int) -> None:
