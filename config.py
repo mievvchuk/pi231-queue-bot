@@ -14,10 +14,7 @@ def load_env_file(path: str = ".env") -> None:
 
 
 load_env_file()
-DATABASE_URL = os.getenv(
-    "DATABASE_URL",
-    "postgresql://neondb_owner:npg_LhRQsAB7i0If@ep-morning-base-b9my7fky-pooler.c-7.eu-central-1.aws.neon.tech/neondb?sslmode=require"
-)
+DATABASE_URL = os.getenv("DATABASE_URL", "")
 SUBJECTS_PATH = os.getenv("SUBJECTS_PATH", "subjects.json")
 SCHEDULE_PATH = os.getenv("SCHEDULE_PATH", "schedule.json")
 STUDENT_GROUP = os.getenv("STUDENT_GROUP", "ПІ-231")
