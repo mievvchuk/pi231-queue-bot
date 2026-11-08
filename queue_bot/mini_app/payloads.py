@@ -16,7 +16,8 @@ def entry_view(row, uid, admin=False):
     item.update(name=row['full_name'] or 'Вільне місце', is_me=row['telegram_id'] == uid,
                 vacant=row['user_id'] is None, labs=lab_catalog.read_numbers(row['selected_labs']),
                 passed_labs=lab_catalog.read_numbers(row['passed_labs']) or [],
-                ready_to_swap=bool(row['ready_to_swap']), swap_wish=row['swap_wish'])
+                ready_to_swap=bool(row['ready_to_swap']), swap_wish=row['swap_wish'],
+                coursework=bool(row['coursework_priority']))
     if admin:
         item.update(user_id=row['user_id'], telegram_id=row['telegram_id'], blocked=bool(row['is_blocked']))
     return item

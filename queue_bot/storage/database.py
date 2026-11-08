@@ -457,6 +457,7 @@ class PGConnectionWrapper:
             cur.execute("ALTER TABLE queue_entries ADD COLUMN IF NOT EXISTS selected_labs TEXT DEFAULT NULL;")
             cur.execute("ALTER TABLE queue_entries ADD COLUMN IF NOT EXISTS passed_labs TEXT NOT NULL DEFAULT '[]';")
             cur.execute("ALTER TABLE queue_entries ADD COLUMN IF NOT EXISTS entry_revision INTEGER NOT NULL DEFAULT 0;")
+            cur.execute("ALTER TABLE queue_entries ADD COLUMN IF NOT EXISTS coursework_priority BOOLEAN NOT NULL DEFAULT FALSE;")
             cur.execute("ALTER TABLE queue_sessions ADD COLUMN IF NOT EXISTS queue_type TEXT NOT NULL DEFAULT 'lesson';")
             cur.execute("ALTER TABLE queue_entries ADD COLUMN IF NOT EXISTS ready_to_swap BOOLEAN NOT NULL DEFAULT FALSE;")
             cur.execute("ALTER TABLE queue_entries ADD COLUMN IF NOT EXISTS swap_wish TEXT DEFAULT NULL;")
@@ -542,6 +543,9 @@ def connect(db_target: str):
     conn.execute("PRAGMA foreign_keys = ON")
     conn.execute("PRAGMA journal_mode = WAL")
     migrate_sqlite(conn)
+    # Як ADD COLUMN IF NOT EXISTS у Postgres: без нового номера, бо тести рахують MIGRATIONS з кінця
+    if 'coursework_priority' not in {row[1] for row in conn.execute('PRAGMA table_info(queue_entries)')}:
+        conn.execute('ALTER TABLE queue_entries ADD COLUMN coursework_priority INTEGER NOT NULL DEFAULT 0')
     return conn
 
 

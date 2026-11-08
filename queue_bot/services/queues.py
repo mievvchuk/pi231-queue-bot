@@ -6,7 +6,7 @@ from queue_bot.services.admins import log_action, require_admin
 from queue_bot.services.errors import BotError
 from queue_bot.services.restrictions import require_available
 from queue_bot.services.lab_estimates import validate_lab_count, validate_planned_minutes
-from queue_bot.services import lab_catalog
+from queue_bot.services import coursework_priority, lab_catalog
 
 UNFINISHED = ("open", "closed")
 
@@ -32,7 +32,7 @@ def get_entries(conn: sqlite3.Connection, session_id: int) -> list[sqlite3.Row]:
     """Активні записи по порядку. full_name = NULL означає вільне місце."""
     return conn.execute(
         """SELECT e.id, e.user_id, e.position, e.ready_to_swap, e.swap_wish, e.lab_count, e.planned_minutes, e.labs_passed,
-                  e.selected_labs, e.passed_labs, e.entry_revision, s.subject_id, s.queue_type, u.full_name, u.telegram_id, u.is_blocked
+                  e.selected_labs, e.passed_labs, e.entry_revision, e.coursework_priority, s.subject_id, s.queue_type, u.full_name, u.telegram_id, u.is_blocked
            FROM queue_entries e LEFT JOIN users u ON u.id = e.user_id
            JOIN queue_sessions s ON s.id = e.session_id
            WHERE e.session_id = ? AND e.status = 'active' ORDER BY e.position""",
@@ -152,7 +152,9 @@ def join_queue(conn: sqlite3.Connection, telegram_id: int, session_id: int,
         if get_user_position(conn, telegram_id, session_id) is not None:
             raise BotError("Ви вже записані в цю чергу.")
 
-        if position is None:
+        if position is None and coursework_priority.applies(conn, session, user["id"]):
+            _place_coursework_first(conn, session_id, user["id"])
+        elif position is None:
             _place_user(conn, session_id, user["id"])
         else:
             _place_user_at(conn, session_id, user["id"], position)
@@ -184,6 +186,28 @@ def _place_user(conn, session_id: int, user_id: int) -> None:
         "INSERT INTO queue_entries (session_id, user_id, position) VALUES (?, ?, ?)",
         (session_id, user_id, last + 1),
     )
+
+
+def _place_coursework_first(conn, session_id: int, user_id: int) -> None:
+    """Ставить студента з курсовою після тих, хто вже біля викладача, і після інших курсовиків."""
+    _require_roster_user(conn, user_id)
+    entries = get_entries(conn, session_id)
+    at_teacher = {row["entry_id"] for row in conn.execute(
+        "SELECT entry_id FROM lesson_attendance WHERE state IN ('called', 'serving') "
+        "AND run_id IN (SELECT id FROM lesson_runs WHERE active = 1)").fetchall()}
+    index = 0
+    for i, e in enumerate(entries):
+        if e["id"] in at_teacher or e["coursework_priority"]:
+            index = i + 1
+        else:
+            break
+    new_id = conn.execute(
+        "INSERT INTO queue_entries (session_id, user_id, position, coursework_priority) VALUES (?, ?, NULL, TRUE)",
+        (session_id, user_id),
+    ).lastrowid
+    ids = [e["id"] for e in entries]
+    ids.insert(index, new_id)
+    _set_order(conn, session_id, ids)
 
 
 def _take_slot(conn, entry_id: int, user_id: int) -> None:
@@ -400,7 +424,7 @@ def leave_queue(conn: sqlite3.Connection, telegram_id: int, session_id: int) -> 
             """UPDATE queue_entries
                SET user_id = NULL, lab_count = NULL, planned_minutes = NULL, labs_passed = 0,
                    selected_labs = NULL, passed_labs = '[]', entry_revision = entry_revision + 1,
-                   ready_to_swap = FALSE, swap_wish = NULL
+                   ready_to_swap = FALSE, swap_wish = NULL, coursework_priority = FALSE
                WHERE id = ?""", (entry['id'],))
 
 
@@ -437,7 +461,7 @@ def finish_own_entry(conn: sqlite3.Connection, telegram_id: int, session_id: int
         ids.remove(entry["id"])
         ids.append(entry["id"])
         _set_order(conn, session_id, ids)
-        conn.execute("UPDATE queue_entries SET ready_to_swap = FALSE, swap_wish = NULL WHERE id = ?", (entry["id"],))
+        conn.execute("UPDATE queue_entries SET ready_to_swap = FALSE, swap_wish = NULL, coursework_priority = FALSE WHERE id = ?", (entry["id"],))
         return len(ids)
 
 

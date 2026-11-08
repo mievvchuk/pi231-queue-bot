@@ -687,7 +687,8 @@ def format_entry(row, my_telegram_id: int | None = None, marked: bool = False, s
                 except BotError:
                     details += ' · оновіть перелік лабораторних'
     lab_part = f' · {details}' if details else ''
-    return f"{prefix}{pos}. {name}{lab_part}{swap_badge}{suffix}{id_part}"
+    coursework_badge = " 📑 [курсова]" if 'coursework_priority' in row.keys() and row['coursework_priority'] and tg_id else ""
+    return f"{prefix}{pos}. {name}{coursework_badge}{lab_part}{swap_badge}{suffix}{id_part}"
 
 
 async def show(callback: CallbackQuery, text: str, markup: InlineKeyboardMarkup | None = None):
