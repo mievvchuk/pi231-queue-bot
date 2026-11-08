@@ -227,13 +227,7 @@ async def test_postgres_mini_app_shares_bot_signup_completion_and_replacements(p
         roster = (await response.json())['users']
         assert len(roster) == len(expected) + 4
         assert [row['full_name'] for row in roster if row['full_name'] in expected] == expected
-        created = await client.post('/api/miniapp/admin/manage/polls?mode=admin',headers=owner_auth,
-            json={'action':'create','question':'Тестове голосування','options':['Так','Ні'],'is_anonymous':True,'allows_multiple':False,'target':'private','minutes':10})
-        assert created.status == 200
-        pid = (await created.json())['poll_id']
-        assert (await client.post(f'/api/miniapp/polls/{pid}/vote',headers=auth,json={'options':[1]})).status == 200
-        poll = await (await client.get(f'/api/miniapp/polls/{pid}',headers=auth)).json()
-        assert poll['results']['total_voters'] == 1 and poll['results']['options'][1]['voters'] == []
+        assert (await client.get('/api/miniapp/polls',headers=auth)).status == 404
         assert (await client.post('/api/miniapp/bugs',headers=auth,json={'text':'Перевірка PostgreSQL'})).status == 200
         response = await client.get('/api/miniapp/admin/manage/bugs?mode=admin',headers=owner_auth)
         assert response.status == 200 and isinstance((await response.json())['items'][0]['created_at'],str)

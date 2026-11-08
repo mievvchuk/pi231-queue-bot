@@ -459,7 +459,7 @@
   }
   function openFeature(key, force=false, query="") {
     if (S.busy || !features) return;
-    if (key === "polls" || key === "help") S.tab = key;
+    if (key === "help") S.tab = key;
     if(typeof history!=='undefined'&&typeof location!=='undefined'&&typeof URL!=='undefined'){
       const url=new URL(location.href);
       if(key==='journal'){
@@ -591,7 +591,7 @@
     }
   }
   function navigate(tab) {
-    if (tab === "polls" || tab === "help" || tab === "journal") {
+    if (tab === "help" || tab === "journal") {
       openFeature(tab);
       return;
     }
@@ -686,7 +686,7 @@
       ["schedule", "Розклад"],
       ["more", "Ще"],
     ];
-    const activeTab = S.queue ? 'queues' : (S.feature || ['profile', 'admin', 'polls', 'help'].includes(S.tab)) ? 'more' : S.tab;
+    const activeTab = S.queue ? 'queues' : (S.feature || ['profile', 'admin', 'help'].includes(S.tab)) ? 'more' : S.tab;
     if (navCache) {
       navCache.buttons.forEach((node, i) => node.classList.toggle('active', tabs[i][0] === activeTab));
       navCache.control.select(Math.max(0, tabs.findIndex(([key]) => key === activeTab)));
@@ -836,7 +836,7 @@
     );
   }
   function morePage() {
-    const links=[['journal','mortarboard','Електронний журнал','Лабораторні, оцінки та атестації'],['profile','profile','Профіль і мої обміни','Акаунт, записи та запити на обмін'],['polls','polls','Опитування','Голосування та результати'],['help','help','Допомога','Як працюють черги'],['bugs','bugs','Звернення','Повідомити про проблему']];
+    const links=[['journal','mortarboard','Електронний журнал','Лабораторні, оцінки та атестації'],['profile','profile','Профіль і мої обміни','Акаунт, записи та запити на обмін'],['help','help','Допомога','Як працюють черги'],['bugs','bugs','Звернення','Повідомити про проблему']];
     if(S.data.me.is_admin) links.unshift(['admin','admin','Керування групою','Черги, студенти та розклад']);
     return el('main',{},el('div',{class:'page-title'},el('h1',{},'Ще'),small('Усе інше — в одному місці.')),
       el('div',{class:'more-list'},links.map(([key,glyph,title,description])=>btn([icon(glyph),el('span',{},el('strong',{},title),small(description)),icon('arrow')],()=>{
@@ -1940,7 +1940,6 @@
         "Автоматичні заміни, підтвердження та редагування",
       ],
       ["admin-saturdays", "Робочі суботи", "Дата, день розкладу та тип тижня"],
-      ["admin-polls", "Опитування", "Створення, голосування та результати"],
     ];
     if (S.data.me.is_owner)
       sections.push([
@@ -1967,7 +1966,7 @@
         { class: "more-list admin-categories" },
         sections.map(([key, title, description]) =>
           btn(
-            [icon(({'admin-history':'queues','admin-group':'users','admin-subjects':'mortarboard','admin-replacements':'schedule','admin-saturdays':'schedule','admin-polls':'polls',owner:'owner'})[key]),el('span',{},el("strong", {}, title), small(description)), icon("arrow")],
+            [icon(({'admin-history':'queues','admin-group':'users','admin-subjects':'mortarboard','admin-replacements':'schedule','admin-saturdays':'schedule',owner:'owner'})[key]),el('span',{},el("strong", {}, title), small(description)), icon("arrow")],
             () => openFeature(key),
             "more-row admin-nav-row",
           ),
@@ -2199,12 +2198,6 @@
       await openFeature('journal',false,'?'+new URLSearchParams([...params].filter(([key])=>['subject','period'].includes(key))).toString());
       return;
     }
-    const pid = params.get('poll');
-    if (pid && /^[1-9][0-9]*$/.test(pid)) {
-      await openFeature('polls');
-      features.openPoll(Number(pid));
-      return;
-    }
     if(!isAdmin())await openFeature('journal');
   }
   window.addEventListener?.('popstate',()=>{
@@ -2242,7 +2235,7 @@
     if(design) return design.loginPage();
     const panel = el('main', {class: 'login-page'},
       el('h1', {}, 'Твій простір ПІ-231'),
-      el('p', {class: 'muted'}, 'Черги, розклад та опитування — з телефона чи комп’ютера.'),
+      el('p', {class: 'muted'}, 'Черги, розклад і оцінки — з телефона чи комп’ютера.'),
     );
     if (!browserSession.ready) panel.append(el('p', {role: 'status'}, 'Перевіряю вхід…'));
     else if (browserSession.enabled) {

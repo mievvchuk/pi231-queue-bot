@@ -202,14 +202,14 @@ test("an old feature response cannot overwrite the newly opened feature", async 
   );
   const old = features.open("bugs");
   assert.match(features.page("bugs").textContent, /Завантаження/);
-  await features.open("polls");
+  await features.open("proposals");
   pending.reject(Object.assign(new Error("stale error"), { status: 403 }));
   await old;
   assert.doesNotMatch(
-    features.page("polls").textContent,
+    features.page("proposals").textContent,
     /stale error|Завантаження/,
   );
-  assert.match(features.page("polls").textContent, /немає записів/);
+  assert.match(features.page("proposals").textContent, /немає записів/);
   assert.equal(S.fatal, null);
 });
 
@@ -229,38 +229,6 @@ test('administrator names accompany identifiers with a truthful unregistered fal
   S.mode='admin';await features.open('admin-admins');const text=features.page('admin-admins').textContent;
   assert.match(text,/Петренко Іван/);assert.match(text,/Telegram ID: 123/);
   assert.match(text,/Профіль ще не зареєстрований/);assert.match(text,/Telegram ID: 456/);
-});
-
-test("native anonymous poll remains read-only and shows actual result counts", async () => {
-  const { features, panels } = setup(async (path) =>
-    path === "/polls"
-      ? { items: [] }
-      : {
-          poll: {
-            id: 7,
-            question: "Запитання",
-            options: ["Так", "Ні"],
-            is_anonymous: true,
-          },
-          results: { options: [{ index: 0, count: 3, percent: 75 }] },
-          my_options: [],
-          can_vote: false,
-          can_vote_reason: "Голосуй у Telegram",
-        },
-  );
-  await features.open("polls");
-  await features.openPoll(7);
-  assert.match(panels[0].textContent, /Так · 3 \(75%\)/);
-  assert.match(panels[0].textContent, /Голосуй у Telegram/);
-  assert.equal(
-    descendants(panels[0]).filter((node) => node.tag === "form").length,
-    0,
-  );
-  assert.ok(
-    descendants(panels[0])
-      .filter((node) => node.tag === "input")
-      .every((node) => node.disabled),
-  );
 });
 
 test("queue creation submits numeric catalog IDs and server errors stay in the form", async () => {
@@ -295,19 +263,6 @@ test("queue creation submits numeric catalog IDs and server errors stay in the f
   );
 });
 
-test("a poll request that finishes after navigation cannot open a sheet", async () => {
-  const pending = deferred();
-  const { features, panels } = setup(async (path) =>
-    path === "/polls/7" ? pending.promise : { items: [] },
-  );
-  await features.open("polls");
-  const request = features.openPoll(7);
-  await features.open("help");
-  pending.resolve({ poll: { question: "Old", options: [] }, can_vote: false });
-  await request;
-  assert.equal(panels.length, 0);
-});
-
 test("access failures replace protected content with the global fatal state", async () => {
   const error = Object.assign(new Error("Доступ відкликано"), { status: 403 });
   const { features, S, renders } = setup(async () => {
@@ -319,46 +274,10 @@ test("access failures replace protected content with the global fatal state", as
   assert.ok(renders() >= 2);
 });
 
-test("anonymous poll results never show voter names but public polls may", async () => {
-  let anonymous = true;
-  const { features, panels } = setup(async (path) =>
-    path === "/polls"
-      ? { items: [] }
-      : {
-          poll: {
-            question: "Опитування",
-            options: ["Так"],
-            is_anonymous: anonymous,
-          },
-          results: {
-            options: [
-              {
-                index: 0,
-                count: 1,
-                percent: 100,
-                voters: [{ name: "Публічне ім’я" }],
-              },
-            ],
-          },
-          can_vote: false,
-        },
-  );
-  await features.open("polls");
-  await features.openPoll(1);
-  assert.doesNotMatch(panels[0].textContent, /Публічне ім’я/);
-  anonymous = false;
-  await features.openPoll(2);
-  assert.match(panels[1].textContent, /Публічне ім’я/);
-  assert.equal(
-    descendants(panels[1]).find((node) => node.tag === "meter").attrs.value,
-    100,
-  );
-});
-
 test("successful feature retry clears a previous global fatal error", async () => {
   const { features, S } = setup(async () => ({ items: [] }));
   S.fatal = "Доступ був тимчасово обмежений";
-  await features.open("polls");
+  await features.open("proposals");
   assert.equal(S.fatal, null);
 });
 
@@ -486,14 +405,12 @@ test("every feature page action has a real click handler or a submitted form", a
     "create",
     "proposals",
     "bugs",
-    "polls",
     "help",
     "admin-history",
     "admin-group",
     "admin-subjects",
     "admin-replacements",
     "admin-saturdays",
-    "admin-polls",
     "owner",
     "admin-admins",
     "admin-bugs",
@@ -515,34 +432,6 @@ test("every feature page action has a real click handler or a submitted form", a
       );
     }
   }
-});
-
-test("existing mini-app votes can be withdrawn through the real vote endpoint", async () => {
-  const requests = [],
-    { features, panels } = setup(async (path, body) => {
-      requests.push([path, body]);
-      return path === "/polls/3"
-        ? {
-            poll: { question: "Запитання", options: ["Так", "Ні"] },
-            my_options: [1],
-            can_vote: true,
-            results: { options: [] },
-          }
-        : { items: [] };
-    });
-  await features.open("polls");
-  await features.openPoll(3);
-  const withdraw = descendants(panels[0]).find(
-    (node) =>
-      node.tag === "form" && node.textContent.includes("Відкликати голос"),
-  );
-  assert.ok(withdraw);
-  await withdraw.events.submit({ preventDefault() {} });
-  const mutation = requests.find(
-    ([path, body]) => path === "/polls/3/vote" && body,
-  );
-  assert.ok(mutation);
-  assert.equal(mutation[1].options.length, 0);
 });
 
 test("empty replacement lists never render a literal null action", async () => {

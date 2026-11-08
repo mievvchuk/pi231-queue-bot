@@ -11,7 +11,7 @@ from datetime import date, datetime
 from aiohttp import web
 
 from queue_bot import config
-from queue_bot.services import admins, bugs, maintenance, polls, queues, recognition, replacements, restrictions, schedule, subjects, users, working_days
+from queue_bot.services import admins, bugs, maintenance, queues, recognition, replacements, restrictions, schedule, subjects, users, working_days
 from queue_bot.services.errors import BotError
 from queue_bot.storage.database import transaction
 
@@ -167,7 +167,7 @@ async def manage(request):
                              'server_time': working_days.now_in_kyiv().isoformat()})
         if section == 'owner':
             return response({'maintenance': maintenance.is_maintenance_active(conn), 'end_time': maintenance.get_maintenance_end_time(conn),
-                             'admins': admins.list_admins(conn), 'group_chat_id': polls.get_group_chat_id(conn)})
+                             'admins': admins.list_admins(conn)})
         if section == 'admins':
             return response({'items': admins.list_admins(conn)})
         if section == 'bugs':
@@ -175,9 +175,6 @@ async def manage(request):
             return response({'items': [{**{k: row[k] for k in keys}, 'has_photo': bool(row['photo_file_id'])} for row in bugs.list_bug_reports(conn, status=None, limit=100)]})
         if section == 'proposals':
             return response({'items': [{**r, 'kind': 'teacher' if r['type'] == 'add_teacher' else 'subject'} for r in subjects._load_requests(conn).values()]})
-        if section == 'polls':
-            from .poll_api import admin_polls
-            return await admin_polls(request)
         raise BotError('Невідомий розділ.')
 
     data = await api.body(request)
@@ -322,9 +319,6 @@ async def manage(request):
         try:
             await ctx['bot'].send_message(item['user_telegram_id'], 'Вашу заявку схвалено.' if action == 'approve' else 'Вашу заявку відхилено.')
         except Exception: pass
-    elif section == 'polls':
-        from .poll_api import admin_polls
-        return await admin_polls(request)
     else: raise BotError('Невідома дія.')
     return response({'message': 'Зміни збережено.'})
 
@@ -332,6 +326,4 @@ async def manage(request):
 def setup(app):
     app.router.add_get('/api/miniapp/admin/manage/{section}', manage)
     app.router.add_post('/api/miniapp/admin/manage/{section}', manage)
-    from .poll_api import setup as poll_setup
-    poll_setup(app)
 

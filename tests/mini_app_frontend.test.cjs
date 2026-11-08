@@ -111,9 +111,9 @@ test('journal launch link opens the exact feature after authenticated bootstrap'
   assert.equal(app.S.mode,'student');
 });
 
-test('launch links require registration, ignore arbitrary feature names and retain poll links',async()=>{
+test('launch links require registration and ignore arbitrary feature names and old poll links',async()=>{
   const calls=[];
-  const {app,context}=setup(false,{open:async key=>calls.push(key),openPoll:id=>calls.push(id)});
+  const {app,context}=setup(false,{open:async key=>calls.push(key)});
   context.location={search:'?page=journal'};
   app.S.data.me.is_registered=false;
   await app.openInitialFeature();
@@ -129,7 +129,7 @@ test('launch links require registration, ignore arbitrary feature names and reta
   calls.length=0;
   context.location={search:'?poll=12'};
   await app.openInitialFeature();
-  assert.deepEqual(calls,['polls',12]);
+  assert.deepEqual(calls,['journal']);
 });
 const schedule = (date) => ({
   date,
@@ -436,8 +436,9 @@ test('four-tab navigation keeps secondary features reachable through More', () =
   const {app}=setup();
   const nav=app.bottomnav();
   assert.deepEqual(allNodes(nav).filter(n=>n.tag==='button').map(n=>n.textContent.trim()),['Головна','Черги','Розклад','Ще']);
-  for(const text of ['Профіль','Опитування','Допомога','Звернення','Керування групою','PWA'])
+  for(const text of ['Профіль','Допомога','Звернення','Керування групою','PWA'])
     assert.ok(app.morePage().textContent.includes(text));
+  assert.ok(!app.morePage().textContent.includes('Опитування'));
 });
 test('home shows real upcoming class and personal positions without invented waits', () => {
   const {app}=setup();

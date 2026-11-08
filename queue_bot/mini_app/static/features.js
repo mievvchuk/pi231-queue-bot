@@ -18,7 +18,6 @@ window.createPI231Features = function (H) {
     create: "Відкрити чергу",
     proposals: "Пропозиції",
     bugs: "Повідомити про помилку",
-    polls: "Опитування",
     help: "Допомога",
     journal: "Мої оцінки",
     "admin-history": "Активні черги",
@@ -26,7 +25,6 @@ window.createPI231Features = function (H) {
     "admin-subjects": "Предмети й викладачі",
     "admin-replacements": "Заміни",
     "admin-saturdays": "Робочі суботи",
-    "admin-polls": "Керування опитуваннями",
     owner: "Панель власника",
     "admin-admins": "Адміністратори",
     "admin-bugs": "Звернення студентів",
@@ -38,8 +36,7 @@ window.createPI231Features = function (H) {
     "admin-bugs",
     "admin-proposals",
   ]);
-  let state = { key: null, loading: false, data: null, error: null, token: 0 },
-    pollRequest = 0;
+  let state = { key: null, loading: false, data: null, error: null, token: 0 };
   let saturdayTicker = null;
   const adminPath = (key) =>
     "/admin/manage/" + (key === "owner" ? "owner" : key.slice(6));
@@ -1097,233 +1094,6 @@ window.createPI231Features = function (H) {
       ),
     );
   }
-  async function pollDetail(id) {
-    const request = ++pollRequest;
-    const ctx = { token: state.token, epoch: S.epoch, key: S.feature };
-    try {
-      const data = await api("/polls/" + encodeURIComponent(id));
-      if (!current(ctx.token, ctx.epoch, ctx.key) || request !== pollRequest)
-        return;
-      const poll = data.poll,
-        selected = new Set(rows(data.my_options)),
-        panel = sheet(
-          poll.question,
-          poll.is_anonymous ? "Анонімне опитування" : "Відкрите опитування",
-        );
-      if (data.vote_channel_note)
-        panel.append(el("p", { class: "notice" }, data.vote_channel_note));
-      const options = rows(poll.options).map((option, index) => {
-        const control = el("input", {
-          type: poll.allows_multiple ? "checkbox" : "radio",
-          name: "poll-vote",
-          value: index,
-          checked: selected.has(index),
-          disabled: !data.can_vote,
-        });
-        const result = rows(data.results?.options).find(
-          (item) => item.index === index,
-        );
-        const count = result?.count;
-        const percent = Number.isFinite(result?.percent)
-          ? Math.max(0, Math.min(100, result.percent))
-          : 0;
-        const voters = !poll.is_anonymous
-          ? rows(result?.voters)
-              .map((voter) =>
-                typeof voter === "string"
-                  ? voter
-                  : voter.name || voter.full_name,
-              )
-              .filter(Boolean)
-          : [];
-        return {
-          control,
-          view: el(
-            "div",
-            { class: "poll-option-result" },
-            field(
-              option +
-                (Number.isFinite(count)
-                  ? " · " +
-                    count +
-                    (Number.isFinite(result.percent)
-                      ? " (" + percent + "%)"
-                      : "")
-                  : ""),
-              control,
-            ),
-            Number.isFinite(count) && Number.isFinite(result?.percent)
-              ? el("meter", {
-                  min: 0,
-                  max: 100,
-                  value: percent,
-                  "aria-label": option + ": " + percent + "%",
-                  style: "width:100%;height:12px",
-                })
-              : null,
-            voters.length ? small(voters.join(", ")) : null,
-          ),
-        };
-      });
-      if (data.can_vote)
-        panel.append(
-          form(
-            options.map((o) => o.view),
-            "Проголосувати",
-            async (voteCtx) => {
-              const chosen = options
-                .map((o, index) => (o.control.checked ? index : null))
-                .filter((v) => v !== null);
-              if (!chosen.length) throw new Error("Обери варіант відповіді.");
-              await send(
-                "/polls/" + encodeURIComponent(id) + "/vote",
-                { options: chosen },
-                voteCtx,
-              );
-            },
-          ),
-        );
-      else
-        panel.append(
-          ...options.map((o) => o.view),
-          el(
-            "p",
-            { class: "notice" },
-            data.can_vote_reason ||
-              data.reason ||
-              "Голосування зараз недоступне.",
-          ),
-        );
-      if (data.can_vote && selected.size)
-        panel.append(
-          form([], "Відкликати голос", (voteCtx) =>
-            send(
-              "/polls/" + encodeURIComponent(id) + "/vote",
-              { options: [] },
-              voteCtx,
-            ),
-          ),
-        );
-    } catch (err) {
-      if (!accessError(err, ctx) && current(ctx.token, ctx.epoch, ctx.key))
-        toast(err.message, true);
-    }
-  }
-  function pollsPage(data, admin = false) {
-    const path = adminPath("admin-polls"),
-      content = [];
-    if (admin) {
-      const question = input({ maxlength: 300 }),
-        options = text({
-          placeholder: "Кожен варіант з нового рядка",
-          maxlength: 3000,
-        });
-      const anonymous = checkbox("Анонімне", true),
-        multiple = checkbox("Можна обирати кілька варіантів");
-      const target = select([
-        ["private", "Особисті повідомлення"],
-        ["group", "Чат групи"],
-      ]);
-      const minutes = input({
-        type: "number",
-        min: 1,
-        step: 1,
-        required: false,
-        placeholder: "Без обмеження",
-      });
-      content.push(
-        card(
-          el(
-            "p",
-            { class: "notice" },
-            "Голосування відбудеться в мініапці. У Telegram буде надіслано запрошення.",
-          ),
-          form(
-            [
-              field("Запитання", question),
-              field("Варіанти відповіді", options),
-              anonymous.view,
-              multiple.view,
-              field("Куди надіслати запрошення", target),
-              field("Тривалість, хвилин", minutes),
-            ],
-            "Створити й надіслати",
-            (ctx) => {
-              const values = options.value
-                .split(/\r?\n/)
-                .map((s) => s.trim())
-                .filter(Boolean);
-              if (values.length < 2 || values.length > 10)
-                throw new Error("Додай від 2 до 10 варіантів.");
-              return send(
-                path,
-                {
-                  action: "create",
-                  question: question.value.trim(),
-                  options: values,
-                  is_anonymous: anonymous.node.checked,
-                  allows_multiple: multiple.node.checked,
-                  target: target.value,
-                  minutes: minutes.value ? Number(minutes.value) : null,
-                },
-                ctx,
-              );
-            },
-          ),
-        ),
-      );
-      const chat = input({
-        type: "text",
-        inputmode: "numeric",
-        pattern: "-?[0-9]+",
-        placeholder: "Telegram ID чату",
-      });
-      content.push(
-        card(
-          form(
-            [field("Чат групи для опитувань", chat)],
-            "Зберегти чат",
-            (ctx) =>
-              send(path, { action: "group", chat_id: Number(chat.value) }, ctx),
-          ),
-        ),
-      );
-    }
-    content.push(
-      list(rows(data.items || data.polls), (poll) =>
-        card(
-          el("h3", {}, poll.question),
-          badge(statusText(poll.status)),
-          small(poll.is_anonymous ? "Анонімне" : "Відкрите"),
-          poll.closes_at
-            ? small(
-                "До " +
-                  new Date(poll.closes_at).toLocaleString("uk-UA", {
-                    timeZone: "Europe/Kyiv",
-                  }),
-              )
-            : null,
-          btn(
-            "Відкрити опитування",
-            () => pollDetail(poll.id),
-            "button secondary",
-          ),
-          admin && !["closed", "finished"].includes(poll.status)
-            ? btn(
-                "Закрити голосування",
-                () =>
-                  confirm("Закрити опитування?", poll.question, path, {
-                    action: "close",
-                    poll_id: poll.id,
-                  }),
-                "text-button danger",
-              )
-            : null,
-        ),
-      ),
-    );
-    return content;
-  }
   function ownerPage(data) {
     const path = adminPath("owner"),
       announcement = text({ maxlength: 4000 });
@@ -1711,13 +1481,11 @@ window.createPI231Features = function (H) {
       bugs: bugsPage,
       help: helpPage,
       journal: journalPage,
-      polls: pollsPage,
       "admin-history": historyPage,
       "admin-group": groupPage,
       "admin-subjects": subjectsPage,
       "admin-replacements": replacementsPage,
       "admin-saturdays": saturdaysPage,
-      "admin-polls": (d) => pollsPage(d, true),
       owner: ownerPage,
       "admin-admins": adminsPage,
       "admin-bugs": (d) => bugsPage(d, true),
@@ -1730,7 +1498,7 @@ window.createPI231Features = function (H) {
     );
     return main;
   }
-  return { open, page, openPoll: pollDetail,
+  return { open, page,
     tick: () => { if(S.feature==='admin-saturdays' && allowed('admin-saturdays') && !state.loading && !state.error) saturdayTicker?.(); },
   };
 };
