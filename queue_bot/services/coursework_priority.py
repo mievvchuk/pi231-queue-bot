@@ -41,6 +41,41 @@ def applies(conn, session, user_id: int, *, today: date | None = None, data: dic
     return bool(row) and _norm(row["full_name"]) in {_norm(name) for name in students}
 
 
+def promote_existing(conn, *, today: date | None = None, data: dict | None = None) -> int:
+    """Ставить наперед курсовиків, які записались у відкриті черги ще до початку тижня.
+    Повертає кількість змінених черг."""
+    from queue_bot.services import queues
+    data = load() if data is None else data
+    today = today or datetime.now(ZoneInfo(config.TIMEZONE)).date()
+    changed = 0
+    for session in queues.list_sessions(conn, ("open", "closed")):
+        if queues.promote_coursework(
+            conn, session["id"], lambda user_id: applies(conn, session, user_id, today=today, data=data)
+        ):
+            changed += 1
+    return changed
+
+
+async def watch(conn, interval_sec: int = 60) -> None:
+    """Раз на день у межах тижня курсових переставляє тих, хто вже стоїть у чергах."""
+    import asyncio
+    import logging
+    log = logging.getLogger(__name__)
+    while True:
+        try:
+            today = datetime.now(ZoneInfo(config.TIMEZONE)).date()
+            data = load()
+            key = f"coursework_promoted_{today.isoformat()}"
+            if data and date.fromisoformat(data["from"]) <= today <= date.fromisoformat(data["to"]) \
+                    and not conn.execute("SELECT 1 FROM bot_state WHERE key = ?", (key,)).fetchone():
+                changed = promote_existing(conn, today=today, data=data)
+                conn.execute("INSERT INTO bot_state (key, value) VALUES (?, ?)", (key, str(changed)))
+                log.info("Coursework priority applied to %s existing queues", changed)
+        except Exception:
+            log.exception("Coursework priority watcher failed")
+        await asyncio.sleep(interval_sec)
+
+
 def _norm(name: str) -> str:
     # «Дар`єв», «Дар'єв» і «Дар’єв» — одне прізвище
     for mark in "`’ʼ":
