@@ -652,7 +652,8 @@ def move_entry(conn, actor_id: int, entry_id: int, new_position: int) -> None:
         entries = get_entries(conn, session_id)
         # Якщо нова позиція більша за поточну довжину черги, доповнюємо пустими слотами
         if new_position > len(entries):
-            for p in range(len(entries) + 1, new_position):
+            # +1: сам запис зараз вийде зі свого місця, тож потрібно на один слот більше
+            for p in range(len(entries) + 1, new_position + 1):
                 conn.execute(
                     "INSERT INTO queue_entries (session_id, user_id, position) VALUES (?, NULL, ?)",
                     (session_id, p),
