@@ -963,8 +963,8 @@ async def swap_confirm_action(message: Message, state: FSMContext, conn, subject
     )
     invite_keyboard = make_keyboard([
         [
-            ("✅ Погодитися", f"sw_yes:{my_entry['id']}:{target['id']}"),
-            ("❌ Відхилити", f"sw_no:{my_entry['id']}:{target['id']}")
+            ("✅ Погодитися", f"sw_yes:{my_entry['id']}:{target['id']}:{my_entry['user_id']}"),
+            ("❌ Відхилити", f"sw_no:{my_entry['id']}:{target['id']}:{my_entry['user_id']}")
         ]
     ])
     try:
@@ -982,8 +982,10 @@ async def swap_confirm_action(message: Message, state: FSMContext, conn, subject
 
 @router.callback_query(F.data.startswith("sw_yes:"))
 async def swap_accept(callback: CallbackQuery, conn, subjects):
-    _, sender_entry_id, target_entry_id = callback.data.split(":")
-    sender_entry_id, target_entry_id = int(sender_entry_id), int(target_entry_id)
+    parts = callback.data.split(":")
+    if len(parts) != 4:
+        raise BotError("Цей запит на обмін застарів. Попросіть надіслати новий.")
+    sender_entry_id, target_entry_id, sender_user_id = map(int, parts[1:])
 
     target_entry = queues.get_entry(conn, target_entry_id)
     if not target_entry or target_entry["status"] != "active":
@@ -994,7 +996,8 @@ async def swap_accept(callback: CallbackQuery, conn, subjects):
         raise BotError("Ця пропозиція призначена для іншого студента.")
 
     sender_entry = queues.get_entry(conn, sender_entry_id)
-    if not sender_entry or sender_entry["status"] != "active":
+    # Після виходу відправника його місце (той самий entry id) може зайняти інший студент
+    if not sender_entry or sender_entry["status"] != "active" or sender_entry["user_id"] != sender_user_id:
         raise BotError("Студент, який надсилав запит, уже змінив позицію або вийшов.")
 
     session = get_session_or_fail(conn, target_entry["session_id"])
@@ -1023,8 +1026,9 @@ async def swap_accept(callback: CallbackQuery, conn, subjects):
 
 @router.callback_query(F.data.startswith("sw_no:"))
 async def swap_decline(callback: CallbackQuery, conn, subjects):
-    _, sender_entry_id, target_entry_id = callback.data.split(":")
-    sender_entry_id, target_entry_id = int(sender_entry_id), int(target_entry_id)
+    parts = callback.data.split(":")
+    sender_entry_id, target_entry_id = int(parts[1]), int(parts[2])
+    sender_user_id = int(parts[3]) if len(parts) > 3 else None
 
     target_entry = queues.get_entry(conn, target_entry_id)
     target_user = conn.execute("SELECT * FROM users WHERE id = ?", (target_entry["user_id"],)).fetchone() if target_entry else None
@@ -1032,6 +1036,8 @@ async def swap_decline(callback: CallbackQuery, conn, subjects):
         raise BotError("Ця пропозиція призначена для іншого студента.")
 
     sender_entry = queues.get_entry(conn, sender_entry_id)
+    if sender_entry and sender_user_id is not None and sender_entry["user_id"] != sender_user_id:
+        sender_entry = None  # місце вже зайняв інший студент — його не сповіщаємо
     sender_user = conn.execute("SELECT * FROM users WHERE id = ?", (sender_entry["user_id"],)).fetchone() if sender_entry else None
 
     await show(callback, "❌ <b>Ви відхилили пропозицію обміну місцями.</b>")
@@ -1081,8 +1087,8 @@ async def swap_request_from_notification(callback: CallbackQuery, conn, subjects
     )
     invite_keyboard = make_keyboard([
         [
-            ("✅ Погодитися", f"sw_yes:{initiator_entry['id']}:{receiver_entry['id']}"),
-            ("❌ Відхилити", f"sw_no:{initiator_entry['id']}:{receiver_entry['id']}"),
+            ("✅ Погодитися", f"sw_yes:{initiator_entry['id']}:{receiver_entry['id']}:{initiator_entry['user_id']}"),
+            ("❌ Відхилити", f"sw_no:{initiator_entry['id']}:{receiver_entry['id']}:{initiator_entry['user_id']}"),
         ]
     ])
 
