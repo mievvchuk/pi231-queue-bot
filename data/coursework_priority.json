@@ -1,0 +1,12 @@
+{
+  "from": "2026-11-09",
+  "to": "2026-11-13",
+  "skip_subject_ids": [7],
+  "supervisors": [
+    {"teacher_id": 6, "teacher": "Атаман В.О.", "students": []},
+    {"teacher_id": 1, "teacher": "Когут В.С.", "students": []},
+    {"teacher_id": 2, "teacher": "Кондратюк Є.С.", "students": []},
+    {"teacher_id": 3, "teacher": "Щуцький С.В.", "students": []},
+    {"teacher_id": 7, "teacher": "Жереб Д.В.", "students": []}
+  ]
+}
