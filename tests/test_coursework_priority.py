@@ -73,3 +73,11 @@ def test_shipped_data_file_is_valid():
     data = coursework_priority.load()
     date.fromisoformat(data["from"]), date.fromisoformat(data["to"])
     assert all(isinstance(t["teacher_id"], int) and isinstance(t["students"], list) for t in data["supervisors"])
+
+
+def test_apostrophe_variants_match(conn, make_user):
+    make_user(5, "Дар’єв Даниїл")
+    s = queues.create_session(conn, ADMIN, 2, KONDRATIUK, "ЛМВ")
+    user_id = conn.execute("SELECT id FROM users WHERE telegram_id = 5").fetchone()["id"]
+    data = dict(DATA, supervisors=[{"teacher_id": KONDRATIUK, "students": ["Дар`єв Даниїл"]}])
+    assert coursework_priority.applies(conn, queues.get_session(conn, s), user_id, today=date(2026, 11, 10), data=data)

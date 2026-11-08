@@ -38,6 +38,11 @@ def applies(conn, session, user_id: int, *, today: date | None = None, data: dic
     if not students:
         return False
     row = conn.execute("SELECT full_name FROM users WHERE id = ?", (user_id,)).fetchone()
-    return bool(row) and " ".join(row["full_name"].split()).lower() in {
-        " ".join(name.split()).lower() for name in students
-    }
+    return bool(row) and _norm(row["full_name"]) in {_norm(name) for name in students}
+
+
+def _norm(name: str) -> str:
+    # «Дар`єв», «Дар'єв» і «Дар’єв» — одне прізвище
+    for mark in "`’ʼ":
+        name = name.replace(mark, "'")
+    return " ".join(name.split()).lower()
