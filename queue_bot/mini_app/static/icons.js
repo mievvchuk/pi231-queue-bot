@@ -292,7 +292,6 @@
   const aliases = {
     queues: "list-ul",
     schedule: "calendar3",
-    polls: "bar-chart",
     profile: "person",
     menu: "grid",
     admin: "gear",

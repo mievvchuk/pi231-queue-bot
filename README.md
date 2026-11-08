@@ -27,7 +27,7 @@ A Telegram bot and optional Telegram Mini App/PWA for managing student queues fo
 
 ### Telegram Mini App and installable PWA
 - Optional web interface with **Home**, **Queues**, **Schedule**, and **More** sections, plus administrator screens where permitted.
-- Queue actions, lab selection, partial completions, swaps, schedule viewing, polls, profile, and registration.
+- Queue actions, lab selection, partial completions, swaps, schedule viewing, profile, and registration. Polls live only in the bot as native Telegram polls.
 - Responsive light/dark interface with reduced-motion and reduced-transparency fallbacks; bundled assets require no frontend CDN.
 - Telegram Mini App authentication through validated `initData`. Optional browser/PWA sign-in uses Telegram Login (OIDC authorization code with PKCE).
 - Installable PWA manifest and service worker. Browser sign-in requires separate Telegram Login credentials; it is not enabled merely by setting a Mini App URL.
@@ -76,7 +76,6 @@ queue_bot/
     api.py                   Mini App HTTP API
     student_api.py           Student actions
     admin_api.py             Administrative actions
-    poll_api.py              Poll operations
     browser_auth.py          Optional browser login and sessions
     static/                  HTML, JS, CSS, icons, manifest, service worker
 data/

@@ -19,6 +19,7 @@ UK_TZ = ZoneInfo(config.TIMEZONE)
 
 
 def is_miniapp_poll(conn, poll_id: int) -> bool:
+    """Polls created before voting moved to Telegram; their votes live only in poll_votes."""
     return conn.execute("SELECT 1 FROM bot_state WHERE key = ? AND value = '1'", (f'miniapp_poll:{poll_id}',)).fetchone() is not None
 
 
@@ -34,40 +35,6 @@ def _poll_expired(poll) -> bool:
     if closing.tzinfo is None:
         closing = closing.replace(tzinfo=UK_TZ)
     return datetime.now(UK_TZ) >= closing
-
-
-async def _send_miniapp_invitation(bot, poll, chat_id):
-    from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
-    invitation = f"🗳 <b>{html.escape(poll['question'])}</b>\nГолосуйте в мініапці бота."
-    if chat_id > 0:
-        keyboard = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text='🗳 Голосувати', web_app=WebAppInfo(url=f'{config.MINI_APP_URL}?poll={poll["id"]}'))]])
-        await bot.send_message(chat_id, invitation, reply_markup=keyboard)
-    else:
-        # Telegram only supports web_app buttons in private conversations.
-        me = await bot.get_me()
-        username = getattr(me, 'username', None)
-        if not isinstance(username, str) or not username:
-            raise BotError('Не вдалося отримати посилання на бота.')
-        keyboard = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text='Відкрити бота', url=f'https://t.me/{username}')]])
-        await bot.send_message(chat_id, invitation + '\nВідкрийте бота та натисніть кнопку мініапки.', reply_markup=keyboard)
-
-
-async def _publish_miniapp_poll(bot, conn, poll):
-    # Persist voting channel before the first network await. No synthetic native
-    # poll instances: anonymous group totals must never mix channels.
-    conn.execute("INSERT INTO bot_state (key, value) VALUES (?, '1') ON CONFLICT (key) DO UPDATE SET value = excluded.value", (f'miniapp_poll:{poll["id"]}',))
-    targets = [get_group_chat_id(conn)] if poll['target'] == 'group' else get_active_user_ids(conn)
-    if not all(targets):
-        raise BotError('ID групового чату ще не налаштовано.')
-    success = errors = 0
-    for target in targets:
-        try:
-            await _send_miniapp_invitation(bot, poll, target)
-            success += 1
-        except Exception:
-            log.warning('Unable to deliver Mini App poll invitation', exc_info=True)
-            errors += 1
-    return success, errors
 
 
 def get_group_chat_id(conn) -> int | None:
@@ -401,9 +368,6 @@ async def publish_poll(bot: Bot, conn, poll_id: int) -> tuple[int, int]:
     if not poll:
         raise BotError("Опитування не знайдено.")
 
-    if config.MINI_APP_URL:
-        return await _publish_miniapp_poll(bot, conn, poll)
-
     options = json.loads(poll["options_json"])
     is_anon = bool(poll["is_anonymous"])
     allows_mult = bool(poll["allows_multiple"])
@@ -471,11 +435,8 @@ async def send_poll_to_single_user(bot: Bot, conn, poll_id: int, telegram_id: in
     if not poll or poll["status"] != "active" or _poll_expired(poll):
         raise BotError("Це опитування вже завершено.")
     if is_miniapp_poll(conn, poll_id):
-        try:
-            await _send_miniapp_invitation(bot, poll, telegram_id)
-            return True
-        except Exception:
-            return False
+        # Legacy Mini App ballots keep their web votes; a native ballot would mix channels.
+        return False
     options = json.loads(poll["options_json"])
     try:
         msg = await bot.send_poll(

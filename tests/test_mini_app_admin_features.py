@@ -53,7 +53,7 @@ async def test_group_returns_every_user_in_ukrainian_alphabetical_order(admin_cl
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('section', ['subjects', 'group', 'history', 'replacements', 'saturdays', 'owner', 'admins', 'bugs', 'proposals', 'polls'])
+@pytest.mark.parametrize('section', ['subjects', 'group', 'history', 'replacements', 'saturdays', 'owner', 'admins', 'bugs', 'proposals'])
 async def test_admin_sections_require_signed_current_role_and_admin_mode(admin_client, conn, section):
     path = '/api/miniapp/admin/manage/' + section
     assert (await admin_client.get(path)).status == 401
@@ -194,79 +194,78 @@ async def test_saturdays_admin_management_and_group_invitations(admin_client, co
     assert admins.is_admin(conn, 123456789012)
     assert (await post(admin_client, 'admins', {'action': 'remove', 'telegram_id': 100})).status == 400
     assert (await post(admin_client, 'admins', {'action': 'remove', 'telegram_id': 123456789012})).status == 200
-    assert (await post(admin_client, 'polls', {'action': 'group', 'chat_id': -1001234567890})).status == 200
-    result = await post(admin_client, 'polls', {'action': 'create', 'question': 'У групі?', 'options': ['Так', 'Ні'], 'target': 'group', 'is_anonymous': True, 'allows_multiple': False})
-    assert result.status == 200
-    pid = (await result.json())['poll_id']
-    assert polls.is_miniapp_poll(conn, pid)
-    assert (await (await admin_client.get(f'/api/miniapp/polls/{pid}', headers=headers(1))).json())['can_vote']
-    bot = admin_client.app[api.CONTEXT]['bot']
-    bot.send_poll.assert_not_awaited()
-    assert bot.send_message.call_args.kwargs['reply_markup'].inline_keyboard[0][0].url == 'https://t.me/test_bot'
+
+
+def native_bot(bot):
+    bot.send_poll.return_value = SimpleNamespace(message_id=5, poll=SimpleNamespace(id='tg-poll'))
+    return bot
 
 
 @pytest.mark.asyncio
-async def test_polls_new_delivery_shared_votes_privacy_and_deadlines(admin_client, conn):
-    result = await post(admin_client, 'polls', {'action': 'create', 'question': 'Коли?', 'options': ['Сьогодні', 'Завтра'], 'is_anonymous': True, 'allows_multiple': False, 'target': 'private'})
-    assert result.status == 200
-    pid = (await result.json())['poll_id']
-    assert polls.is_miniapp_poll(conn, pid)
-    bot = admin_client.app[api.CONTEXT]['bot']
-    bot.send_poll.assert_not_awaited()
-    path = f'/api/miniapp/polls/{pid}'
-    assert (await admin_client.post(path+'/vote', headers=headers(1), json={'options': [True]})).status == 400
-    assert (await admin_client.post(path+'/vote', headers=headers(1), json={'options': [0]})).status == 200
-    assert (await admin_client.post(path+'/vote', headers=headers(1), json={'options': [1]})).status == 200
-    details = await (await admin_client.get(path, headers=headers(1))).json()
-    assert details['results']['total_voters'] == 1 and details['my_options'] == [1]
-    assert all(not option['voters'] for option in details['results']['options'])
-    assert 'Студент Тестовий' not in str(details) and 'telegram_id' not in str(details)
-    conn.execute('UPDATE polls SET closes_at = ? WHERE id = ?', ((datetime.now(polls.UK_TZ)-timedelta(seconds=1)).isoformat(), pid))
-    assert (await admin_client.post(path+'/vote', headers=headers(1), json={'options': [0]})).status == 400
-    assert not (await (await admin_client.get(path, headers=headers(1))).json())['can_vote']
+async def test_mini_app_no_longer_serves_polls(admin_client):
+    for path in ('/api/miniapp/polls', '/api/miniapp/polls/1'):
+        assert (await admin_client.get(path, headers=headers(1))).status == 404
+    assert (await admin_client.post('/api/miniapp/polls/1/vote', headers=headers(1), json={'options': [0]})).status in (404, 405)
+    for result in (await admin_client.get('/api/miniapp/admin/manage/polls?mode=admin', headers=headers(100)),
+                   await post(admin_client, 'polls', {'action': 'create', 'question': 'Так?', 'options': ['Так', 'Ні'], 'target': 'private'})):
+        assert result.status == 400
+    assert 'group_chat_id' not in await (await admin_client.get('/api/miniapp/admin/manage/owner?mode=admin', headers=headers(100))).json()
 
 
 @pytest.mark.asyncio
-async def test_legacy_anonymous_group_readonly_and_native_identity_shared(admin_client, conn):
+@pytest.mark.parametrize('anonymous,multiple', [(True, False), (False, True)])
+async def test_group_poll_is_native_telegram_poll_even_with_mini_app(admin_client, conn, anonymous, multiple):
+    polls.set_group_chat_id(conn, -1001234567890)
+    bot = native_bot(admin_client.app[api.CONTEXT]['bot'])
+    pid = polls.create_poll(conn, 100, 'У групі?', ['Так', 'Ні'], anonymous, multiple, 'group')
+    assert await polls.publish_poll(bot, conn, pid) == (1, 0)
+    kwargs = bot.send_poll.call_args.kwargs
+    assert kwargs['chat_id'] == -1001234567890 and kwargs['options'] == ['Так', 'Ні']
+    assert kwargs['is_anonymous'] is anonymous and kwargs['allows_multiple_answers'] is multiple
+    assert not polls.is_miniapp_poll(conn, pid)
+    assert all('web_app' not in str(call) and 't.me/' not in str(call) for call in bot.send_message.call_args_list)
+    if not anonymous:
+        assert polls.record_poll_answer(conn, 'tg-poll', 1, 'Студент Тестовий', [0, 1]) == pid
+        assert polls.get_poll_results(conn, pid)['total_voters'] == 1
+
+
+@pytest.mark.asyncio
+async def test_private_poll_is_sent_as_native_ballot_to_each_student(admin_client, conn):
+    from queue_bot.services.updates import get_active_user_ids
+    bot = native_bot(admin_client.app[api.CONTEXT]['bot'])
+    pid = polls.create_poll(conn, 100, 'Коли?', ['Сьогодні', 'Завтра'], True, False, 'private')
+    sent, failed = await polls.publish_poll(bot, conn, pid)
+    assert sent == len(get_active_user_ids(conn)) == bot.send_poll.await_count and failed == 0
+
+
+@pytest.mark.asyncio
+async def test_legacy_mini_app_poll_keeps_votes_and_never_gets_native_ballot(admin_client, conn):
+    pid = polls.create_poll(conn, 100, 'Старе?', ['Так', 'Ні'], False)
+    conn.execute("INSERT INTO bot_state (key, value) VALUES (?, '1')", (f'miniapp_poll:{pid}',))
+    conn.execute("INSERT INTO poll_votes (poll_id, voter_telegram_id, voter_name, option_index) VALUES (?, 1, 'Студент Тестовий', 1)", (pid,))
+    bot = native_bot(admin_client.app[api.CONTEXT]['bot'])
+    assert await polls.send_poll_to_single_user(bot, conn, pid, 1) is False
+    bot.send_poll.assert_not_awaited()
+    assert [o['count'] for o in polls.get_poll_results(conn, pid)['options']] == [0, 1]
+    await polls.close_poll_and_summarize(bot, conn, pid)
+    assert polls.get_poll(conn, pid)['status'] == 'closed'
+    assert [o['count'] for o in polls.get_poll_results(conn, pid)['options']] == [0, 1]
+
+
+@pytest.mark.asyncio
+async def test_legacy_anonymous_group_counts_and_native_identity(admin_client, conn):
     pid = polls.create_poll(conn, 100, 'Питання', ['Так', 'Ні'], True, False, 'group')
     polls.register_poll_instance(conn, pid, -100, 1, 'anonymous')
     polls.record_poll_state_update(conn, 'anonymous', [3, 2])
-    path = f'/api/miniapp/polls/{pid}'
-    details = await (await admin_client.get(path, headers=headers(1))).json()
-    assert not details['can_vote'] and details['can_vote_reason']
-    assert details['results']['total_votes_cast'] == 5
-    assert (await admin_client.post(path+'/vote', headers=headers(1), json={'options': [0]})).status == 400
+    assert polls.get_poll_results(conn, pid)['total_votes_cast'] == 5
     pid = polls.create_poll(conn, 100, 'Питання', ['Так', 'Ні'], False)
     polls.register_poll_instance(conn, pid, 1, 2, 'identified')
     polls.record_poll_answer(conn, 'identified', 1, 'Native', [0])
-    assert (await admin_client.post(f'/api/miniapp/polls/{pid}/vote', headers=headers(1), json={'options': [1]})).status == 200
+    polls.record_poll_answer(conn, 'identified', 1, 'Native', [1])
     assert polls.get_poll_results(conn, pid)['total_voters'] == 1
     conn.execute('UPDATE polls SET closes_at = ? WHERE id = ?', ((datetime.now(polls.UK_TZ)-timedelta(seconds=1)).isoformat(), pid))
     assert polls.record_poll_answer(conn, 'identified', 1, 'Native', [0]) is None
     assert polls.record_poll_state_update(conn, 'identified', [5, 5]) is None
-
-
-@pytest.mark.asyncio
-async def test_old_private_anonymous_votes_share_identity_and_closed_votes_rejected(admin_client, conn):
-    pid = polls.create_poll(conn, 100, 'Питання', ['Так', 'Ні'], True)
-    polls.register_poll_instance(conn, pid, 1, 2, 'private-anonymous')
-    polls.record_poll_state_update(conn, 'private-anonymous', [1, 0])
-    path = f'/api/miniapp/polls/{pid}/vote'
-    assert (await admin_client.post(path, headers=headers(1), json={'options': [1]})).status == 200
-    assert polls.get_poll_results(conn, pid)['total_voters'] == 1
-    conn.execute("UPDATE polls SET status = 'closed' WHERE id = ?", (pid,))
-    assert (await admin_client.post(path, headers=headers(1), json={'options': [0]})).status == 400
-
-
-@pytest.mark.asyncio
-async def test_legacy_multiple_anonymous_group_does_not_invent_unique_voters(admin_client, conn):
-    pid = polls.create_poll(conn, 100, 'Питання', ['Так', 'Ні'], True, True, 'group')
-    polls.register_poll_instance(conn, pid, -100, 1, 'legacy-multiple')
-    polls.record_poll_state_update(conn, 'legacy-multiple', [3, 2])
-    result = await (await admin_client.get(f'/api/miniapp/polls/{pid}', headers=headers(1))).json()
-    assert result['results']['total_voters'] is None
-    assert result['results']['total_votes_cast'] == 5
-    assert [option['percent'] for option in result['results']['options']] == [None, None]
 
 
 @pytest.mark.asyncio
@@ -275,9 +274,12 @@ async def test_closing_legacy_private_anonymous_poll_preserves_web_vote(admin_cl
     pid = polls.create_poll(conn, 100, 'Питання', ['Так', 'Ні'], True)
     polls.register_poll_instance(conn, pid, 1, 2, 'old-private')
     polls.record_poll_state_update(conn, 'old-private', [1, 0])
-    assert (await admin_client.post(f'/api/miniapp/polls/{pid}/vote', headers=headers(1), json={'options': choices})).status == 200
+    # A ballot cast earlier through the removed Mini App vote endpoint.
+    conn.execute("INSERT INTO bot_state (key, value) VALUES (?, '1')", (f'poll_web_vote:{pid}:1',))
+    conn.execute('DELETE FROM poll_votes WHERE poll_id = ? AND voter_telegram_id = 1', (pid,))
+    for choice in choices:
+        conn.execute("INSERT INTO poll_votes (poll_id, voter_telegram_id, voter_name, option_index) VALUES (?, 1, '', ?)", (pid, choice))
     assert polls.has_miniapp_vote(conn, pid, 1)
-    # Even another native update before closing lacks a trustworthy timestamp.
     polls.record_poll_state_update(conn, 'old-private', [1, 0])
     bot = admin_client.app[api.CONTEXT]['bot']
     bot.stop_poll.return_value = SimpleNamespace(options=[SimpleNamespace(voter_count=1), SimpleNamespace(voter_count=0)])
