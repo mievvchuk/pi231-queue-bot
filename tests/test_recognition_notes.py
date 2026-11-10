@@ -161,3 +161,18 @@ async def test_full_table_rows_pick_only_target_group_and_header_slot(vision, mo
     first, fourth = (await recognize())['replacements']
     assert (first['lesson_number'], first['new_subject'], first['teacher'], first['room']) == (1, 'Людино-машинна взаємодія (ЛМВ)', 'Кондратюк Є.С.', '231')
     assert (fourth['lesson_number'], fourth['new_subject']) == (4, 'Понеділок третя')
+
+
+@pytest.mark.asyncio
+async def test_truncated_as_scheduled_old_subject_and_split_teacher_room(vision, monkeypatch):
+    data, recognize, source, client = vision
+    source['monday'] = [{'pair': 3, 'subject': 'Машинне навчання', 'teachers': [{'name': 'Барабаш Д.С.', 'room': '231а'}]}]
+    monkeypatch.setattr(schedule, 'load_schedule_data', lambda: source)
+    data.update(date='2026-10-30', scheduleOverrides=[], notes=['ЧЕТВЕРТІ ПАРИ ПРОВОДЯТЬСЯ ЗА РОЗКЛАДОМ 3-Ї пари ПОНЕДІЛКА (знаменник)'])
+    data.pop('replacements')
+    data['rows'] = [{'group': 'ПІ-231', 'lessons': '1-2', 'subject': 'По розклад', 'teacher': 'Новий', 'room': '241'}]
+    first, fourth = (await recognize())['replacements']
+    assert (first['new_subject'], first['old_subject'], first['teacher']) == ('Звичайна перша', 'Звичайна перша', 'Новий')
+    assert (fourth['teacher'], fourth['room'], fourth['old_subject']) == ('Барабаш Д.С.', '231а', 'Звичайна четверта')
+    prompt = client.post.call_args.kwargs['json']['messages'][0]['content'][0]['text']
+    assert 'Задніпровський' not in prompt

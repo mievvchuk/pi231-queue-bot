@@ -19,7 +19,7 @@ from queue_bot.services.errors import BotError
 log = logging.getLogger(__name__)
 
 # Bump when recognition changes: drafts dated today or later are recognized and asked about once more.
-RECOGNIZER_VERSION = 2
+RECOGNIZER_VERSION = 3
 
 
 def format_no_replacements(date_str):
