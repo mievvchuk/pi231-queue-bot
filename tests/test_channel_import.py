@@ -75,8 +75,9 @@ async def test_confirm_empty_clears_date_once(conn, monkeypatch):
     assert replacements.get_replacements(conn, date='2026-11-09') == []
     assert channel.get_state(conn, 'channel_draft:replacements_xpk:828')['status'] == 'confirmed'
     await confirm_channel_import(callback, conn)
-    assert broadcast.await_count == 1
-    assert broadcast.call_args.args[2] == "У групи ПІ-231 замін немає. 📅 09.11.2026"
+    assert broadcast.await_count == 2
+    assert broadcast.call_args_list[0].args[2] == "У групи ПІ-231 замін немає. 📅 09.11.2026"
+    assert 'Повний розклад із замінами' in broadcast.call_args_list[1].args[2]
 
 
 @pytest.mark.asyncio
@@ -145,9 +146,10 @@ async def test_edit_confirmed_result_requires_new_approval_and_updates_schedule(
     await asyncio.sleep(0)
     lessons, _ = schedule.get_actual_schedule(conn, schedule.load_schedule_data(), datetime.date(2026,11,9))
     assert any(item['subject'] == 'Виправлений предмет' for item in lessons)
-    assert 'Виправлення попередніх даних' in broadcast.call_args.args[2]
+    assert 'Виправлення попередніх даних' in broadcast.call_args_list[0].args[2]
+    assert 'Виправлений предмет' in broadcast.call_args_list[1].args[2]
     await confirm_channel_import(cb, conn)
-    assert broadcast.await_count == 1
+    assert broadcast.await_count == 2
 
 
 def test_schedule_shows_confirmed_empty_result_for_exact_date(conn):
@@ -210,3 +212,24 @@ async def test_full_table_without_group_rows_is_no_replacements(conn, monkeypatc
     monkeypatch.setattr(recognition.aiohttp, 'ClientSession', lambda: context)
     assert (await recognition.recognize_replacements_from_images([b'a'], conn=conn, allow_empty=True))['replacements'] == []
     assert channel.format_no_replacements('2026-11-09') == 'У групи ПІ-231 замін немає. 📅 09.11.2026'
+
+
+@pytest.mark.asyncio
+async def test_old_draft_for_upcoming_date_is_asked_again_once(conn, monkeypatch):
+    import datetime
+    upcoming = (datetime.date.today() + datetime.timedelta(days=2)).isoformat()
+    past = (datetime.date.today() - datetime.timedelta(days=5)).isoformat()
+    monkeypatch.setattr(channel, 'read_bounded', AsyncMock(side_effect=lambda _, url, limit: b'page' if url.startswith('https://t.me/s/') else b'\xff\xd8\xffimage'))
+    monkeypatch.setattr(channel, 'parse_posts', lambda *_: [dict(id=i, photos=['image'], url=f'https://t.me/replacements_xpk/{i}') for i in (830, 837)])
+    channel.set_state(conn, 'channel_cursor:replacements_xpk', 837)
+    channel.set_state(conn, 'channel_draft:replacements_xpk:830', dict(date=past, replacements=[], status='confirmed', notified=True))
+    channel.set_state(conn, 'channel_draft:replacements_xpk:837', dict(date=upcoming, replacements=[], status='confirmed', notified=True))
+    recognize = AsyncMock(return_value=dict(date=upcoming, replacements=[], confidence=.95))
+    monkeypatch.setattr(recognition, 'recognize_replacements_from_images', recognize)
+    bot = MagicMock(send_message=AsyncMock())
+    await channel.poll_once(bot, conn, None)
+    await channel.poll_once(bot, conn, None)
+    assert recognize.await_count == 1 and bot.send_message.await_count == 1
+    assert 'Повторне розпізнавання' in bot.send_message.call_args.args[1]
+    assert channel.get_state(conn, 'channel_draft:replacements_xpk:837')['status'] == 'pending'
+    assert channel.get_state(conn, 'channel_cursor:replacements_xpk') == 837

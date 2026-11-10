@@ -6,6 +6,7 @@ import json
 import logging
 import re
 from urllib.parse import urlparse
+from zoneinfo import ZoneInfo
 
 import aiohttp
 from bs4 import BeautifulSoup
@@ -16,6 +17,9 @@ from queue_bot.services import recognition, diagnostics
 from queue_bot.services.errors import BotError
 
 log = logging.getLogger(__name__)
+
+# Bump when recognition changes: drafts dated today or later are recognized and asked about once more.
+RECOGNIZER_VERSION = 2
 
 
 def format_no_replacements(date_str):
@@ -109,19 +113,28 @@ async def poll_once(bot, conn, session):
     cursor = get_state(conn, cursor_key)
     # First launch imports only the latest album, never the entire visible history.
     candidates = [p for p in posts if p['id'] > cursor] if cursor is not None else posts[-1:]
+    today = datetime.datetime.now(ZoneInfo(config.TIMEZONE)).date().isoformat()
+    stale = set()
+    for post in posts:
+        old = get_state(conn, f'channel_draft:{channel}:{post["id"]}')
+        if old and old.get('version', 1) < RECOGNIZER_VERSION and old.get('date', '') >= today:
+            stale.add(post['id'])
+    candidates = sorted({p['id']: p for p in candidates + [p for p in posts if p['id'] in stale]}.values(),
+                        key=lambda p: p['id'])
     for post in candidates:
         key = f'channel_draft:{channel}:{post["id"]}'
         draft = get_state(conn, key)
-        if draft is None:
+        if draft is None or post['id'] in stale:
             images = await download_post_images(session, post, channel)
             result = await recognition.recognize_replacements_from_images(
                 images, config.STUDENT_GROUP, conn, allow_empty=True)
             datetime.date.fromisoformat(result['date'])
-            draft = dict(result, source=post['url'], status='pending')
+            draft = dict(result, source=post['url'], status='pending', version=RECOGNIZER_VERSION)
             set_state(conn, key, draft)
         if not draft.get('notified'):
             from queue_bot.services.replacements import format_replacement
-            text = (f'📷 <a href="{post["url"]}">Новий допис із замінами</a>\n'
+            text = '🔁 <b>Повторне розпізнавання</b>\n' if post['id'] in stale else ''
+            text += (f'📷 <a href="{post["url"]}">Новий допис із замінами</a>\n'
                     f'📅 {datetime.date.fromisoformat(draft["date"]):%d.%m.%Y}\n\n')
             text += '\n\n'.join(format_replacement(r) for r in draft['replacements']) if draft['replacements'] else format_no_replacements(draft['date'])
             text += '\n\nПідтвердити цей результат і сповістити студентів?'
@@ -129,7 +142,7 @@ async def poll_once(bot, conn, session):
             await bot.send_message(config.OWNER_ID, text, reply_markup=keyboard)
             draft['notified'] = True
             set_state(conn, key, draft)
-        set_state(conn, cursor_key, post['id'])
+        set_state(conn, cursor_key, max(post['id'], get_state(conn, cursor_key) or 0))
         log.info('Channel post %s processed; approval draft delivered', post['id'])
 
 

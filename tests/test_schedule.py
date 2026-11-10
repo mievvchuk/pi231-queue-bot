@@ -4,14 +4,14 @@ import pytest
 from queue_bot.services import replacements, schedule
 
 
-def test_committed_schedule_has_fifth_pair_only_on_monday_and_thursday():
+def test_committed_schedule_has_no_fifth_pair_and_monday_starts_with_web():
     from pathlib import Path
     data = schedule.load_schedule_data(str(Path(__file__).resolve().parents[1] / 'data/schedule.json'))
     for parity in ('numerator', 'denominator'):
-        for day in ('monday', 'thursday'):
-            fifth = [item for item in schedule.get_base_schedule_for_day(data, day, parity) if item['number'] == 5]
-            assert len(fifth) == 1 and fifth[0]['subject'] == 'Програмування в Інтернет'
-        assert all(item['number'] != 5 for item in schedule.get_base_schedule_for_day(data, 'tuesday', parity))
+        for day in schedule.DAY_KEYS:
+            assert all(item['number'] != 5 for item in schedule.get_base_schedule_for_day(data, day, parity))
+        first = schedule.get_base_schedule_for_day(data, 'monday', parity)[0]
+        assert (first['number'], first['subject']) == (1, 'Програмування в Інтернет')
 
 
 def test_five_slots_preserve_gaps_and_have_exact_bell_times(conn):

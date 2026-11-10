@@ -832,7 +832,17 @@ async def confirm_channel_import(callback: CallbackQuery, conn):
     await callback.message.edit_text('✅ Підтверджено.\n\n' + text,
                                      reply_markup=approval_keyboard(post_id, confirmed=True))
     from queue_bot.services.updates import broadcast_message_to_users, get_active_user_ids
-    asyncio.create_task(broadcast_message_to_users(callback.bot, get_active_user_ids(conn), text))
+    full = schedule.format_schedule_for_date(conn, schedule.load_schedule_data(),
+                                             datetime.date.fromisoformat(draft['date']), config.STUDENT_GROUP)
+    notes = dict.fromkeys(r['source_note'] for r in draft['replacements'] if r.get('source_note'))
+    full = '🗓 <b>Повний розклад із замінами</b>\n\n' + full + ''.join(
+        f'\n\n📝 <b>Примітка:</b> {html.escape(str(n))}' for n in notes)
+    users = get_active_user_ids(conn)
+
+    async def send_both():
+        await broadcast_message_to_users(callback.bot, users, text)
+        await broadcast_message_to_users(callback.bot, users, full)
+    asyncio.create_task(send_both())
 
 
 class ChannelEditState(StatesGroup):
