@@ -349,7 +349,9 @@ async def recognize_replacements_from_images(images: list[bytes], group_name: st
                 })
 
     filtered = resolve_header_notes(result, date_str, group_name, filtered)
-    if not filtered and not (allow_empty and result.get("tableReadable") is True and result.get("noReplacements") is True and confidence >= 0.8 and not raw_replacements):
+    # With full rows the code itself knows the group is absent; the legacy format still needs noReplacements.
+    absent = bool(result.get("rows")) if "rows" in result else result.get("noReplacements") is True
+    if not filtered and not (allow_empty and result.get("tableReadable") is True and absent and confidence >= 0.8 and not raw_replacements):
         raise BotError(f"Для групи {group_name} замін на фото не знайдено.")
 
     return {
