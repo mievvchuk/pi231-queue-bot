@@ -260,7 +260,7 @@ Read [`CONTRIBUTING.md`](CONTRIBUTING.md) for PR conventions, release checks, ba
 за цю дату й повідомлення надсилається студентам. Помилки завантаження та
 нечіткі фото не вважаються відсутністю замін; бот повторює спробу.
 
-Налаштування: `REPLACEMENTS_CHANNEL=replacements_xpk`, `CHANNEL_POLL_SECONDS=300`
+Налаштування: `REPLACEMENTS_CHANNEL=replacements_xpk`, `CHANNEL_POLL_SECONDS=60`
 (мінімум 60 секунд). Порожній `REPLACEMENTS_CHANNEL` вимикає перевірку.
 Без ключа розпізнавання перевірка не запускається. Вебсторінка Telegram не є
 стабільним API: зміна розмітки може потребувати оновлення парсера.
