@@ -75,9 +75,8 @@ async def test_confirm_empty_clears_date_once(conn, monkeypatch):
     assert replacements.get_replacements(conn, date='2026-11-09') == []
     assert channel.get_state(conn, 'channel_draft:replacements_xpk:828')['status'] == 'confirmed'
     await confirm_channel_import(callback, conn)
-    assert broadcast.await_count == 2
+    assert broadcast.await_count == 1
     assert broadcast.call_args_list[0].args[2] == "У групи ПІ-231 замін немає. 📅 09.11.2026"
-    assert 'Повний розклад із замінами' in broadcast.call_args_list[1].args[2]
 
 
 @pytest.mark.asyncio
@@ -139,6 +138,8 @@ async def test_edit_confirmed_result_requires_new_approval_and_updates_schedule(
     broadcast = AsyncMock()
     monkeypatch.setattr(updates, 'broadcast_message_to_users', broadcast)
     monkeypatch.setattr(updates, 'get_active_user_ids', lambda _: [200])
+    from queue_bot.services.schedule_notifier import mark_sent_today
+    mark_sent_today(conn, 'evening_2026-11-08')
     cb = MagicMock(data='ch_yes:828', from_user=MagicMock(id=100), answer=AsyncMock())
     cb.message.edit_text = AsyncMock()
     await confirm_channel_import(cb, conn)
@@ -147,6 +148,7 @@ async def test_edit_confirmed_result_requires_new_approval_and_updates_schedule(
     lessons, _ = schedule.get_actual_schedule(conn, schedule.load_schedule_data(), datetime.date(2026,11,9))
     assert any(item['subject'] == 'Виправлений предмет' for item in lessons)
     assert 'Виправлення попередніх даних' in broadcast.call_args_list[0].args[2]
+    assert 'Повний розклад із замінами' in broadcast.call_args_list[1].args[2]
     assert 'Виправлений предмет' in broadcast.call_args_list[1].args[2]
     await confirm_channel_import(cb, conn)
     assert broadcast.await_count == 2

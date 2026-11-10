@@ -838,10 +838,15 @@ async def confirm_channel_import(callback: CallbackQuery, conn):
     full = '🗓 <b>Повний розклад із замінами</b>\n\n' + full + ''.join(
         f'\n\n📝 <b>Примітка:</b> {html.escape(str(n))}' for n in notes)
     users = get_active_user_ids(conn)
+    from queue_bot.services.schedule_notifier import has_sent_today
+    day_before = datetime.date.fromisoformat(draft['date']) - datetime.timedelta(days=1)
+    # Resend the timetable only if the 17:00 broadcast for that day already went out without these replacements.
+    resend = has_sent_today(conn, f'evening_{day_before.isoformat()}')
 
     async def send_both():
         await broadcast_message_to_users(callback.bot, users, text)
-        await broadcast_message_to_users(callback.bot, users, full)
+        if resend:
+            await broadcast_message_to_users(callback.bot, users, full)
     asyncio.create_task(send_both())
 
 
