@@ -179,6 +179,14 @@ def normalize_date_input(val: str) -> str:
 
 
 def render_main_preview(token: str, reps: list[dict], conf_pct: int | None = None) -> tuple[str, InlineKeyboardMarkup]:
+    if token.startswith("ch"):
+        body = ("\n\n────────────────\n\n".join(replacements.format_replacement(r) for r in reps)
+                if reps else "Замін немає.")
+        return f"✏️ <b>Виправлені заміни:</b>\n\n{body}", InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="💾 Зберегти виправлення", callback_data=f"ch_sv:{token[2:]}")],
+            [InlineKeyboardButton(text="✏️ Ще редагувати", callback_data=f"rec_ed:{token}"),
+             InlineKeyboardButton(text="➕ Додати пару", callback_data=f"rec_add:{token}")],
+        ])
     if not reps:
         text = "⚠️ Немає розпізнаних замін для збереження."
         markup = InlineKeyboardMarkup(
@@ -222,6 +230,8 @@ def render_corrections_menu(token: str, reps: list[dict]) -> tuple[str, InlineKe
                 [InlineKeyboardButton(text="🔙 Повернутися", callback_data=f"rec_done:{token}")],
             ]
         )
+        if token.startswith("ch"):
+            markup.inline_keyboard.insert(1, [InlineKeyboardButton(text="🚫 Замін немає — зберегти", callback_data=f"ch_sv:{token[2:]}")])
         return text, markup
 
     text = (
@@ -523,19 +533,52 @@ async def edit_field_prompt_handler(callback: CallbackQuery, state: FSMContext, 
     await state.set_state(EditReplacementState.waiting_for_value)
     await state.update_data(token=token, idx=idx, field=field, message_id=callback.message.message_id)
 
-    cancel_kb = InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text="↩️ Скасувати", callback_data=f"rec_it:{token}:{idx}")],
-        ]
-    )
+    choices = schedule_choices(field)
+    buttons = [InlineKeyboardButton(text=value[:40], callback_data=f"rec_pk:{token}:{idx}:{field}:{i}")
+               for i, value in enumerate(choices)]
+    rows = [buttons[i:i + 2] for i in range(0, len(buttons), 2)]
+    rows.append([InlineKeyboardButton(text="🧹 Очистити", callback_data=f"rec_pk:{token}:{idx}:{field}:-1"),
+                 InlineKeyboardButton(text="↩️ Скасувати", callback_data=f"rec_it:{token}:{idx}")])
     cur_val = r.get(field) or "не вказано"
     await callback.message.edit_text(
         f"✏️ <b>Редагування поля: {f_title}</b> (заміна #{idx + 1})\n\n"
         f"Поточне значення: <b>{html.escape(str(cur_val))}</b>\n\n"
-        "Надішліть нове значення в цей чат текстовим повідомленням 👇\n"
-        "<i>(надішліть «-» щоб очистити, або натисніть «↩️ Скасувати» нижче)</i>",
-        reply_markup=cancel_kb,
+        + ("Оберіть кнопкою або напишіть своє значення в чат 👇" if choices else "Напишіть нове значення в чат 👇"),
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
     )
+
+
+def schedule_choices(field: str) -> list[str]:
+    """Subjects, teachers or rooms from schedule.json, so values can be tapped instead of typed."""
+    days = schedule.load_schedule_data().values()
+    items = [x for day in days if isinstance(day, list) for x in day if isinstance(x, dict)]
+    if field in ("new_subject", "old_subject"):
+        values = [x.get("subject") for x in items]
+    elif field in ("teacher", "room"):
+        key = "name" if field == "teacher" else "room"
+        values = [t.get(key) for x in items for t in (x.get("teachers") or []) if isinstance(t, dict)]
+    else:
+        return []
+    return sorted({str(v) for v in values if v})[:30]
+
+
+@router.callback_query(F.data.startswith("rec_pk:"))
+async def pick_field_value_handler(callback: CallbackQuery, state: FSMContext, conn):
+    if not admins.is_admin(conn, callback.from_user.id):
+        await callback.answer("Тільки для адміністраторів.", show_alert=True)
+        return
+    _, token, idx_str, field, choice = callback.data.split(":")
+    reps = _PENDING_RECOGNITIONS.get(token)
+    idx, choice = int(idx_str), int(choice)
+    choices = schedule_choices(field)
+    if reps is None or idx >= len(reps) or choice >= len(choices) or field not in FIELD_NAMES_UK:
+        await callback.answer("Дані застаріли.", show_alert=True)
+        return
+    await state.clear()
+    reps[idx][field] = "" if choice < 0 else choices[choice]
+    await callback.answer("Збережено")
+    text, kb = render_item_edit_menu(token, idx, reps[idx])
+    await callback.message.edit_text(text, reply_markup=kb)
 
 
 @router.callback_query(F.data.startswith("rec_txtdate:"))
@@ -652,7 +695,14 @@ async def add_replacement_item_handler(callback: CallbackQuery, conn):
 
     last_pair = reps[-1].get("lesson_number", 0) if reps else 0
     next_pair = (last_pair + 1) if (isinstance(last_pair, int) and last_pair < 6) else 1
-    default_date = reps[0].get("date") if reps else working_days.get_next_working_day_key(conn)
+    if reps:
+        default_date = reps[0].get("date")
+    elif token.startswith("ch"):
+        from queue_bot.services.channel_import import get_state
+        draft = get_state(conn, f"channel_draft:{config.REPLACEMENTS_CHANNEL}:{token[2:]}") or {}
+        default_date = (draft.get("edit") or draft).get("date") or working_days.get_next_working_day_key(conn)
+    else:
+        default_date = working_days.get_next_working_day_key(conn)
 
     new_item = {
         "date": default_date,
@@ -850,13 +900,12 @@ async def confirm_channel_import(callback: CallbackQuery, conn):
     asyncio.create_task(send_both())
 
 
-class ChannelEditState(StatesGroup):
-    waiting_for_text = State()
-
-
 @router.callback_query(F.data.startswith('ch_edit:'))
 async def edit_channel_result(callback: CallbackQuery, state: FSMContext, conn):
+    """Channel drafts reuse the button editor of photo recognitions (phone-friendly, no separators)."""
+    import copy
     from queue_bot.services.channel_import import get_state
+    await state.clear()
     if callback.from_user.id != config.OWNER_ID or not admins.is_admin(conn, callback.from_user.id):
         await callback.answer('Тільки для власника бота.', show_alert=True)
         return
@@ -865,45 +914,33 @@ async def edit_channel_result(callback: CallbackQuery, state: FSMContext, conn):
     if not draft:
         await callback.answer('Дані не знайдено.', show_alert=True)
         return
-    value = draft.get('edit') or draft
-    lines = [datetime.date.fromisoformat(value['date']).strftime('%d.%m.%Y')]
-    lines += [f"{r['lesson_number']} | {r['new_subject']} | {r.get('teacher') or '-'} | {r.get('room') or '-'}" for r in value['replacements']]
-    if not value['replacements']:
-        lines.append('немає')
-    await state.set_state(ChannelEditState.waiting_for_text)
-    await state.update_data(channel_post_id=post_id)
+    token = f'ch{post_id}'
+    _PENDING_RECOGNITIONS[token] = copy.deepcopy((draft.get('edit') or draft)['replacements'])
     await callback.answer()
-    await callback.message.answer('✏️ Надішліть виправлені дані одним повідомленням. Перший рядок — дата, далі кожна пара: '
-                                  '<b>номер | предмет | викладач | аудиторія</b>. Якщо замін немає — слово «немає».\n'
-                                  'Щоб скасувати, надішліть /cancel.\n\n<code>' + html.escape('\n'.join(lines)) + '</code>')
+    text, kb = render_corrections_menu(token, _PENDING_RECOGNITIONS[token])
+    await callback.message.answer(text, reply_markup=kb)
 
 
-@router.message(_private_only, ChannelEditState.waiting_for_text, F.text)
-async def save_channel_edit(message: Message, state: FSMContext, conn):
-    from queue_bot.services.channel_import import get_state, set_state, parse_edit, approval_keyboard, format_no_replacements
-    if message.from_user.id != config.OWNER_ID or not admins.is_admin(conn, message.from_user.id):
-        await state.clear()
+@router.callback_query(F.data.startswith('ch_sv:'))
+async def save_channel_edit(callback: CallbackQuery, conn):
+    from queue_bot.services.channel_import import get_state, set_state, approval_keyboard, format_no_replacements
+    if callback.from_user.id != config.OWNER_ID or not admins.is_admin(conn, callback.from_user.id):
+        await callback.answer('Тільки для власника бота.', show_alert=True)
         return
-    if message.text.strip().lower() in {'/cancel', 'скасувати'}:
-        await state.clear()
-        await message.answer('Редагування скасовано. Збережені дані не змінено.')
-        return
-    try:
-        edited = parse_edit(message.text)
-    except BotError as error:
-        await message.answer(html.escape(str(error)))
-        return
-    post_id = (await state.get_data())['channel_post_id']
+    post_id = callback.data.split(':', 1)[1]
     key = f'channel_draft:{config.REPLACEMENTS_CHANNEL}:{post_id}'
     draft = get_state(conn, key)
-    if not draft:
-        await state.clear()
-        await message.answer('Дані не знайдено.')
+    reps = _PENDING_RECOGNITIONS.pop(f'ch{post_id}', None)
+    if not draft or reps is None:
+        await callback.answer('Дані застаріли. Натисніть «✏️ Редагувати» ще раз.', show_alert=True)
         return
-    draft['edit'] = edited
+    # shortcut: one post is one day; the first pair's date wins if pairs were given different dates.
+    day = reps[0]['date'] if reps else (draft.get('edit') or draft)['date']
+    for item in reps:
+        item.update(date=day, group_name=config.STUDENT_GROUP)
+    draft['edit'] = dict(date=day, replacements=reps)
     set_state(conn, key, draft)
-    await state.clear()
-    text = ('\n\n'.join(replacements.format_replacement(r) for r in edited['replacements'])
-            if edited['replacements'] else format_no_replacements(edited['date']))
-    await message.answer('✏️ <b>Перевірте виправлення перед збереженням:</b>\n\n' + text,
-                         reply_markup=approval_keyboard(post_id))
+    text = ('\n\n'.join(replacements.format_replacement(r) for r in reps) if reps else format_no_replacements(day))
+    await callback.answer()
+    await callback.message.edit_text('✏️ <b>Перевірте виправлення перед збереженням:</b>\n\n' + text,
+                                     reply_markup=approval_keyboard(post_id))

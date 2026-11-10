@@ -242,14 +242,13 @@ async def recognize_replacements_from_images(images: list[bytes], group_name: st
         '  "scheduleOverrides": [{"targetPair":4,"sourceDay":"thursday","sourcePair":1,"weekType":"denominator","text":"точна примітка з фото"}],\n'
         '  "unparsedNotes": [],\n'
         '  "headerWeekType": "denominator",\n'
-        '  "notes": ["ЧЕТВЕРТІ ПАРИ ПРОВОДЯТЬСЯ ЗА РОЗКЛАДОМ 3-Ї пари ПОНЕДІЛКА (знаменник)"],\n'
+        '  "notes": ["<дослівний текст примітки над таблицею>"],\n'
         '  "rows": [\n'
-        '    {"group": "КІ-231", "lessons": "1-2", "replaced": "", "subject": "Системне програм", "teacher": "Задніпровський", "room": "232"},\n'
-        '    {"group": "", "lessons": "7-8", "replaced": "Шимків", "subject": "Немає пари", "teacher": "", "room": ""},\n'
-        f'    {{"group": "{group_name}", "lessons": "1-2", "replaced": "", "subject": "ЛМВ", "teacher": "Кондратюк", "room": "231"}}\n'
+        '    {"group": "<група або порожньо>", "lessons": "<№>", "replaced": "<кого замінили>", "subject": "<предмет>", "teacher": "<викладач>", "room": "<ауд.>"}\n'
         '  ]\n'
         '}\n'
-        'scheduleOverrides і notes у прикладі заповнюй лише за реальною приміткою; без неї поверни []. rows — усі рядки таблиці.'
+        'Значення в кутових дужках — лише шаблон: заповни їх тим, що реально видно на фото, нічого не копіюй із шаблону. '
+        'scheduleOverrides і notes — лише за реальною приміткою; без неї []. rows — усі рядки таблиці.'
     )
 
     if allow_empty:
@@ -275,7 +274,9 @@ async def recognize_replacements_from_images(images: list[bytes], group_name: st
                     {"type": "text", "text": prompt},
                     *[{
                         "type": "image_url",
-                        "image_url": {"url": 'data:image/jpeg;base64,' + base64.b64encode(part).decode('ascii')},
+                        # Dense tables are unreadable at the default downscaled resolution.
+                        "image_url": {"url": 'data:image/jpeg;base64,' + base64.b64encode(part).decode('ascii'),
+                                      **({} if provider_name == "Groq" else {"detail": "high"})},
                     } for part in images],
                 ],
             }
