@@ -114,13 +114,28 @@ async def test_cdn_failure_never_advances_cursor_or_calls_ocr(conn, monkeypatch)
     recognize.assert_not_awaited()
 
 
-def test_edit_parser_validates_and_allows_empty():
-    assert channel.parse_edit('09.11.2026\nнемає') == dict(date='2026-11-09', replacements=[])
-    result = channel.parse_edit('09.11.2026\n2 | Машинне навчання | Ковальчук | 231')
-    assert result['replacements'][0]['lesson_number'] == 2
-    for value in ['31.02.2026\nнемає', '09.11.2026', '09.11.2026\n9 | X | - | -', '09.11.2026\n2 | X | - | -\n2 | Y | - | -']:
-        with pytest.raises(BotError):
-            channel.parse_edit(value)
+@pytest.mark.asyncio
+async def test_phone_editor_edits_channel_draft_with_buttons(conn, monkeypatch):
+    from queue_bot.handlers import schedule as handlers
+    monkeypatch.setattr(config, 'OWNER_ID', 100)
+    monkeypatch.setattr(handlers.admins, 'is_admin', lambda *_: True)
+    item = dict(date='2026-11-11', group_name='ПІ-231', lesson_number=3, new_subject='Системне програм', teacher='Задніпровський', room='232')
+    channel.set_state(conn, 'channel_draft:replacements_xpk:837', dict(date='2026-11-11', replacements=[item], status='pending'))
+    cb = lambda data: MagicMock(data=data, from_user=MagicMock(id=100), answer=AsyncMock(),
+                                message=MagicMock(answer=AsyncMock(), edit_text=AsyncMock()))
+    state = MagicMock(clear=AsyncMock())
+    await handlers.edit_channel_result(cb('ch_edit:837'), state, conn)
+    subjects = handlers.schedule_choices('new_subject')
+    pick = subjects.index('Машинне навчання')
+    await handlers.pick_field_value_handler(cb(f'rec_pk:ch837:0:new_subject:{pick}'), state, conn)
+    await handlers.pick_field_value_handler(cb('rec_pk:ch837:0:room:-1'), state, conn)
+    await handlers.set_pair_number_handler(cb('rec_sp:ch837:0:4'), conn)
+    saved = cb('ch_sv:837')
+    await handlers.save_channel_edit(saved, conn)
+    edit = channel.get_state(conn, 'channel_draft:replacements_xpk:837')['edit']
+    assert edit['date'] == '2026-11-11'
+    assert [(r['lesson_number'], r['new_subject'], r['room']) for r in edit['replacements']] == [(4, 'Машинне навчання', '')]
+    assert saved.message.edit_text.call_args.kwargs['reply_markup'].inline_keyboard[0][0].callback_data == 'ch_yes:837'
 
 
 @pytest.mark.asyncio
@@ -130,7 +145,8 @@ async def test_edit_confirmed_result_requires_new_approval_and_updates_schedule(
     monkeypatch.setattr(config, 'OWNER_ID', 100)
     key = 'channel_draft:replacements_xpk:828'
     draft = dict(date='2026-11-09', replacements=[], status='confirmed', source='https://t.me/replacements_xpk/828')
-    draft['edit'] = channel.parse_edit('09.11.2026\n1 | Виправлений предмет | Викладач | 123')
+    draft['edit'] = dict(date='2026-11-09', replacements=[dict(date='2026-11-09', group_name='ПІ-231', lesson_number=1,
+                         new_subject='Виправлений предмет', teacher='Викладач', room='123', old_subject=None)])
     channel.set_state(conn, key, draft)
     # Editing a confirmed result must leave the published timetable unchanged.
     assert channel.confirmed_results(conn, '2026-11-09')[0]['replacements'] == []

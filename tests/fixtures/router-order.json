@@ -214,8 +214,7 @@
       "process_field_value_text",
       "export_schedule_file",
       "export_schedule_file",
-      "handle_document_upload",
-      "save_channel_edit"
+      "handle_document_upload"
     ],
     "callback_query": [
       "reject_recognition",
@@ -224,13 +223,15 @@
       "open_item_edit_handler",
       "finish_corrections_handler",
       "edit_field_prompt_handler",
+      "pick_field_value_handler",
       "edit_custom_date_prompt",
       "set_pair_number_handler",
       "set_date_value_handler",
       "delete_replacement_item_handler",
       "add_replacement_item_handler",
       "confirm_channel_import",
-      "edit_channel_result"
+      "edit_channel_result",
+      "save_channel_edit"
     ]
   },
   {
