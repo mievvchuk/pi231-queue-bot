@@ -28,7 +28,7 @@ async def test_poll_persists_draft_and_does_not_repeat(conn, monkeypatch):
     await channel.poll_once(bot, conn, None)
     assert recognize.await_count == 1
     assert bot.send_message.await_count == 1
-    assert 'На 09.11.2026 замін немає для ПІ-231.' in bot.send_message.call_args.args[1]
+    assert 'У групи ПІ-231 замін немає. 📅 09.11.2026' in bot.send_message.call_args.args[1]
     assert channel.get_state(conn, 'channel_draft:replacements_xpk:828')['status'] == 'pending'
     assert conn.execute('SELECT COUNT(*) FROM replacements').fetchone()[0] == 0
 
@@ -76,7 +76,7 @@ async def test_confirm_empty_clears_date_once(conn, monkeypatch):
     assert channel.get_state(conn, 'channel_draft:replacements_xpk:828')['status'] == 'confirmed'
     await confirm_channel_import(callback, conn)
     assert broadcast.await_count == 1
-    assert broadcast.call_args.args[2] == "На 09.11.2026 замін немає для ПІ-231."
+    assert broadcast.call_args_list[0].args[2] == "У групи ПІ-231 замін немає. 📅 09.11.2026"
 
 
 @pytest.mark.asyncio
@@ -138,6 +138,8 @@ async def test_edit_confirmed_result_requires_new_approval_and_updates_schedule(
     broadcast = AsyncMock()
     monkeypatch.setattr(updates, 'broadcast_message_to_users', broadcast)
     monkeypatch.setattr(updates, 'get_active_user_ids', lambda _: [200])
+    from queue_bot.services.schedule_notifier import mark_sent_today
+    mark_sent_today(conn, 'evening_2026-11-08')
     cb = MagicMock(data='ch_yes:828', from_user=MagicMock(id=100), answer=AsyncMock())
     cb.message.edit_text = AsyncMock()
     await confirm_channel_import(cb, conn)
@@ -145,9 +147,11 @@ async def test_edit_confirmed_result_requires_new_approval_and_updates_schedule(
     await asyncio.sleep(0)
     lessons, _ = schedule.get_actual_schedule(conn, schedule.load_schedule_data(), datetime.date(2026,11,9))
     assert any(item['subject'] == 'Виправлений предмет' for item in lessons)
-    assert 'Виправлення попередніх даних' in broadcast.call_args.args[2]
+    assert 'Виправлення попередніх даних' in broadcast.call_args_list[0].args[2]
+    assert 'Повний розклад із замінами' in broadcast.call_args_list[1].args[2]
+    assert 'Виправлений предмет' in broadcast.call_args_list[1].args[2]
     await confirm_channel_import(cb, conn)
-    assert broadcast.await_count == 1
+    assert broadcast.await_count == 2
 
 
 def test_schedule_shows_confirmed_empty_result_for_exact_date(conn):
@@ -155,8 +159,8 @@ def test_schedule_shows_confirmed_empty_result_for_exact_date(conn):
     from queue_bot.services import schedule
     channel.set_state(conn, 'channel_draft:replacements_xpk:828', dict(date='2026-11-09', replacements=[], status='confirmed'))
     data = schedule.load_schedule_data()
-    assert 'На 09.11.2026 замін немає для ПІ-231.' in schedule.format_schedule_for_date(conn, data, datetime.date(2026,11,9))
-    assert 'замін немає для' not in schedule.format_schedule_for_date(conn, data, datetime.date(2026,11,10))
+    assert 'У групи ПІ-231 замін немає. 📅 09.11.2026' in schedule.format_schedule_for_date(conn, data, datetime.date(2026,11,9))
+    assert 'замін немає' not in schedule.format_schedule_for_date(conn, data, datetime.date(2026,11,10))
 
 
 @pytest.mark.asyncio
@@ -169,7 +173,7 @@ async def test_replacements_menu_shows_empty_date_and_edit_button(conn, monkeypa
     channel.set_state(conn, 'channel_draft:replacements_xpk:828', dict(date='2026-11-09', replacements=[], status='confirmed'))
     message = MagicMock(chat=MagicMock(type='private'), from_user=MagicMock(id=100), answer=AsyncMock())
     await show_replacements(message, conn)
-    assert 'На 09.11.2026 замін немає для ПІ-231.' in message.answer.call_args.args[0]
+    assert 'У групи ПІ-231 замін немає. 📅 09.11.2026' in message.answer.call_args.args[0]
     assert 'надішліть фотографію' not in message.answer.call_args.args[0]
     assert message.answer.call_args.kwargs['reply_markup'].inline_keyboard[0][0].callback_data == 'ch_edit:828'
 
@@ -191,3 +195,43 @@ async def test_next_date_confirmation_archives_previous_even_if_new_date_has_no_
     await asyncio.sleep(0)
     assert replacements.get_replacements(conn, date='2026-11-09') == []
     assert replacements.get_archived_replacements(conn)[0]['new_subject'] == 'Попередня заміна'
+
+
+@pytest.mark.asyncio
+async def test_full_table_without_group_rows_is_no_replacements(conn, monkeypatch):
+    monkeypatch.setattr(config, 'RECOGNITION_API_KEY', 'test-key')
+    monkeypatch.setattr(config, 'RECOGNITION_PROVIDER', 'openai')
+    result = dict(date='2026-11-09', confidence=.95, tableReadable=True, notes=[], scheduleOverrides=[],
+                  rows=[{'group': 'КІ-231', 'lessons': '1-2', 'subject': 'Системне програм'}])
+    response = MagicMock(status=200)
+    response.json = AsyncMock(return_value={'choices':[{'message':{'content':json.dumps(result)}}]})
+    request = MagicMock()
+    request.__aenter__ = AsyncMock(return_value=response)
+    session = MagicMock()
+    session.post.return_value = request
+    context = MagicMock()
+    context.__aenter__ = AsyncMock(return_value=session)
+    monkeypatch.setattr(recognition.aiohttp, 'ClientSession', lambda: context)
+    assert (await recognition.recognize_replacements_from_images([b'a'], conn=conn, allow_empty=True))['replacements'] == []
+    assert channel.format_no_replacements('2026-11-09') == 'У групи ПІ-231 замін немає. 📅 09.11.2026'
+
+
+@pytest.mark.asyncio
+async def test_old_draft_for_upcoming_date_is_asked_again_once(conn, monkeypatch):
+    import datetime
+    upcoming = (datetime.date.today() + datetime.timedelta(days=2)).isoformat()
+    past = (datetime.date.today() - datetime.timedelta(days=5)).isoformat()
+    monkeypatch.setattr(channel, 'read_bounded', AsyncMock(side_effect=lambda _, url, limit: b'page' if url.startswith('https://t.me/s/') else b'\xff\xd8\xffimage'))
+    monkeypatch.setattr(channel, 'parse_posts', lambda *_: [dict(id=i, photos=['image'], url=f'https://t.me/replacements_xpk/{i}') for i in (830, 837)])
+    channel.set_state(conn, 'channel_cursor:replacements_xpk', 837)
+    channel.set_state(conn, 'channel_draft:replacements_xpk:830', dict(date=past, replacements=[], status='confirmed', notified=True))
+    channel.set_state(conn, 'channel_draft:replacements_xpk:837', dict(date=upcoming, replacements=[], status='confirmed', notified=True))
+    recognize = AsyncMock(return_value=dict(date=upcoming, replacements=[], confidence=.95))
+    monkeypatch.setattr(recognition, 'recognize_replacements_from_images', recognize)
+    bot = MagicMock(send_message=AsyncMock())
+    await channel.poll_once(bot, conn, None)
+    await channel.poll_once(bot, conn, None)
+    assert recognize.await_count == 1 and bot.send_message.await_count == 1
+    assert 'Повторне розпізнавання' in bot.send_message.call_args.args[1]
+    assert channel.get_state(conn, 'channel_draft:replacements_xpk:837')['status'] == 'pending'
+    assert channel.get_state(conn, 'channel_cursor:replacements_xpk') == 837

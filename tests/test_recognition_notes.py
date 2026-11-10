@@ -126,3 +126,38 @@ async def test_malformed_model_fields_receive_helpful_error(vision, field, value
     data[field] = value
     with pytest.raises(BotError):
         await recognize()
+
+
+@pytest.mark.parametrize('text,expected', [
+    ('ЧЕТВЕРТІ ПАРИ ПРОВОДЯТЬСЯ ЗА РОЗКЛАДОМ 3-Ї пари ПОНЕДІЛКА (знаменник)', (4, 'monday', 3, 'denominator')),
+    ('4-ті пари проводяться за розкладом четверга / перша пара / знаменник', (4, 'thursday', 1, 'denominator')),
+    ("Другі пари проводяться за розкладом п’ятниці 5 пари", (2, 'friday', 5, 'numerator')),
+])
+def test_header_note_parsed_by_code(text, expected):
+    o = recognition.parse_header_note(text, 'numerator')
+    assert (o['targetPair'], o['sourceDay'], o['sourcePair'], o['weekType']) == expected
+    assert recognition.parse_header_note('Черговий викладач: Фрімерштейн Г.О.') is None
+
+
+def test_hours_and_group_cells():
+    assert [recognition.lesson_pairs(h) for h in ('1-2', '3-4', '5-6', '7-8', '9-10', '3-6', '')] == [[1], [2], [3], [4], [5], [2, 3], []]
+    assert recognition.expand_groups('КІ-251,252,253') == {recognition.normalize_group(g) for g in ('КІ-251', 'КІ-252', 'КІ-253')}
+
+
+@pytest.mark.asyncio
+async def test_full_table_rows_pick_only_target_group_and_header_slot(vision, monkeypatch):
+    data, recognize, source, _ = vision
+    source['monday'] = [{'pair': 3, 'subject': 'Понеділок третя', 'teacher': 'Викладач Пн', 'room': '231', 'week_type': 'denominator'}]
+    monkeypatch.setattr(schedule, 'load_schedule_data', lambda: source)
+    data.update(date='2026-11-11', scheduleOverrides=[], headerWeekType='denominator',
+                notes=['ЧЕТВЕРТІ ПАРИ ПРОВОДЯТЬСЯ ЗА РОЗКЛАДОМ 3-Ї пари ПОНЕДІЛКА (знаменник)'])
+    data.pop('replacements')
+    data['rows'] = [
+        {'group': 'КІ-231', 'lessons': '1-2', 'subject': 'Системне програм', 'teacher': 'Задніпровський', 'room': '232'},
+        {'group': '', 'lessons': '7-8', 'replaced': 'Шимків', 'subject': 'Немає пари'},
+        {'group': 'ПІ-231', 'lessons': '1-2', 'subject': 'ЛМВ', 'teacher': 'Кондратюк', 'room': '231'},
+        {'group': 'ПІ-232', 'lessons': '7-8', 'replaced': 'Багас', 'subject': 'Проект.інтерфейс', 'teacher': 'Атаман', 'room': '235'},
+    ]
+    first, fourth = (await recognize())['replacements']
+    assert (first['lesson_number'], first['new_subject'], first['teacher'], first['room']) == (1, 'Людино-машинна взаємодія (ЛМВ)', 'Кондратюк Є.С.', '231')
+    assert (fourth['lesson_number'], fourth['new_subject']) == (4, 'Понеділок третя')

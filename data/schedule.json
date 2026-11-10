@@ -1,6 +1,16 @@
 {
   "monday": [
     {
+      "pair": 1,
+      "lessons": "1-2",
+      "subject": "Програмування в Інтернет",
+      "teachers": [
+        { "name": "Когут В.С.", "room": "231а" },
+        { "name": "Барабаш Д.С.", "room": "235" }
+      ],
+      "week_type": "both"
+    },
+    {
       "pair": 2,
       "lessons": "3-4",
       "subject": "Людино-машинна взаємодія",
@@ -25,16 +35,6 @@
       "subject": "Філософія",
       "teachers": [
         { "name": "Багас Л.М.", "room": "129" }
-      ],
-      "week_type": "both"
-    },
-    {
-      "pair": 5,
-      "lessons": "9-10",
-      "subject": "Програмування в Інтернет",
-      "teachers": [
-        { "name": "Когут В.С.", "room": "231а" },
-        { "name": "Барабаш Д.С.", "room": "235" }
       ],
       "week_type": "both"
     }
@@ -132,16 +132,6 @@
     {
       "pair": 3,
       "lessons": "5-6",
-      "subject": "Програмування в Інтернет",
-      "teachers": [
-        { "name": "Когут В.С.", "room": "231а" },
-        { "name": "Барабаш Д.С.", "room": null }
-      ],
-      "week_type": "both"
-    },
-    {
-      "pair": 5,
-      "lessons": "9-10",
       "subject": "Програмування в Інтернет",
       "teachers": [
         { "name": "Когут В.С.", "room": "231а" },
