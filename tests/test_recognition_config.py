@@ -43,4 +43,4 @@ async def test_payment_required_explains_balance_and_request_caps_tokens(monkeyp
     monkeypatch.setattr(recognition.aiohttp, 'ClientSession', lambda: session_context)
     with pytest.raises(BotError, match='закінчились кошти'):
         await recognition.recognize_replacements_from_image(b'offline-test')
-    assert session.post.call_args.kwargs['json']['max_tokens'] == 6000
+    assert session.post.call_args.kwargs['json']['max_tokens'] == 900

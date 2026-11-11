@@ -119,12 +119,16 @@ async def poll_once(bot, conn, session):
         old = get_state(conn, f'channel_draft:{channel}:{post["id"]}')
         if old and old.get('version', 1) < RECOGNIZER_VERSION and old.get('date', '') >= today:
             stale.add(post['id'])
-    candidates = sorted({p['id']: p for p in candidates + [p for p in posts if p['id'] in stale]}.values(),
-                        key=lambda p: p['id'])
+    # New posts first, then one-time re-asks; at most one AI request per poll (free tiers limit tokens per minute).
+    candidates = candidates + [p for p in posts if p['id'] in stale and p not in candidates]
+    recognized = False
     for post in candidates:
         key = f'channel_draft:{channel}:{post["id"]}'
         draft = get_state(conn, key)
         if draft is None or post['id'] in stale:
+            if recognized:
+                break
+            recognized = True
             images = await download_post_images(session, post, channel)
             result = await recognition.recognize_replacements_from_images(
                 images, config.STUDENT_GROUP, conn, allow_empty=True)

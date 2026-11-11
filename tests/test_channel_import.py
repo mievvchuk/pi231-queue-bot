@@ -217,8 +217,7 @@ async def test_next_date_confirmation_archives_previous_even_if_new_date_has_no_
 async def test_full_table_without_group_rows_is_no_replacements(conn, monkeypatch):
     monkeypatch.setattr(config, 'RECOGNITION_API_KEY', 'test-key')
     monkeypatch.setattr(config, 'RECOGNITION_PROVIDER', 'openai')
-    result = dict(date='2026-11-09', confidence=.95, tableReadable=True, notes=[], scheduleOverrides=[],
-                  rows=[{'group': 'КІ-231', 'lessons': '1-2', 'subject': 'Системне програм'}])
+    result = dict(date='2026-11-09', confidence=.95, tableReadable=True, noReplacements=True, notes=[], scheduleOverrides=[], rows=[])
     response = MagicMock(status=200)
     response.json = AsyncMock(return_value={'choices':[{'message':{'content':json.dumps(result)}}]})
     request = MagicMock()
@@ -251,3 +250,17 @@ async def test_old_draft_for_upcoming_date_is_asked_again_once(conn, monkeypatch
     assert 'Повторне розпізнавання' in bot.send_message.call_args.args[1]
     assert channel.get_state(conn, 'channel_draft:replacements_xpk:837')['status'] == 'pending'
     assert channel.get_state(conn, 'channel_cursor:replacements_xpk') == 837
+
+
+@pytest.mark.asyncio
+async def test_one_ai_request_per_poll_newest_first(conn, monkeypatch):
+    monkeypatch.setattr(channel, 'read_bounded', AsyncMock(side_effect=lambda _, url, limit: b'page' if url.startswith('https://t.me/s/') else b'\xff\xd8\xffimage'))
+    monkeypatch.setattr(channel, 'parse_posts', lambda *_: [dict(id=i, photos=['image'], url=f'https://t.me/replacements_xpk/{i}') for i in (840, 841)])
+    channel.set_state(conn, 'channel_cursor:replacements_xpk', 839)
+    recognize = AsyncMock(return_value=dict(date='2026-11-12', replacements=[], confidence=.95))
+    monkeypatch.setattr(recognition, 'recognize_replacements_from_images', recognize)
+    bot = MagicMock(send_message=AsyncMock())
+    await channel.poll_once(bot, conn, None)
+    assert recognize.await_count == 1 and channel.get_state(conn, 'channel_cursor:replacements_xpk') == 840
+    await channel.poll_once(bot, conn, None)
+    assert recognize.await_count == 2 and channel.get_state(conn, 'channel_cursor:replacements_xpk') == 841
