@@ -283,6 +283,8 @@ async def recognize_replacements_from_images(images: list[bytes], group_name: st
         ],
         "response_format": {"type": "json_object"},
         "temperature": 0.1,
+        # OpenRouter reserves credit for max_tokens; the model's default (16k+) fails with 402 on a small balance.
+        "max_tokens": 6000,
     }
 
     try:
@@ -291,7 +293,15 @@ async def recognize_replacements_from_images(images: list[bytes], group_name: st
                 if resp.status != 200:
                     err_body = await resp.text()
                     log.error(f"{provider_name} API error {resp.status}: {err_body}")
-                    raise BotError(f"Помилка {provider_name} API ({resp.status}). Спробуйте пізніше або надішліть чіткіше фото.")
+                    reasons = {
+                        401: "ключ RECOGNITION_API_KEY недійсний або видалений",
+                        402: "на балансі провайдера (OpenRouter) закінчились кошти — поповніть кредити",
+                        403: "ключу заборонено доступ до цієї моделі",
+                        404: "модель OPENAI_MODEL не знайдено — перевірте назву",
+                        429: "перевищено ліміт запитів, повторю пізніше",
+                    }
+                    reason = reasons.get(resp.status, "спробуйте пізніше або надішліть чіткіше фото")
+                    raise BotError(f"Помилка {provider_name} API ({resp.status}): {reason}.")
                 data = await resp.json()
                 content = data["choices"][0]["message"]["content"]
                 result = json.loads(content)
