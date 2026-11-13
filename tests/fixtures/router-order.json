@@ -190,6 +190,8 @@
       "admin_parity_working_saturday",
       "admin_set_parity_working_saturday",
       "admin_cancel_working_saturday",
+      "admin_pairs_working_saturday",
+      "admin_set_pairs_working_saturday",
       "admin_view_working_saturday_schedule",
       "admin_other_working_saturdays",
       "admin_goto_working_saturday",

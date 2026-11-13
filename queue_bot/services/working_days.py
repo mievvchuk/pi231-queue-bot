@@ -81,6 +81,11 @@ def set_working_saturday(
     )
 
 
+def set_working_saturday_pairs(conn, date_str: str, pairs_count: int | None) -> None:
+    """None = усі пари дня-донора."""
+    conn.execute("UPDATE working_saturdays SET pairs_count = ? WHERE date = ?", (pairs_count, date_str))
+
+
 def remove_working_saturday(conn, date_str: str) -> bool:
     ensure_working_saturdays_table(conn)
     cur = conn.execute("DELETE FROM working_saturdays WHERE date = ?", (date_str,))
