@@ -169,6 +169,9 @@ def get_actual_schedule(conn, schedule_data: dict, dt: date, group_name: str = "
         effective_day_key = ws["replaces_day"]
         effective_w_type = ws.get("week_type") or get_week_type(dt)
         base = get_base_schedule_for_day(schedule_data, effective_day_key, effective_w_type)
+        if ws.get("pairs_count"):
+            kept = sorted({int(l.get("number", 0)) for l in base})[:int(ws["pairs_count"])]
+            base = [l for l in base if int(l.get("number", 0)) in kept]
     else:
         base = get_base_schedule(schedule_data, dt)
 
@@ -230,6 +233,8 @@ def format_schedule_for_date(conn, schedule_data: dict, dt: date, group_name: st
             f"📅 <b>{day_uk}, {date_formatted}</b> ({ws_wtype_uk})\n"
             f"🏢 <b>Робоча субота за розкладом: {rep_day_uk}</b>"
         )
+        if ws.get("pairs_count"):
+            header += f"\n🔢 Пар у цю суботу: <b>{ws['pairs_count']}</b>"
     else:
         header = f"📅 <b>{day_uk}, {date_formatted}</b> ({w_type_uk})"
 

@@ -54,3 +54,15 @@ async def test_stale_telegram_controls_cannot_change_archived_history(conn, monk
     row=working_days.get_working_saturday(conn,'2026-10-31')
     assert row is not None and row['replaces_day']=='monday' and row['week_type']=='denominator'
     assert 'архів' in callback.answer.await_args.args[0].lower()
+
+
+def test_pairs_count_keeps_first_pairs_and_survives_day_change(conn):
+    data = {'monday': [{'pair': n, 'subject': f'P{n}'} for n in (2, 3, 4, 5)]}
+    working_days.set_working_saturday(conn, '2026-11-14', 'monday')
+    working_days.set_working_saturday_pairs(conn, '2026-11-14', 2)
+    working_days.set_working_saturday(conn, '2026-11-14', 'monday', 'numerator')
+    lessons, _ = schedule.get_actual_schedule(conn, data, date(2026, 11, 14))
+    assert [l['number'] for l in lessons] == [2, 3]
+    working_days.set_working_saturday_pairs(conn, '2026-11-14', None)
+    lessons, _ = schedule.get_actual_schedule(conn, data, date(2026, 11, 14))
+    assert len(lessons) == 4

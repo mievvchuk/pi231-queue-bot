@@ -95,6 +95,7 @@ async def render_working_saturday_panel(event: Message | CallbackQuery, conn, sa
             f"🏢 <b>Робоча субота — {date_formatted}</b>\n\n"
             f"• Статус: 🟢 <b>Робочий день</b>\n"
             f"• Працюємо за розкладом: <b>{rep_day_uk}</b> ({w_type_uk})\n"
+            f"• Кількість пар: <b>{ws.get('pairs_count') or 'усі за розкладом'}</b>\n"
             f"• {lessons_summary}\n"
             f"• {reps_summary}\n\n"
             "<i>Щоб змінити день або скасувати робочу суботу, скористайтеся кнопками нижче:</i>"
@@ -107,6 +108,9 @@ async def render_working_saturday_panel(event: Message | CallbackQuery, conn, sa
             [
                 InlineKeyboardButton(text="✏️ Змінити день тижня", callback_data=f"ws_pick:{date_str}"),
                 InlineKeyboardButton(text="🔄 Тип тижня", callback_data=f"ws_par:{date_str}"),
+            ],
+            [
+                InlineKeyboardButton(text="🔢 Кількість пар", callback_data=f"ws_cnt:{date_str}"),
             ],
             [
                 InlineKeyboardButton(text="🏖 Зробити вихідним (скасувати)", callback_data=f"ws_cancel:{date_str}"),
@@ -242,6 +246,39 @@ async def admin_set_parity_working_saturday(callback: CallbackQuery, conn):
         await callback.answer(f"Тип тижня: {par_uk}!")
     sat_date = date.fromisoformat(date_str)
     await render_working_saturday_panel(callback, conn, sat_date)
+
+
+
+async def admin_pairs_working_saturday(callback: CallbackQuery, conn):
+    date_str = callback.data.split(":", 1)[1]
+    date_formatted = date.fromisoformat(date_str).strftime("%d.%m.%Y")
+    kb = [
+        [InlineKeyboardButton(text=str(n), callback_data=f"ws_setcnt:{date_str}:{n}") for n in range(1, 4)],
+        [InlineKeyboardButton(text=str(n), callback_data=f"ws_setcnt:{date_str}:{n}") for n in range(4, 7)],
+        [InlineKeyboardButton(text="📋 Усі за розкладом", callback_data=f"ws_setcnt:{date_str}:all")],
+        [InlineKeyboardButton(text="🔙 Скасувати", callback_data=f"ws_back:{date_str}")],
+    ]
+    await callback.answer()
+    await callback.message.edit_text(
+        f"🔢 <b>Скільки пар буде в суботу {date_formatted}?</b>\n"
+        "<i>Залишаться перші пари з розкладу обраного дня.</i>",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=kb),
+    )
+
+
+
+async def admin_set_pairs_working_saturday(callback: CallbackQuery, conn):
+    _, date_str, value = callback.data.split(":")
+    from queue_bot.services.working_days import is_saturday_archived, get_working_saturday, set_working_saturday_pairs
+    if is_saturday_archived(date_str):
+        await callback.answer("Ця субота вже в архіві. Запис доступний лише для перегляду.", show_alert=True)
+        return
+    if get_working_saturday(conn, date_str):
+        pairs = None if value == "all" else int(value)
+        set_working_saturday_pairs(conn, date_str, pairs)
+        admins.log_action(conn, callback.from_user.id, "set_working_saturday_pairs", f"date={date_str} pairs={value}")
+        await callback.answer(f"Кількість пар: {pairs or 'усі'}!")
+    await render_working_saturday_panel(callback, conn, date.fromisoformat(date_str))
 
 
 

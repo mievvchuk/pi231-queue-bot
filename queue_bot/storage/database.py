@@ -449,6 +449,7 @@ class PGConnectionWrapper:
             cur.execute(PG_SCHEMA)
             cur.execute('ALTER TABLE lesson_attendance ADD COLUMN IF NOT EXISTS turn_due BIGINT;')
             cur.execute('ALTER TABLE users ADD COLUMN IF NOT EXISTS deleted_at TEXT;')
+            cur.execute('ALTER TABLE working_saturdays ADD COLUMN IF NOT EXISTS pairs_count INTEGER;')
             cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_blocked BOOLEAN NOT NULL DEFAULT FALSE;")
             cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS banned_until TEXT DEFAULT NULL;")
             cur.execute("ALTER TABLE queue_entries ADD COLUMN IF NOT EXISTS lab_count INTEGER DEFAULT NULL CHECK (lab_count IS NULL OR lab_count BETWEEN 1 AND 20);")
@@ -546,6 +547,8 @@ def connect(db_target: str):
     # Як ADD COLUMN IF NOT EXISTS у Postgres: без нового номера, бо тести рахують MIGRATIONS з кінця
     if 'coursework_priority' not in {row[1] for row in conn.execute('PRAGMA table_info(queue_entries)')}:
         conn.execute('ALTER TABLE queue_entries ADD COLUMN coursework_priority INTEGER NOT NULL DEFAULT 0')
+    if 'pairs_count' not in {row[1] for row in conn.execute('PRAGMA table_info(working_saturdays)')}:
+        conn.execute('ALTER TABLE working_saturdays ADD COLUMN pairs_count INTEGER')
     return conn
 
 
