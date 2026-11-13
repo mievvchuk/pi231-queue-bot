@@ -62,6 +62,20 @@ async def admin_upload_schedule_action(message: Message):
 
 
 
+def format_saturday_pairs(lessons: list[dict]) -> str:
+    import html
+    by_number: dict[int, list[dict]] = {}
+    for lesson in lessons:
+        by_number.setdefault(int(lesson['number']), []).append(lesson)
+    lines = []
+    for number, items in sorted(by_number.items()):
+        time_part = f" ({items[0]['startTime']}–{items[0]['endTime']})" if items[0].get('startTime') else ""
+        subjects = " / ".join(html.escape(i.get('subject', '')) for i in items)
+        lines.append(f"⏰ <b>{number} пара</b>{time_part} — {subjects}")
+    return "\n".join(lines) + "\n" if lines else ""
+
+
+
 async def admin_working_saturday_btn(message: Message, conn):
     from queue_bot.services.working_days import get_next_saturday
     sat = get_next_saturday()
@@ -381,7 +395,8 @@ async def admin_broadcast_working_saturday_prompt(callback: CallbackQuery, conn)
         f"📢 <b>Увага! Оголошення щодо робочої суботи</b>\n\n"
         f"🗓 <b>Субота, {date_formatted}</b> — навчальний день!\n"
         f"• Навчання проходитиме за розкладом: <b>{rep_day_uk}</b> ({w_type_uk})\n"
-        f"• Кількість пар: <b>{len(actual_lessons)}</b>{reps_note}\n\n"
+        f"• Кількість пар: <b>{len({l['number'] for l in actual_lessons})}</b>{reps_note}\n"
+        f"{format_saturday_pairs(actual_lessons)}\n"
         "💡 <i>Актуальний розклад занять та заміни можна переглянути за допомогою кнопки «📅 Розклад» або команди /schedule.</i>"
     )
 
@@ -435,7 +450,8 @@ async def admin_broadcast_working_saturday_send(callback: CallbackQuery, conn):
         f"📢 <b>Увага! Оголошення щодо робочої суботи</b>\n\n"
         f"🗓 <b>Субота, {date_formatted}</b> — навчальний день!\n"
         f"• Навчання проходитиме за розкладом: <b>{rep_day_uk}</b> ({w_type_uk})\n"
-        f"• Кількість пар: <b>{len(actual_lessons)}</b>{reps_note}\n\n"
+        f"• Кількість пар: <b>{len({l['number'] for l in actual_lessons})}</b>{reps_note}\n"
+        f"{format_saturday_pairs(actual_lessons)}\n"
         "💡 <i>Актуальний розклад занять та заміни можна переглянути за допомогою кнопки «📅 Розклад» або команди /schedule.</i>"
     )
 
