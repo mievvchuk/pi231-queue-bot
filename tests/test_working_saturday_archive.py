@@ -66,3 +66,14 @@ def test_pairs_count_keeps_first_pairs_and_survives_day_change(conn):
     working_days.set_working_saturday_pairs(conn, '2026-11-14', None)
     lessons, _ = schedule.get_actual_schedule(conn, data, date(2026, 11, 14))
     assert len(lessons) == 4
+
+
+def test_saturday_announcement_lists_pairs():
+    from queue_bot.handlers.admin.schedule import format_saturday_pairs
+    text = format_saturday_pairs([
+        {'number': 2, 'subject': 'Веб', 'startTime': '10:00', 'endTime': '11:20'},
+        {'number': 2, 'subject': 'Бази <даних>', 'startTime': '10:00', 'endTime': '11:20'},
+        {'number': 3, 'subject': 'ООП', 'startTime': '', 'endTime': ''},
+    ])
+    assert text == ('⏰ <b>2 пара</b> (10:00–11:20) — Веб / Бази &lt;даних&gt;\n'
+                    '⏰ <b>3 пара</b> — ООП\n')
