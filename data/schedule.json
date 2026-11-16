@@ -1,16 +1,6 @@
 {
   "monday": [
     {
-      "pair": 1,
-      "lessons": "1-2",
-      "subject": "Програмування в Інтернет",
-      "teachers": [
-        { "name": "Когут В.С.", "room": "231а" },
-        { "name": "Барабаш Д.С.", "room": "235" }
-      ],
-      "week_type": "both"
-    },
-    {
       "pair": 2,
       "lessons": "3-4",
       "subject": "Людино-машинна взаємодія",
@@ -51,15 +41,6 @@
       "week_type": "both"
     },
     {
-      "pair": 2,
-      "lessons": "3-4",
-      "subject": "Фізичне виховання",
-      "teachers": [
-        { "name": "Бельський А.В.", "room": null }
-      ],
-      "week_type": "both"
-    },
-    {
       "pair": 3,
       "lessons": "5-6",
       "subject": "Машинне навчання",
@@ -76,15 +57,6 @@
         { "name": "Багас Л.М.", "room": "122" }
       ],
       "week_type": "numerator"
-    },
-    {
-      "pair": 4,
-      "lessons": "7-8",
-      "subject": "Проєкт інтерфейсів користувача",
-      "teachers": [
-        { "name": "Атаман В.О.", "room": "221" }
-      ],
-      "week_type": "denominator"
     }
   ],
   "wednesday": [
@@ -117,15 +89,6 @@
       "teachers": [
         { "name": "Кондратюк Є.С.", "room": "231" },
         { "name": "Щуцький С.В.", "room": "243а" }
-      ],
-      "week_type": "both"
-    },
-    {
-      "pair": 2,
-      "lessons": "3-4",
-      "subject": "Проєкт інтерфейсів користувача",
-      "teachers": [
-        { "name": "Атаман В.О.", "room": "231" }
       ],
       "week_type": "both"
     },

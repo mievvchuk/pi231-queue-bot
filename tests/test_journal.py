@@ -110,7 +110,7 @@ def test_dates_are_explicit_owner_only_and_journal_covers_schedule_subjects(conn
     with pytest.raises(BotError):
         journal.set_date(conn,100,SUBJECTS,{**values,'due_date':'2026-02-30'})
     names = {s['name'] for s in journal.catalog(SUBJECTS)}
-    assert {'Фізичне виховання','Філософія'} <= names
+    assert 'Філософія' in names  # comes from the timetable only, not from subjects.json
 
 
 def test_periods_are_separate_and_queue_completion_does_not_approve_grades(conn, make_user):
