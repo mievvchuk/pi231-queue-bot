@@ -17,7 +17,7 @@
 - `MINI_APP_URL`: HTTPS-адреса цього самого Render-сервісу, наприклад `https://your-bot.onrender.com/app/`. Додає запуск Mini App з меню та додатковою кнопкою в головному меню; наявні кнопки залишаються. Без нового ключа або окремої бази. Порожнє значення не додає кнопку. Покроково: [MINI_APP.md](MINI_APP.md).
 - `GROUP_CHAT_ID`: ID групи; значення, збережене через меню бота в базі, має пріоритет.
 - `STUDENT_GROUP`, `TZ`, `NOTIFICATION_TIME`: група, часовий пояс і час вечірнього розкладу. Поточні типові значення: ПІ-231, Europe/Kyiv, 17:00.
-- `RECOGNITION_PROVIDER`: auto / groq / openai / disabled. `auto` зберігає попередній вибір за префіксом ключа. Для явно обраного провайдера задайте його ключ у `RECOGNITION_API_KEY`; старий `OPENAI_API_KEY` також підтримується.
+- `RECOGNITION_PROVIDER`: auto / groq / openai / ocr / disabled. `ocr` читає таблицю замін без ШІ і без ключа (OpenCV + RapidOCR на сервері, ~10 с на фото; модель ~8 МБ завантажується з modelscope.cn при першому розпізнаванні); це типовий вибір, якщо ключ не задано. `auto` зберігає попередній вибір за префіксом ключа. Для явно обраного провайдера задайте його ключ у `RECOGNITION_API_KEY`; старий `OPENAI_API_KEY` також підтримується.
 - `GROQ_MODEL`, `OPENAI_MODEL`, `GROQ_API_URL`, `OPENAI_API_URL`, `RECOGNITION_TIMEOUT_SECONDS`: параметри сервісу розпізнавання. У шаблоні залишено попередні моделі, автоматичної зміни моделі немає.
 - `HTTP_HOST`, `PORT`, `LOG_LEVEL`: параметри процесу. На Render не замінюйте PORT, який надає платформа.
 - `POLLING_RETRY_SECONDS`, `POLLS_WATCH_INTERVAL`, `SCHEDULE_CHECK_INTERVAL`: інтервали повтору та перевірки фонових задач.

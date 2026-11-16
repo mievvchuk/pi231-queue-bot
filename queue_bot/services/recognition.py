@@ -1,3 +1,4 @@
+import asyncio
 import base64
 import json
 import logging
@@ -96,10 +97,17 @@ def rows_to_replacements(rows: list[dict], group_name: str) -> list[dict]:
         pairs = lesson_pairs(row.get("lessons"))
         if not pairs:
             raise BotError(f"Не вдалося прочитати номер пари «{row.get('lessons')}» для {group_name}. Внесіть заміну вручну.")
+        subject = row.get("subject")
+        if NO_LESSON.match(str(subject or "")):
+            subject = "Немає пари"  # a removed pair is written the same way whatever the photo said
         for pair in pairs:
-            picked.append({"group": group_name, "lessonNumber": pair, "newSubject": row.get("subject"),
+            picked.append({"group": group_name, "lessonNumber": pair, "newSubject": subject,
                            "teacher": row.get("teacher"), "room": row.get("room")})
     return picked
+
+
+# 'Немає пари', 'Нема пари', 'Пари немає' and OCR-damaged 'Немає паон'.
+NO_LESSON = re.compile(r"^\s*(нема\w*\s+па\w*|пар\w*\s+нема\w*)\s*\.?\s*$", re.IGNORECASE)
 
 
 ORDINALS = (("перш", 1), ("друг", 2), ("трет", 3), ("четверт", 4), ("п'ят", 5))
@@ -185,27 +193,13 @@ async def recognize_replacements_from_image(image_bytes: bytes, group_name: str 
     return await recognize_replacements_from_images([image_bytes], group_name=group_name, conn=conn)
 
 
-async def recognize_replacements_from_images(images: list[bytes], group_name: str = "ПІ-231", conn=None, *, allow_empty: bool = False) -> dict:
-    """Recognize one table split across one or two photos in one API request."""
-    if (not isinstance(images, (list, tuple)) or not 1 <= len(images) <= 2
-            or any(not isinstance(part, bytes) or not part for part in images)):
-        raise BotError('Надішліть одне або два непорожні фото таблиці замін.')
+async def _ask_ai(images: list[bytes], group_name: str, next_work_date: str, allow_empty: bool) -> dict:
     api_key = config.RECOGNITION_API_KEY
-    if not api_key or config.RECOGNITION_PROVIDER == "disabled":
+    if not api_key:
         raise BotError(
-            "⚠️ Автоматичне розпізнавання фото наразі вимкнено (не налаштовано RECOGNITION_API_KEY в .env).\n"
-            "Зверніться до адміністратора для активації ключа Groq або OpenAI."
+            "⚠️ Розпізнавання через ШІ не налаштовано (немає RECOGNITION_API_KEY в .env).\n"
+            "Встановіть RECOGNITION_PROVIDER=ocr, щоб читати таблиці без ШІ."
         )
-
-    try:
-        from queue_bot.services.working_days import get_next_working_day_key
-        next_work_date = get_next_working_day_key(conn)
-    except Exception:
-        from datetime import datetime, timedelta
-        from zoneinfo import ZoneInfo
-        now_dt = datetime.now(ZoneInfo(config.TIMEZONE)).date()
-        next_work_date = (now_dt + timedelta(days=1)).strftime("%Y-%m-%d")
-
     prompt = (
         f"Проаналізуй фотографію таблиці замін занять для групи '{group_name}'.\n"
         "Може бути 1 або 2 фото ЧАСТИН ОДНІЄЇ таблиці. Розглянь усі зображення разом незалежно від порядку. Дата і примітки можуть бути на одному фото, а рядки групи — на іншому.\n"
@@ -311,6 +305,31 @@ async def recognize_replacements_from_images(images: list[bytes], group_name: st
     except Exception as e:
         log.exception(f"Error calling {provider_name} API for recognition: {e}")
         raise BotError(f"Не вдалося обробити зображення: {e}")
+    return result
+
+
+async def recognize_replacements_from_images(images: list[bytes], group_name: str = "ПІ-231", conn=None, *, allow_empty: bool = False) -> dict:
+    """Recognize one table split across one or two photos in one API request."""
+    if (not isinstance(images, (list, tuple)) or not 1 <= len(images) <= 2
+            or any(not isinstance(part, bytes) or not part for part in images)):
+        raise BotError('Надішліть одне або два непорожні фото таблиці замін.')
+    if config.RECOGNITION_PROVIDER == "disabled":
+        raise BotError("⚠️ Автоматичне розпізнавання фото вимкнено (RECOGNITION_PROVIDER=disabled).")
+
+    try:
+        from queue_bot.services.working_days import get_next_working_day_key
+        next_work_date = get_next_working_day_key(conn)
+    except Exception:
+        from datetime import datetime, timedelta
+        from zoneinfo import ZoneInfo
+        now_dt = datetime.now(ZoneInfo(config.TIMEZONE)).date()
+        next_work_date = (now_dt + timedelta(days=1)).strftime("%Y-%m-%d")
+
+    if config.RECOGNITION_PROVIDER == "ocr":
+        from queue_bot.services import table_ocr
+        result = await asyncio.to_thread(table_ocr.recognize, list(images), group_name)
+    else:
+        result = await _ask_ai(images, group_name, next_work_date, allow_empty)
 
     if not isinstance(result, dict):
         raise BotError('ШІ повернув некоректний формат таблиці. Повторіть розпізнавання.')
