@@ -44,3 +44,28 @@ async def test_payment_required_explains_balance_and_request_caps_tokens(monkeyp
     with pytest.raises(BotError, match='закінчились кошти'):
         await recognition.recognize_replacements_from_image(b'offline-test')
     assert session.post.call_args.kwargs['json']['max_tokens'] == 900
+
+
+@pytest.mark.asyncio
+async def test_nvidia_key_selects_nvidia_endpoint_without_json_mode_and_accepts_fenced_json(monkeypatch):
+    monkeypatch.setattr(config, 'RECOGNITION_API_KEY', 'nvapi-test')
+    monkeypatch.setattr(config, 'RECOGNITION_PROVIDER', 'auto')
+    monkeypatch.setattr(config, 'NVIDIA_API_URL', 'https://example.invalid/nvidia')
+    monkeypatch.setattr(config, 'NVIDIA_MODEL', 'vision-model')
+    content = '```json\n{"date":"2026-10-26","confidence":0.99,"replacements":[{"group":"ПІ-231","lessonNumber":1,"newSubject":"Тест"}]}\n```'
+    response = MagicMock(status=200)
+    response.json = AsyncMock(return_value={'choices': [{'message': {'content': content}}]})
+    response_context = MagicMock()
+    response_context.__aenter__ = AsyncMock(return_value=response)
+    session = MagicMock()
+    session.post.return_value = response_context
+    session_context = MagicMock()
+    session_context.__aenter__ = AsyncMock(return_value=session)
+    monkeypatch.setattr(recognition.aiohttp, 'ClientSession', lambda: session_context)
+    await recognition.recognize_replacements_from_image(b'offline-test')
+    args, kwargs = session.post.call_args
+    assert args[0] == 'https://example.invalid/nvidia'
+    assert kwargs['json']['model'] == 'vision-model'
+    assert 'response_format' not in kwargs['json']
+    image = kwargs['json']['messages'][0]['content'][1]['image_url']
+    assert 'detail' not in image

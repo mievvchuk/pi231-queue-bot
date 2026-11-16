@@ -79,6 +79,8 @@ GROQ_API_URL = os.getenv('GROQ_API_URL', 'https://api.groq.com/openai/v1/chat/co
 GROQ_MODEL = os.getenv('GROQ_MODEL', 'qwen/qwen3.8-27b')
 OPENAI_API_URL = os.getenv('OPENAI_API_URL', 'https://api.openai.com/v1/chat/completions')
 OPENAI_MODEL = os.getenv('OPENAI_MODEL', 'gpt-4o-mini')
+NVIDIA_API_URL = os.getenv('NVIDIA_API_URL', 'https://integrate.api.nvidia.com/v1/chat/completions')
+NVIDIA_MODEL = os.getenv('NVIDIA_MODEL', 'meta/llama-3.2-90b-vision-instruct')
 RECOGNITION_TIMEOUT_SECONDS = integer('RECOGNITION_TIMEOUT_SECONDS', 45, 1, 300)
 RECOGNITION_MAX_TOKENS = integer('RECOGNITION_MAX_TOKENS', 900, 300, 32000)
 
@@ -86,9 +88,16 @@ RECOGNITION_MAX_TOKENS = integer('RECOGNITION_MAX_TOKENS', 900, 300, 32000)
 def recognition_settings():
     provider = RECOGNITION_PROVIDER
     if provider == 'auto':
-        provider = 'groq' if RECOGNITION_API_KEY.startswith('gsk_') else 'openai'
+        if RECOGNITION_API_KEY.startswith('gsk_'):
+            provider = 'groq'
+        elif RECOGNITION_API_KEY.startswith('nvapi-'):
+            provider = 'nvidia'
+        else:
+            provider = 'openai'
     if provider == 'groq':
         return GROQ_API_URL, GROQ_MODEL, 'Groq'
+    if provider == 'nvidia':
+        return NVIDIA_API_URL, NVIDIA_MODEL, 'NVIDIA'
     return OPENAI_API_URL, OPENAI_MODEL, 'OpenAI'
 
 
@@ -136,9 +145,9 @@ def validate_runtime():
         raise RuntimeError('NOTIFICATION_TIME must use HH:MM')
     if LOG_LEVEL not in {'DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'}:
         raise RuntimeError('LOG_LEVEL must be DEBUG, INFO, WARNING, ERROR or CRITICAL')
-    if RECOGNITION_PROVIDER not in {'disabled', 'auto', 'groq', 'openai', 'ocr'}:
-        raise RuntimeError('RECOGNITION_PROVIDER must be disabled, auto, groq, openai or ocr')
-    if RECOGNITION_PROVIDER in {'groq', 'openai'} and not RECOGNITION_API_KEY:
+    if RECOGNITION_PROVIDER not in {'disabled', 'auto', 'groq', 'openai', 'nvidia', 'ocr'}:
+        raise RuntimeError('RECOGNITION_PROVIDER must be disabled, auto, groq, openai, nvidia or ocr')
+    if RECOGNITION_PROVIDER in {'groq', 'openai', 'nvidia'} and not RECOGNITION_API_KEY:
         raise RuntimeError('Set RECOGNITION_API_KEY or disable recognition')
     if GROUP_CHAT_ID and not GROUP_CHAT_ID.lstrip('-').isdigit():
         raise RuntimeError('GROUP_CHAT_ID must be a Telegram chat ID')

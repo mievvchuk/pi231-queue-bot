@@ -271,12 +271,13 @@ async def _ask_ai(images: list[bytes], group_name: str, next_work_date: str, all
                         "type": "image_url",
                         # Dense tables are unreadable at the default downscaled resolution.
                         "image_url": {"url": 'data:image/jpeg;base64,' + base64.b64encode(part).decode('ascii'),
-                                      **({} if provider_name == "Groq" else {"detail": "high"})},
+                                      **({"detail": "high"} if provider_name == "OpenAI" else {})},
                     } for part in images],
                 ],
             }
         ],
-        "response_format": {"type": "json_object"},
+        # NVIDIA vision models may reject JSON mode; the prompt already demands bare JSON.
+        **({} if provider_name == "NVIDIA" else {"response_format": {"type": "json_object"}}),
         "temperature": 0.1,
         # Groq free tier counts max_tokens against 1000 output tokens/min; OpenRouter reserves credit for it.
         "max_tokens": config.RECOGNITION_MAX_TOKENS,
@@ -292,14 +293,16 @@ async def _ask_ai(images: list[bytes], group_name: str, next_work_date: str, all
                         401: "ключ RECOGNITION_API_KEY недійсний або видалений",
                         402: "на балансі провайдера (OpenRouter) закінчились кошти — поповніть кредити",
                         403: "ключу заборонено доступ до цієї моделі",
-                        404: "модель OPENAI_MODEL не знайдено — перевірте назву",
+                        404: f"модель {model_name} не знайдено — перевірте {provider_name.upper()}_MODEL",
                         429: "перевищено ліміт запитів, повторю пізніше",
                     }
                     reason = reasons.get(resp.status, "спробуйте пізніше або надішліть чіткіше фото")
                     raise BotError(f"Помилка {provider_name} API ({resp.status}): {reason}.")
                 data = await resp.json()
                 content = data["choices"][0]["message"]["content"]
-                result = json.loads(content)
+                # Without JSON mode some models wrap the answer in ```json fences.
+                fenced = re.fullmatch(r"\s*```(?:json)?\s*(.*?)\s*```\s*", content, re.DOTALL)
+                result = json.loads(fenced[1] if fenced else content)
     except BotError:
         raise
     except Exception as e:
