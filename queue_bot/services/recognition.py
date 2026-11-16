@@ -278,6 +278,8 @@ async def _ask_ai(images: list[bytes], group_name: str, next_work_date: str, all
         ],
         # NVIDIA vision models may reject JSON mode; the prompt already demands bare JSON.
         **({} if provider_name == "NVIDIA" else {"response_format": {"type": "json_object"}}),
+        # Nemotron reasoning models otherwise spend the whole max_tokens thinking and return content=null.
+        **({"chat_template_kwargs": {"enable_thinking": False}} if provider_name == "NVIDIA" else {}),
         "temperature": 0.1,
         # Groq free tier counts max_tokens against 1000 output tokens/min; OpenRouter reserves credit for it.
         "max_tokens": config.RECOGNITION_MAX_TOKENS,
@@ -294,12 +296,21 @@ async def _ask_ai(images: list[bytes], group_name: str, next_work_date: str, all
                         402: "на балансі провайдера (OpenRouter) закінчились кошти — поповніть кредити",
                         403: "ключу заборонено доступ до цієї моделі",
                         404: f"модель {model_name} не знайдено — перевірте {provider_name.upper()}_MODEL",
+                        410: f"модель {model_name} знято з {provider_name} — вкажіть актуальну в {provider_name.upper()}_MODEL",
                         429: "перевищено ліміт запитів, повторю пізніше",
                     }
                     reason = reasons.get(resp.status, "спробуйте пізніше або надішліть чіткіше фото")
                     raise BotError(f"Помилка {provider_name} API ({resp.status}): {reason}.")
                 data = await resp.json()
-                content = data["choices"][0]["message"]["content"]
+                choice = data["choices"][0]
+                content = choice["message"].get("content")
+                if not content:
+                    log.error("%s returned no content (finish_reason=%s, reasoning=%s chars)", provider_name,
+                              choice.get("finish_reason"), len(choice["message"].get("reasoning_content") or ""))
+                    hint = ("модель витратила весь ліміт RECOGNITION_MAX_TOKENS на міркування — збільште його "
+                            "або оберіть модель без режиму міркування" if choice.get("finish_reason") == "length"
+                            else "модель повернула порожню відповідь")
+                    raise BotError(f"{provider_name} не повернув таблицю: {hint}.")
                 # Without JSON mode some models wrap the answer in ```json fences.
                 fenced = re.fullmatch(r"\s*```(?:json)?\s*(.*?)\s*```\s*", content, re.DOTALL)
                 result = json.loads(fenced[1] if fenced else content)

@@ -80,9 +80,11 @@ GROQ_MODEL = os.getenv('GROQ_MODEL', 'qwen/qwen3.8-27b')
 OPENAI_API_URL = os.getenv('OPENAI_API_URL', 'https://api.openai.com/v1/chat/completions')
 OPENAI_MODEL = os.getenv('OPENAI_MODEL', 'gpt-4o-mini')
 NVIDIA_API_URL = os.getenv('NVIDIA_API_URL', 'https://integrate.api.nvidia.com/v1/chat/completions')
-NVIDIA_MODEL = os.getenv('NVIDIA_MODEL', 'meta/llama-3.2-90b-vision-instruct')
-RECOGNITION_TIMEOUT_SECONDS = integer('RECOGNITION_TIMEOUT_SECONDS', 45, 1, 300)
-RECOGNITION_MAX_TOKENS = integer('RECOGNITION_MAX_TOKENS', 900, 300, 32000)
+NVIDIA_MODEL = os.getenv('NVIDIA_MODEL', 'nvidia/nemotron-3.5-super-vl-120b-a12b')
+# NVIDIA's 120B vision model is slower and needs room to answer; Groq's free tier caps output at 1000 tokens/min.
+_NVIDIA = RECOGNITION_PROVIDER == 'nvidia' or (RECOGNITION_PROVIDER == 'auto' and RECOGNITION_API_KEY.startswith('nvapi-'))
+RECOGNITION_TIMEOUT_SECONDS = integer('RECOGNITION_TIMEOUT_SECONDS', 120 if _NVIDIA else 45, 1, 300)
+RECOGNITION_MAX_TOKENS = integer('RECOGNITION_MAX_TOKENS', 4096 if _NVIDIA else 900, 300, 32000)
 
 
 def recognition_settings():
