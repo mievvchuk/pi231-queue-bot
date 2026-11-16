@@ -171,7 +171,7 @@ See [`.env.example`](.env.example) and [`docs/CONFIGURATION.md`](docs/CONFIGURAT
 | `RECOGNITION_API_KEY` | Key for optional image recognition; `OPENAI_API_KEY` is supported as a fallback |
 | `GROQ_MODEL`, `OPENAI_MODEL` | Recognition model selection |
 | `GROQ_API_URL`, `OPENAI_API_URL` | Recognition API endpoints |
-| `RECOGNITION_TIMEOUT_SECONDS` | Recognition timeout (default: 45 seconds) |
+| `RECOGNITION_TIMEOUT_SECONDS` | Recognition timeout (default: 120 seconds for NVIDIA, 45 otherwise) |
 | `HTTP_HOST`, `PORT` | Web server binding (defaults: `0.0.0.0`, `8080`) |
 | `LOG_LEVEL` | Logging level (default: `INFO`) |
 | `POLLING_RETRY_SECONDS` | Telegram polling retry delay |

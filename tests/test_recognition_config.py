@@ -108,3 +108,23 @@ async def test_nvidia_disables_thinking_and_explains_empty_content(monkeypatch):
     with pytest.raises(BotError, match='NVIDIA не повернув таблицю: модель витратила весь ліміт'):
         await recognition.recognize_replacements_from_image(b'offline-test')
     assert session.post.call_args.kwargs['json']['chat_template_kwargs'] == {'enable_thinking': False}
+
+
+@pytest.mark.parametrize('key, provider, tokens, timeout', [
+    ('nvapi-test', 'auto', 4096, 120),
+    ('any-key', 'nvidia', 4096, 120),
+    ('gsk_test', 'auto', 900, 45),
+])
+def test_token_and_timeout_defaults_depend_on_provider(monkeypatch, key, provider, tokens, timeout):
+    import importlib
+    for name in ('RECOGNITION_MAX_TOKENS', 'RECOGNITION_TIMEOUT_SECONDS', 'OPENAI_API_KEY'):
+        monkeypatch.setenv(name, '')
+        monkeypatch.delenv(name)
+    monkeypatch.setenv('RECOGNITION_API_KEY', key)
+    monkeypatch.setenv('RECOGNITION_PROVIDER', provider)
+    try:
+        importlib.reload(config)
+        assert (config.RECOGNITION_MAX_TOKENS, config.RECOGNITION_TIMEOUT_SECONDS) == (tokens, timeout)
+    finally:
+        monkeypatch.undo()
+        importlib.reload(config)
