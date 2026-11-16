@@ -156,7 +156,7 @@ async def watch_channel(bot, conn):
     async with aiohttp.ClientSession(trust_env=True, timeout=aiohttp.ClientTimeout(total=60)) as session:
         while True:
             try:
-                if config.RECOGNITION_API_KEY and config.RECOGNITION_PROVIDER != 'disabled':
+                if config.RECOGNITION_PROVIDER != 'disabled':
                     await poll_once(bot, conn, session)
                     set_state(conn, 'channel_last_error', None)
             except Exception as error:
