@@ -4,14 +4,14 @@ import pytest
 from queue_bot.services import replacements, schedule
 
 
-def test_committed_schedule_has_no_fifth_pair_and_monday_starts_with_web():
+def test_committed_schedule_has_no_fifth_pair_and_monday_starts_with_hci():
     from pathlib import Path
     data = schedule.load_schedule_data(str(Path(__file__).resolve().parents[1] / 'data/schedule.json'))
     for parity in ('numerator', 'denominator'):
         for day in schedule.DAY_KEYS:
             assert all(item['number'] != 5 for item in schedule.get_base_schedule_for_day(data, day, parity))
         first = schedule.get_base_schedule_for_day(data, 'monday', parity)[0]
-        assert (first['number'], first['subject']) == (1, 'Програмування в Інтернет')
+        assert (first['number'], first['subject']) == (2, 'Людино-машинна взаємодія')
 
 
 def test_five_slots_preserve_gaps_and_have_exact_bell_times(conn):
@@ -465,3 +465,14 @@ async def test_open_schedule_menu_time_of_day_switch(conn):
 
 
 
+
+
+def test_lesson_note_from_schedule_json_reaches_text_and_mini_app(conn):
+    from pathlib import Path
+    data = schedule.load_schedule_data(str(Path(__file__).resolve().parents[1] / 'data/schedule.json'))
+    thursday = datetime.date(2026, 11, 19)
+    lessons, _ = schedule.get_actual_schedule(conn, data, thursday)
+    web = next(item for item in lessons if item['subject'] == 'Програмування в Інтернет')
+    assert web['note'] == 'Остання пара'
+    assert '📝 <i>Остання пара</i>' in schedule.format_schedule_for_date(conn, data, thursday)
+    assert all(not item['note'] for item in lessons if item is not web)

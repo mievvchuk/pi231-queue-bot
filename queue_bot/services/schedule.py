@@ -147,6 +147,7 @@ def get_base_schedule_for_day(schedule_data: dict, day_key: str, w_type: str) ->
             "lessons": item.get("lessons", ""),
             "startTime": start_time,
             "endTime": end_time,
+            "note": str(item.get("note") or "").strip(),  # free text from schedule.json, e.g. «Остання пара»
         })
 
     return filtered
@@ -270,6 +271,8 @@ def format_schedule_for_date(conn, schedule_data: dict, dt: date, group_name: st
                 lines.append(f"👨‍🏫 {html.escape(l['teacher'])}")
             if l.get("room"):
                 lines.append(f"🚪 Ауд. {html.escape(l['room'])}")
+        if l.get("note"):
+            lines.append(f"📝 <i>{html.escape(l['note'])}</i>")
         lines.append("")
 
     return "\n".join(lines).strip()
