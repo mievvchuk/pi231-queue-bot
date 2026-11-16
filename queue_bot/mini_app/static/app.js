@@ -1490,6 +1490,7 @@
                         .filter(Boolean)
                         .join(" · "),
                     ),
+                lesson.note ? el("p", { class: "lesson-note" }, lesson.note) : null,
               ),
             )
           : el("p", { class: "muted empty-lesson-label" }, "Заняття немає"),

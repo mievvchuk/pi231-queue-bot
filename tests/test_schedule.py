@@ -465,3 +465,14 @@ async def test_open_schedule_menu_time_of_day_switch(conn):
 
 
 
+
+
+def test_lesson_note_from_schedule_json_reaches_text_and_mini_app(conn):
+    from pathlib import Path
+    data = schedule.load_schedule_data(str(Path(__file__).resolve().parents[1] / 'data/schedule.json'))
+    thursday = datetime.date(2026, 11, 19)
+    lessons, _ = schedule.get_actual_schedule(conn, data, thursday)
+    web = next(item for item in lessons if item['subject'] == 'Програмування в Інтернет')
+    assert web['note'] == 'Остання пара'
+    assert '📝 <i>Остання пара</i>' in schedule.format_schedule_for_date(conn, data, thursday)
+    assert all(not item['note'] for item in lessons if item is not web)

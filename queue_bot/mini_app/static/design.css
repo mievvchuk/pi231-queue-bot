@@ -242,6 +242,7 @@
 .lesson-card { min-height: 75px; padding: 15px 18px; display: flex; justify-content: space-between; align-items: center; border-left: 4px solid var(--accent); box-shadow: none; }
 .lesson-card h3 { font-size: 14px; }
 .lesson-card p { color: var(--muted); font-size: 10px; margin-top: 5px; }
+.lesson-card p.lesson-note, .lesson-note { color: var(--accent); font-style: italic; font-weight: 600; }
 .lesson-empty .lesson-card { opacity: .7; border-left-color: var(--border-strong); }
 .lesson-violet .lesson-card { border-left-color: #9c78dc; }
 .lesson-blue .lesson-card { border-left-color: #648ee8; }

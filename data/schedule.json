@@ -100,7 +100,8 @@
         { "name": "Когут В.С.", "room": "231а" },
         { "name": "Барабаш Д.С.", "room": null }
       ],
-      "week_type": "both"
+      "week_type": "both",
+      "note": "Остання пара"
     }
   ],
   "friday": [

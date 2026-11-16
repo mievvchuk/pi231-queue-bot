@@ -274,7 +274,7 @@ window.createPI231Design = function (H) {
   }
   function lessonCard(slot){
     const lessons=slot.lessons||[];
-    return el('div',{class:'lesson-row '+(!lessons.length?'lesson-empty':'')},el('div',{class:'lesson-time'},el('strong',{},slot.number),el('span',{},slot.startTime+'–'+slot.endTime)),card('lesson-card',el('div',{},lessons.length?lessons.map(l=>el('div',{class:'real-lesson'},el('h3',{},l.subject),el('p',{},l.teachers_raw?.length?l.teachers_raw.map(t=>t.name+(t.room?' · ауд. '+t.room:'')).join(' / '):[l.teacher,l.room&&'ауд. '+l.room].filter(Boolean).join(' · ')),l.is_replacement?badge('Заміна','warning'):null)):[el('h3',{},'Заняття немає'),el('p',{},'Вільний час')])));
+    return el('div',{class:'lesson-row '+(!lessons.length?'lesson-empty':'')},el('div',{class:'lesson-time'},el('strong',{},slot.number),el('span',{},slot.startTime+'–'+slot.endTime)),card('lesson-card',el('div',{},lessons.length?lessons.map(l=>el('div',{class:'real-lesson'},el('h3',{},l.subject),el('p',{},l.teachers_raw?.length?l.teachers_raw.map(t=>t.name+(t.room?' · ауд. '+t.room:'')).join(' / '):[l.teacher,l.room&&'ауд. '+l.room].filter(Boolean).join(' · ')),l.note?el('p',{class:'lesson-note'},l.note):null,l.is_replacement?badge('Заміна','warning'):null)):[el('h3',{},'Заняття немає'),el('p',{},'Вільний час')])));
   }
   return {navigation,topbar,homePage,queuesPage,profilePage,adminPage,queuePage,loginPage,lessonCard,appearance,decorate,glyph,heading,card,badge,button,closeMenu,joinWizard,helpPage,swapsPage,tick};
 };
