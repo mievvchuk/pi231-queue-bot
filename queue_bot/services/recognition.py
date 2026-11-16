@@ -294,6 +294,7 @@ async def _ask_ai(images: list[bytes], group_name: str, next_work_date: str, all
                         402: "на балансі провайдера (OpenRouter) закінчились кошти — поповніть кредити",
                         403: "ключу заборонено доступ до цієї моделі",
                         404: f"модель {model_name} не знайдено — перевірте {provider_name.upper()}_MODEL",
+                        410: f"модель {model_name} знято з {provider_name} — вкажіть актуальну в {provider_name.upper()}_MODEL",
                         429: "перевищено ліміт запитів, повторю пізніше",
                     }
                     reason = reasons.get(resp.status, "спробуйте пізніше або надішліть чіткіше фото")

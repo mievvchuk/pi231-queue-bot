@@ -80,7 +80,7 @@ GROQ_MODEL = os.getenv('GROQ_MODEL', 'qwen/qwen3.8-27b')
 OPENAI_API_URL = os.getenv('OPENAI_API_URL', 'https://api.openai.com/v1/chat/completions')
 OPENAI_MODEL = os.getenv('OPENAI_MODEL', 'gpt-4o-mini')
 NVIDIA_API_URL = os.getenv('NVIDIA_API_URL', 'https://integrate.api.nvidia.com/v1/chat/completions')
-NVIDIA_MODEL = os.getenv('NVIDIA_MODEL', 'meta/llama-3.2-90b-vision-instruct')
+NVIDIA_MODEL = os.getenv('NVIDIA_MODEL', 'nvidia/nemotron-3.5-super-vl-120b-a12b')
 RECOGNITION_TIMEOUT_SECONDS = integer('RECOGNITION_TIMEOUT_SECONDS', 45, 1, 300)
 RECOGNITION_MAX_TOKENS = integer('RECOGNITION_MAX_TOKENS', 900, 300, 32000)
 

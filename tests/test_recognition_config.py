@@ -69,3 +69,22 @@ async def test_nvidia_key_selects_nvidia_endpoint_without_json_mode_and_accepts_
     assert 'response_format' not in kwargs['json']
     image = kwargs['json']['messages'][0]['content'][1]['image_url']
     assert 'detail' not in image
+
+
+@pytest.mark.asyncio
+async def test_retired_model_410_names_the_model_setting(monkeypatch):
+    from queue_bot.services.errors import BotError
+    monkeypatch.setattr(config, 'RECOGNITION_API_KEY', 'nvapi-test')
+    monkeypatch.setattr(config, 'RECOGNITION_PROVIDER', 'nvidia')
+    monkeypatch.setattr(config, 'NVIDIA_MODEL', 'old/vision-model')
+    response = MagicMock(status=410)
+    response.text = AsyncMock(return_value='{"detail":"model is no longer available"}')
+    response_context = MagicMock()
+    response_context.__aenter__ = AsyncMock(return_value=response)
+    session = MagicMock()
+    session.post.return_value = response_context
+    session_context = MagicMock()
+    session_context.__aenter__ = AsyncMock(return_value=session)
+    monkeypatch.setattr(recognition.aiohttp, 'ClientSession', lambda: session_context)
+    with pytest.raises(BotError, match='old/vision-model знято з NVIDIA.*NVIDIA_MODEL'):
+        await recognition.recognize_replacements_from_image(b'offline-test')
