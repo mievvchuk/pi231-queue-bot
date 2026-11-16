@@ -88,3 +88,23 @@ async def test_retired_model_410_names_the_model_setting(monkeypatch):
     monkeypatch.setattr(recognition.aiohttp, 'ClientSession', lambda: session_context)
     with pytest.raises(BotError, match='old/vision-model знято з NVIDIA.*NVIDIA_MODEL'):
         await recognition.recognize_replacements_from_image(b'offline-test')
+
+
+@pytest.mark.asyncio
+async def test_nvidia_disables_thinking_and_explains_empty_content(monkeypatch):
+    from queue_bot.services.errors import BotError
+    monkeypatch.setattr(config, 'RECOGNITION_API_KEY', 'nvapi-test')
+    monkeypatch.setattr(config, 'RECOGNITION_PROVIDER', 'nvidia')
+    response = MagicMock(status=200)
+    response.json = AsyncMock(return_value={'choices': [{'finish_reason': 'length', 'message': {
+        'content': None, 'reasoning_content': 'Let me look at the table...'}}]})
+    response_context = MagicMock()
+    response_context.__aenter__ = AsyncMock(return_value=response)
+    session = MagicMock()
+    session.post.return_value = response_context
+    session_context = MagicMock()
+    session_context.__aenter__ = AsyncMock(return_value=session)
+    monkeypatch.setattr(recognition.aiohttp, 'ClientSession', lambda: session_context)
+    with pytest.raises(BotError, match='NVIDIA не повернув таблицю: модель витратила весь ліміт'):
+        await recognition.recognize_replacements_from_image(b'offline-test')
+    assert session.post.call_args.kwargs['json']['chat_template_kwargs'] == {'enable_thinking': False}
