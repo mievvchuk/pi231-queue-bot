@@ -158,3 +158,6 @@ def validate_runtime():
 # Public channel ingestion; no Telegram user session is required.
 REPLACEMENTS_CHANNEL = os.getenv("REPLACEMENTS_CHANNEL", "replacements_xpk").strip("@ ")
 CHANNEL_POLL_SECONDS = integer("CHANNEL_POLL_SECONDS", 60, 60, 86400)
+
+# Optional alerts.in.ua token; keep it in server secrets or .env.
+ALERTS_API_TOKEN = os.getenv("ALERTS_API_TOKEN", "")

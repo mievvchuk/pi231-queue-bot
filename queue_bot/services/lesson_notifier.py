@@ -6,7 +6,7 @@ import logging
 from aiogram.exceptions import TelegramForbiddenError, TelegramRetryAfter
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
-from queue_bot.services import attendance
+from queue_bot.services import attendance, air_alerts
 from queue_bot.services.subjects import find_subject, find_teacher
 from queue_bot.storage.database import transaction
 
@@ -63,10 +63,14 @@ def message_content(row, kind, title):
 
 async def deliver(bot, conn, subjects, *, now=None):
     """Claim one message at a time; stale revisions are never delivered."""
+    if air_alerts.blocked(conn, now):
+        return
     simulated = now is not None
     now = attendance.now_seconds() if now is None else now
     ids = conn.execute('SELECT id FROM lesson_messages WHERE sent = 0 AND retry_at <= ? ORDER BY id LIMIT 50', (now,)).fetchall()
     for item in ids:
+        if air_alerts.blocked(conn, now if simulated else None):
+            return
         with transaction(conn):
             event = conn.execute('SELECT m.*, r.session_id FROM lesson_messages m JOIN lesson_attendance a ON a.id = m.attendance_id JOIN lesson_runs r ON r.id = a.run_id WHERE m.id = ?', (item['id'],)).fetchone()
             if not event:
@@ -123,6 +127,8 @@ async def deliver(bot, conn, subjects, *, now=None):
 async def watch_lessons(bot, conn, subjects, interval=5):
     while True:
         try:
+            await air_alerts.refresh(conn)
+            air_alerts.freeze_timers(conn)
             from queue_bot.services.lesson_scheduler import sync_schedule
             sync_schedule(conn, subjects)
         except Exception as error:

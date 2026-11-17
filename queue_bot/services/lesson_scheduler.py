@@ -4,7 +4,7 @@ import re
 from datetime import datetime
 
 from queue_bot import config
-from queue_bot.services import attendance, queues, schedule
+from queue_bot.services import attendance, queues, schedule, air_alerts
 from queue_bot.services.subjects import find_subject, find_teacher
 from queue_bot.storage.database import transaction
 
@@ -83,6 +83,8 @@ def suppress_current(conn, sid, now):
 
 def sync_schedule(conn, subjects, *, now=None, schedule_data=None):
     now = attendance.now_seconds() if now is None else now
+    if air_alerts.blocked(conn, now):
+        return
     local = datetime.fromtimestamp(now, schedule.UK_TZ)
     data = schedule.load_schedule_data() if schedule_data is None else schedule_data
     lessons, _ = schedule.get_actual_schedule(conn, data, local.date(), config.STUDENT_GROUP)
