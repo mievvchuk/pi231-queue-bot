@@ -7,13 +7,17 @@ from queue_bot.services import air_alerts as alerts, attendance, queues
 from queue_bot.services.lesson_notifier import deliver
 
 
-def test_region_and_threat_filter():
-    base = dict(alert_type='air_raid', location_type='raion', location_title='Хмельницький район')
+@pytest.mark.parametrize('threat', ['air_raid', 'chemical', 'nuclear', 'artillery_shelling', 'urban_fights'])
+@pytest.mark.parametrize('level', ['yellow', 'red', None, 'future_level'])
+def test_region_and_threat_filter(threat, level):
+    base = dict(alert_type=threat, alert_level=level, location_type='raion',
+                location_title='Хмельницький район')
     assert alerts.relevant_alert(base)
-    assert alerts.relevant_alert(dict(base, location_type='oblast', location_uid='3'))
+    assert not alerts.relevant_alert(dict(base, location_type='oblast', location_uid='3'))
     assert not alerts.relevant_alert(dict(base, location_title='Шепетівський район'))
-    assert not alerts.relevant_alert(dict(base, alert_type='chemical'))
-    assert not alerts.relevant_alert(dict(base, alert_level='yellow'))
+    assert not alerts.relevant_alert(dict(base, location_title='Кам’янець-Подільський район'))
+    assert not alerts.relevant_alert(dict(base, location_type='city', location_title='Хмельницький'))
+    assert not alerts.relevant_alert(dict(base, finished_at='2026-11-17T06:00:00Z'))
 
 
 def test_repeated_alert_and_stale_state(conn, monkeypatch):
