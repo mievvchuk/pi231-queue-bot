@@ -2,7 +2,7 @@
 import secrets
 import time
 
-from queue_bot.services import queues
+from queue_bot.services import queues, air_alerts
 from queue_bot.services.admins import require_admin, log_action
 from queue_bot.services.errors import BotError
 from queue_bot.services.restrictions import require_available
@@ -69,6 +69,8 @@ def _sync(conn, run):
 
 
 def _advance(conn, run, now):
+    if air_alerts.blocked(conn, now):
+        return
     _sync(conn, run)
     for row in members(conn, run['id']):
         if row['state'] == 'serving':
