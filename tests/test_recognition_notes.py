@@ -55,11 +55,14 @@ async def test_header_without_group_rows_changes_only_fourth_pair_after_save(con
     assert 'четверга' in item['source_note']
     assert 'четверга' in replacements.format_replacement(item)
     replacements.save_replacement(conn, item)
+    assert replacements.get_replacements(conn, item["date"])[0]["source_note"] == item["source_note"]
     actual, _ = schedule.get_actual_schedule(conn, source, date(2026, 10, 30))
     assert [r['subject'] for r in actual] == ['Звичайна перша', 'Знаменник']
     # Header remapping keeps the target pair and uses the group's fixed bell times.
     assert actual[1]['startTime'] == '13:20'
     assert actual[1]['endTime'] == '14:40'
+    assert item["source_note"] in actual[1]["note"]
+    assert "Примітка" in replacements.format_replacement(replacements.get_replacements(conn, item["date"])[0])
     prompt = client.post.call_args.kwargs['json']['messages'][0]['content'][0]['text']
     assert 'scheduleOverrides' in prompt
 
@@ -176,3 +179,48 @@ async def test_truncated_as_scheduled_old_subject_and_split_teacher_room(vision,
     assert (fourth['teacher'], fourth['room'], fourth['old_subject']) == ('Барабаш Д.С.', '231а', 'Звичайна четверта')
     prompt = client.post.call_args.kwargs['json']['messages'][0]['content'][0]['text']
     assert 'Задніпровський' not in prompt
+
+
+@pytest.mark.parametrize('text', [
+    '4-та пара за розкладом 1-ї пари четверга (знаменник)',
+    'Четверті пари відбудуться за розкладом першої пари четверга (знаменник)',
+    '4 пара по розкладу 1 пари четверга (знаменник)',
+])
+def test_announcement_wording(text):
+    parsed = recognition.parse_header_note(text)
+    assert (parsed['targetPair'], parsed['sourcePair'], parsed['sourceDay'], parsed['weekType']) == (4, 1, 'thursday', 'denominator')
+
+
+@pytest.mark.asyncio
+async def test_wrapped_announcement_is_applied(vision):
+    data, recognize, _, _ = vision
+    data.update(scheduleOverrides=[], notes=['ЧЕТВЕРТІ ПАРИ ПРОВОДЯТЬСЯ',
+                'ЗА РОЗКЛАДОМ ПЕРШОЇ ПАРИ ЧЕТВЕРГА (знаменник)'])
+    item, = (await recognize())['replacements']
+    assert item['new_subject'] == 'Знаменник'
+
+
+@pytest.mark.asyncio
+async def test_unresolved_announcement_cannot_be_reported_as_no_changes(vision):
+    data, recognize, _, _ = vision
+    data.update(scheduleOverrides=[], notes=['Четверті пари за розкладом нерозбірливого дня'])
+    with pytest.raises(BotError, match='оголошенням'):
+        await recognize()
+
+
+def test_source_note_migration_preserves_existing_replacements(tmp_path):
+    from queue_bot.storage.database import connect
+    path = str(tmp_path / 'notes.db')
+    conn = connect(path)
+    item = dict(date='2026-11-17', lesson_number=1, new_subject='Предмет', source_note='Оголошення')
+    replacements.save_replacement(conn, item)
+    conn.execute('ALTER TABLE replacements DROP COLUMN source_note')
+    conn.close()
+    conn = connect(path)
+    saved, = replacements.get_replacements(conn, item['date'])
+    assert saved['new_subject'] == 'Предмет' and saved['source_note'] is None
+    replacements.save_replacement(conn, item)
+    conn.close()
+    conn = connect(path)
+    assert replacements.get_replacements(conn, item['date'])[0]['source_note'] == 'Оголошення'
+    conn.close()

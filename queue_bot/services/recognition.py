@@ -154,7 +154,7 @@ def _pair_before(text: str):
 def parse_header_note(text: str, default_week: str | None = None):
     """'ЧЕТВЕРТІ ПАРИ ПРОВОДЯТЬСЯ ЗА РОЗКЛАДОМ 3-Ї пари ПОНЕДІЛКА (знаменник)' -> scheduleOverride dict."""
     t = re.sub(r"[’ʼ`´]", "'", str(text).lower())
-    m = re.search(r"^(.*?)\s*проводят\w*\s+за\s+розкладом\s+(.*)$", t)
+    m = re.search(r"^(.*?)\s*(?:(?:проводят\w*|відбуд\w*|буд\w*)\s+)?(?:за|по|згідно\s+з)\s+розклад\w*\s+(.*)$", t)
     if not m:
         return None
     target, source = _pair_before(m[1] + " "), _pair_before(m[2])
@@ -179,6 +179,18 @@ def apply_parsed_notes(result: dict, date_str: str) -> None:
              for n in result[key] if isinstance(n, str)]
     parsed = [o for o in (parse_header_note(n, week) for n in notes) if o]
     if not parsed:
+        # OCR may split a full-width announcement across several lines.
+        combined_text = ' '.join(dict.fromkeys(notes))
+        references = re.findall(r'(?:за|по|згідно\s+з)\s+розклад', combined_text, re.I)
+        combined = parse_header_note(combined_text, week) if len(references) == 1 else None
+        if combined:
+            parsed = [combined]
+            # Keep explicitly uncertain notes for manual review.
+            # Joining lines must never turn an unreadable instruction into approval.
+    if not parsed:
+        if (not result.get('scheduleOverrides') and any(
+                re.search(r'пар.*(?:розклад|провод|відбуд)', n, re.I) for n in notes)):
+            raise BotError('Не вдалося підставити розклад за оголошенням над таблицею. Перевірте примітку вручну.')
         return
     targets = {o["targetPair"] for o in parsed}
     model = result.get("scheduleOverrides") if isinstance(result.get("scheduleOverrides"), list) else []

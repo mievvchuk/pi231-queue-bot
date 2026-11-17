@@ -264,3 +264,27 @@ async def test_one_ai_request_per_poll_newest_first(conn, monkeypatch):
     assert recognize.await_count == 1 and channel.get_state(conn, 'channel_cursor:replacements_xpk') == 840
     await channel.poll_once(bot, conn, None)
     assert recognize.await_count == 2 and channel.get_state(conn, 'channel_cursor:replacements_xpk') == 841
+
+
+def test_monitor_status_displays_disabled_pending_and_errors(conn, monkeypatch):
+    monkeypatch.setattr(config, 'RECOGNITION_PROVIDER', 'disabled')
+    monkeypatch.setattr(config, 'REPLACEMENTS_CHANNEL', 'replacements_xpk')
+    channel.set_state(conn, 'channel_last_success', '2026-11-17T10:00:00+02:00')
+    channel.set_state(conn, 'channel_error_reason', 'CDN <error>')
+    channel.set_state(conn, 'channel_draft:replacements_xpk:900', {'status': 'pending'})
+    text = channel.monitoring_status(conn)
+    assert 'вимкнене' in text and '2026-11-17T10:00' in text
+    assert 'CDN &lt;error&gt;' in text
+    assert 'Очікують підтвердження: 1' in text
+
+
+@pytest.mark.asyncio
+async def test_successful_check_records_health_even_without_new_posts(conn, monkeypatch):
+    monkeypatch.setattr(config, 'REPLACEMENTS_CHANNEL', 'replacements_xpk')
+    monkeypatch.setattr(channel, 'read_bounded', AsyncMock(return_value=b'page'))
+    monkeypatch.setattr(channel, 'parse_posts', lambda *_: [dict(id=828, photos=['image'])])
+    channel.set_state(conn, 'channel_cursor:replacements_xpk', 828)
+    await channel.poll_once(AsyncMock(), conn, None)
+    assert channel.get_state(conn, 'channel_last_success')
+    assert channel.get_state(conn, 'channel_last_attempt')
+    assert channel.get_state(conn, 'channel_latest_post') == 828

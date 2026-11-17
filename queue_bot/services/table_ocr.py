@@ -259,7 +259,7 @@ def recognize(images: list[bytes], group_name: str) -> dict:
     from queue_bot.services.recognition import expand_groups, parse_header_note
     from queue_bot.services.schedule_notes import normalize_group
     tables = sorted((read_table(image) for image in images), key=lambda t: parse_date(t['header']) is None)
-    header = [fix_text(line, cutoff=0.75) for t in tables for line in t['header']]
+    header = [fix_note(line) for t in tables for line in t['header']]
     week = next((key for word, key in (('знаменник', 'denominator'), ('чисельник', 'numerator'))
                  if fold(word) in fold(' '.join(header))), None)
     notes, rows, readable = [], [], True
