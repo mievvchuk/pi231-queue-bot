@@ -29,14 +29,10 @@ def blocked(conn, now=None):
 
 
 def relevant_alert(alert):
-    """An oblast-wide alert covers the district; alerts in other districts do not."""
-    if alert.get('alert_type') != 'air_raid' or alert.get('alert_level') == 'yellow':
-        return False
-    if alert.get('finished_at'):
-        return False
-    return ((alert.get('location_type') == 'oblast' and str(alert.get('location_uid')) == '3')
-            or (alert.get('location_type') == 'raion'
-                and alert.get('location_title') == 'Хмельницький район'))
+    """Match every active threat level/type reported for this district only."""
+    return (not alert.get('finished_at')
+            and alert.get('location_type') == 'raion'
+            and alert.get('location_title') == 'Хмельницький район')
 
 
 def record(conn, active, now):
