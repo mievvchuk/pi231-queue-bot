@@ -132,7 +132,11 @@ def parse_date(lines: list[str]) -> str | None:
     is recovered only when exactly one day of that month fits both."""
     from queue_bot.services.recognition import DAY_STEMS
     text = fold(' '.join(lines))
-    weekday = next((i for i, (stem, _) in enumerate(DAY_STEMS) if fold(stem) in text), None)
+    # A schedule announcement names the SOURCE weekday, not the photo's date.
+    # Only title/weekday lines may validate the target date.
+    weekday_text = ' '.join(fold(line) for line in lines
+                            if not re.search(r'пар|чергов|викладач', fold(line)))
+    weekday = next((i for i, (stem, _) in enumerate(DAY_STEMS) if fold(stem) in weekday_text), None)
     m = re.search(r'(\d{1,2})\s*([^\W\d_]+)\s*(\d\d[\dбзо]{2})', text)  # '202бр.'
     month = next((i for i, stem in enumerate(MONTHS, 1) if m and m[2].startswith(fold(stem))), None)
     if not month:
