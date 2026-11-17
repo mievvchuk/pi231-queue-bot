@@ -63,12 +63,13 @@ def save_replacement(conn, item: dict, auto_archive_previous: bool = True) -> bo
 
     conn.execute(
         """INSERT INTO replacements 
-           (date, group_name, lesson_number, old_subject, new_subject, teacher, room, is_archived)
-           VALUES (?, ?, ?, ?, ?, ?, ?, FALSE)
+           (date, group_name, lesson_number, old_subject, new_subject, teacher, room, source_note, is_archived)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, FALSE)
            ON CONFLICT (date, group_name, lesson_number, new_subject) DO UPDATE
            SET old_subject = excluded.old_subject,
                teacher = excluded.teacher,
                room = excluded.room,
+               source_note = excluded.source_note,
                is_archived = FALSE""",
         (
             date_val,
@@ -78,6 +79,7 @@ def save_replacement(conn, item: dict, auto_archive_previous: bool = True) -> bo
             item["new_subject"].strip(),
             item.get("teacher"),
             item.get("room"),
+            item.get("source_note"),
         ),
     )
     return True

@@ -17,16 +17,18 @@ from .common import (
 )
 
 
-async def admin_category_schedule(message: Message, state: FSMContext):
+async def admin_category_schedule(message: Message, state: FSMContext, conn=None):
     await state.clear()
     await state.set_state(AdminPanelState.in_schedule_menu)
+    from queue_bot.services.channel_import import monitoring_status
     await message.answer(
         "📅 <b>Керування розкладом та замінами</b>\n\n"
         "Заміни надходять автоматично з каналу й застосовуються після підтвердження. Відредагувати їх можна до або після збереження.\n\n"
         "• <b>🔄 Активні заміни</b> — переглянути поточні збережені заміни\n"
         "• <b>🏢 Робоча субота</b> — призначити суботу навчальним днем за розкладом іншого дня\n"
         "• <b>📥 Отримати / 📤 Завантажити розклад</b> — редагування базового файлу <code>schedule.json</code>\n"
-        "\nПопередні заміни архівуються автоматично після підтвердження даних на наступну дату.",
+        "\nПопередні заміни архівуються автоматично після підтвердження даних на наступну дату.\n\n"
+        + monitoring_status(conn),
         reply_markup=get_admin_schedule_menu(),
     )
 

@@ -463,6 +463,7 @@ class PGConnectionWrapper:
             cur.execute("ALTER TABLE queue_entries ADD COLUMN IF NOT EXISTS ready_to_swap BOOLEAN NOT NULL DEFAULT FALSE;")
             cur.execute("ALTER TABLE queue_entries ADD COLUMN IF NOT EXISTS swap_wish TEXT DEFAULT NULL;")
             cur.execute("ALTER TABLE replacements ADD COLUMN IF NOT EXISTS is_archived BOOLEAN NOT NULL DEFAULT FALSE;")
+            cur.execute("ALTER TABLE replacements ADD COLUMN IF NOT EXISTS source_note TEXT;")
             cur.execute("DROP INDEX IF EXISTS ux_one_unfinished_session;")
             cur.execute("""CREATE UNIQUE INDEX IF NOT EXISTS ux_one_unfinished_session
                 ON queue_sessions (subject_id, teacher_id, queue_type)
@@ -549,6 +550,8 @@ def connect(db_target: str):
         conn.execute('ALTER TABLE queue_entries ADD COLUMN coursework_priority INTEGER NOT NULL DEFAULT 0')
     if 'pairs_count' not in {row[1] for row in conn.execute('PRAGMA table_info(working_saturdays)')}:
         conn.execute('ALTER TABLE working_saturdays ADD COLUMN pairs_count INTEGER')
+    if 'source_note' not in {row[1] for row in conn.execute('PRAGMA table_info(replacements)')}:
+        conn.execute('ALTER TABLE replacements ADD COLUMN source_note TEXT')
     return conn
 
 

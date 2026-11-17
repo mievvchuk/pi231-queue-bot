@@ -193,6 +193,7 @@ def get_actual_schedule(conn, schedule_data: dict, dt: date, group_name: str = "
                 "startTime": lesson.get("startTime", ""),
                 "endTime": lesson.get("endTime", ""),
                 "is_replacement": True,
+                "note": rep.get("source_note") or "",
             })
         else:
             actual_lessons.append({**lesson, "is_replacement": False})
@@ -210,6 +211,7 @@ def get_actual_schedule(conn, schedule_data: dict, dt: date, group_name: str = "
                 "startTime": PAIR_TIMES.get(num, ('', ''))[0],
                 "endTime": PAIR_TIMES.get(num, ('', ''))[1],
                 "is_replacement": True,
+                "note": rep.get("source_note") or "",
             })
 
     actual_lessons.sort(key=lambda x: x.get("number", 0))

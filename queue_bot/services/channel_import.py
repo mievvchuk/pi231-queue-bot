@@ -19,7 +19,7 @@ from queue_bot.services.errors import BotError
 log = logging.getLogger(__name__)
 
 # Bump when recognition changes: drafts dated today or later are recognized and asked about once more.
-RECOGNIZER_VERSION = 3
+RECOGNIZER_VERSION = 4
 
 
 def format_no_replacements(date_str):
@@ -103,6 +103,7 @@ async def download_post_images(session, post, channel):
 
 async def poll_once(bot, conn, session):
     channel = config.REPLACEMENTS_CHANNEL
+    set_state(conn, 'channel_last_attempt', datetime.datetime.now(ZoneInfo(config.TIMEZONE)).isoformat())
     if not re.fullmatch(r'[A-Za-z0-9_]+', channel):
         raise ValueError('Invalid REPLACEMENTS_CHANNEL')
     page = await read_bounded(session, f'https://t.me/s/{channel}', 4 * 1024 * 1024)
@@ -121,6 +122,7 @@ async def poll_once(bot, conn, session):
             stale.add(post['id'])
     # New posts first, then one-time re-asks; at most one AI request per poll (free tiers limit tokens per minute).
     candidates = candidates + [p for p in posts if p['id'] in stale and p not in candidates]
+    set_state(conn, 'channel_latest_post', posts[-1]['id'])
     recognized = False
     for post in candidates:
         key = f'channel_draft:{channel}:{post["id"]}'
@@ -148,6 +150,7 @@ async def poll_once(bot, conn, session):
             set_state(conn, key, draft)
         set_state(conn, cursor_key, max(post['id'], get_state(conn, cursor_key) or 0))
         log.info('Channel post %s processed; approval draft delivered', post['id'])
+    set_state(conn, 'channel_last_success', datetime.datetime.now(ZoneInfo(config.TIMEZONE)).isoformat())
 
 
 async def watch_channel(bot, conn):
@@ -159,8 +162,11 @@ async def watch_channel(bot, conn):
                 if config.RECOGNITION_PROVIDER != 'disabled':
                     await poll_once(bot, conn, session)
                     set_state(conn, 'channel_last_error', None)
+                    set_state(conn, 'channel_error_reason', None)
             except Exception as error:
                 log.exception('Channel import failed; will retry without advancing cursor')
+                reason = diagnostics.redact(str(error)) if isinstance(error, BotError) else type(error).__name__
+                set_state(conn, 'channel_error_reason', reason[:700])
                 if not get_state(conn, 'channel_last_error'):
                     try:
                         reason = diagnostics.redact(str(error)) if isinstance(error, BotError) else type(error).__name__
@@ -192,3 +198,29 @@ def confirmed_results(conn, date_str=None):
         if draft.get('status') == 'confirmed' and (date_str is None or draft['date'] == date_str):
             records.append(dict(draft, post_id=row['key'].rsplit(':', 1)[1]))
     return sorted(records, key=lambda d: (d['date'], int(d['post_id'])), reverse=True)
+
+
+def monitoring_status(conn):
+    channel = config.REPLACEMENTS_CHANNEL
+    if not channel:
+        return 'Моніторинг каналу вимкнений: канал не задано.'
+    lines = [f'📡 <b>Моніторинг каналу @{html.escape(channel)}</b>']
+    if config.RECOGNITION_PROVIDER == 'disabled':
+        lines.append('⏸ Розпізнавання вимкнене. Потрібно налаштувати провайдер розпізнавання.')
+    if conn is None:
+        return '\n'.join(lines)
+    success = get_state(conn, 'channel_last_success')
+    attempt = get_state(conn, 'channel_last_attempt')
+    error = get_state(conn, 'channel_error_reason')
+    lines.append('Остання успішна перевірка: ' + html.escape(success or 'ще не виконана'))
+    if attempt:
+        lines.append('Остання спроба: ' + html.escape(attempt))
+    latest = get_state(conn, 'channel_latest_post')
+    if latest:
+        lines.append(f'Останній допис із фото: №{latest}')
+    if error:
+        lines.append('⚠️ Помилка: ' + html.escape(error))
+    pending = [json.loads(row['value']) for row in conn.execute(
+        'SELECT value FROM bot_state WHERE key LIKE ?', (f'channel_draft:{channel}:%',)).fetchall()]
+    lines.append(f'Очікують підтвердження: {sum(d.get("status") == "pending" for d in pending)}')
+    return '\n'.join(lines)
