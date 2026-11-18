@@ -47,3 +47,30 @@ def test_failed_query_adds_template_but_never_bound_values_to_traceback():
         conn.execute('SELECT value FROM bot_state WHERE key = ?', ('private-bound-value',))
     assert 'SELECT value FROM bot_state WHERE key = ?' in str(caught.value.__notes__)
     assert 'private-bound-value' not in str(caught.value.__notes__)
+
+
+def test_busy_connection_is_not_pinged_before_every_query(monkeypatch):
+    from queue_bot.storage import database
+    clock = [1000.0]
+    monkeypatch.setattr(database, '_monotonic', lambda: clock[0])
+    raw = MagicMock()
+    raw.closed = False
+    conn = PGConnectionWrapper(raw, 'unused-offline-dsn')
+    for _ in range(5):
+        conn.execute('SELECT value FROM bot_state WHERE key = ?', ('k',))
+    assert raw.execute.call_count == 0  # no extra SELECT 1 round trips
+    clock[0] += PGConnectionWrapper.PING_IDLE_SECONDS
+    conn.execute('SELECT value FROM bot_state WHERE key = ?', ('k',))
+    raw.execute.assert_called_once_with('SELECT 1')
+
+
+def test_dropped_connection_reconnects_without_waiting_for_idle(monkeypatch):
+    raw = MagicMock()
+    raw.closed = False
+    conn = PGConnectionWrapper(raw, 'unused-offline-dsn')
+    fresh = MagicMock()
+    fresh.closed = False
+    monkeypatch.setattr(conn, '_connect_raw', lambda: fresh)
+    raw.closed = True
+    conn.execute('SELECT 1 FROM bot_state')
+    assert conn.raw is fresh
