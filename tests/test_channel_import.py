@@ -21,14 +21,16 @@ def test_album_and_untrusted_images():
 async def test_poll_persists_draft_and_does_not_repeat(conn, monkeypatch):
     monkeypatch.setattr(channel, 'read_bounded', AsyncMock(side_effect=lambda _, url, limit: b'page' if url.startswith('https://t.me/s/') else b'\xff\xd8\xffimage'))
     monkeypatch.setattr(channel, 'parse_posts', lambda *_: [dict(id=828, photos=['image'], url='https://t.me/replacements_xpk/828')])
-    recognize = AsyncMock(return_value=dict(date='2026-11-09', replacements=[], confidence=.95))
+    import datetime
+    upcoming = datetime.date.today() + datetime.timedelta(days=1)
+    recognize = AsyncMock(return_value=dict(date=upcoming.isoformat(), replacements=[], confidence=.95))
     monkeypatch.setattr(recognition, 'recognize_replacements_from_images', recognize)
     bot = MagicMock(send_message=AsyncMock())
     await channel.poll_once(bot, conn, None)
     await channel.poll_once(bot, conn, None)
     assert recognize.await_count == 1
     assert bot.send_message.await_count == 1
-    assert 'У групи ПІ-231 замін немає. 📅 09.11.2026' in bot.send_message.call_args.args[1]
+    assert f'У групи ПІ-231 замін немає. 📅 {upcoming:%d.%m.%Y}' in bot.send_message.call_args.args[1]
     assert channel.get_state(conn, 'channel_draft:replacements_xpk:828')['status'] == 'pending'
     assert conn.execute('SELECT COUNT(*) FROM replacements').fetchone()[0] == 0
 
@@ -288,3 +290,73 @@ async def test_successful_check_records_health_even_without_new_posts(conn, monk
     assert channel.get_state(conn, 'channel_last_success')
     assert channel.get_state(conn, 'channel_last_attempt')
     assert channel.get_state(conn, 'channel_latest_post') == 828
+
+
+def _channel_page(monkeypatch, posts):
+    monkeypatch.setattr(channel, 'read_bounded', AsyncMock(side_effect=lambda _, url, limit: b'page' if url.startswith('https://t.me/s/') else b'\xff\xd8\xffimage'))
+    monkeypatch.setattr(channel, 'parse_posts', lambda *_: [
+        dict(id=i, photos=['image'] * n, url=f'https://t.me/replacements_xpk/{i}') for i, n in posts])
+
+
+@pytest.mark.asyncio
+async def test_unreadable_post_is_reported_once_and_does_not_block_later_posts(conn, monkeypatch):
+    import datetime
+    from queue_bot.services.errors import UnreadableTable
+    upcoming = (datetime.date.today() + datetime.timedelta(days=1)).isoformat()
+    _channel_page(monkeypatch, [(844, 1), (845, 1)])
+    channel.set_state(conn, 'channel_cursor:replacements_xpk', 842)
+    recognize = AsyncMock(side_effect=[UnreadableTable('Не вдалося визначити дату таблиці.'),
+                                       dict(date=upcoming, replacements=[], confidence=.95)])
+    monkeypatch.setattr(recognition, 'recognize_replacements_from_images', recognize)
+    bot = MagicMock(send_message=AsyncMock())
+    await channel.poll_once(bot, conn, None)
+    assert channel.get_state(conn, 'channel_cursor:replacements_xpk') == 844
+    assert channel.get_state(conn, 'channel_draft:replacements_xpk:844')['status'] == 'failed'
+    assert 'Допис №844' in bot.send_message.call_args.args[1]
+    await channel.poll_once(bot, conn, None)
+    await channel.poll_once(bot, conn, None)
+    assert recognize.await_count == 2 and bot.send_message.await_count == 2
+    assert channel.get_state(conn, 'channel_cursor:replacements_xpk') == 845
+    assert channel.get_state(conn, 'channel_draft:replacements_xpk:845')['status'] == 'pending'
+
+
+@pytest.mark.asyncio
+async def test_provider_failure_still_retries_the_same_post(conn, monkeypatch):
+    _channel_page(monkeypatch, [(844, 1)])
+    channel.set_state(conn, 'channel_cursor:replacements_xpk', 842)
+    monkeypatch.setattr(recognition, 'recognize_replacements_from_images',
+                        AsyncMock(side_effect=BotError('Помилка OpenRouter API (429): перевищено ліміт запитів.')))
+    with pytest.raises(BotError):
+        await channel.poll_once(MagicMock(send_message=AsyncMock()), conn, None)
+    assert channel.get_state(conn, 'channel_cursor:replacements_xpk') == 842
+    assert channel.get_state(conn, 'channel_draft:replacements_xpk:844') is None
+
+
+@pytest.mark.asyncio
+async def test_big_album_is_skipped_without_ai_and_past_tables_are_not_announced(conn, monkeypatch):
+    import datetime
+    past = (datetime.date.today() - datetime.timedelta(days=3)).isoformat()
+    _channel_page(monkeypatch, [(849, 4), (855, 2)])
+    channel.set_state(conn, 'channel_cursor:replacements_xpk', 848)
+    recognize = AsyncMock(return_value=dict(date=past, replacements=[], confidence=.95))
+    monkeypatch.setattr(recognition, 'recognize_replacements_from_images', recognize)
+    bot = MagicMock(send_message=AsyncMock())
+    await channel.poll_once(bot, conn, None)
+    assert recognize.await_count == 1  # the four-photo ad cost nothing; the table was read in the same poll
+    assert channel.get_state(conn, 'channel_draft:replacements_xpk:849')['status'] == 'skipped'
+    assert channel.get_state(conn, 'channel_draft:replacements_xpk:855')['status'] == 'expired'
+    assert channel.get_state(conn, 'channel_cursor:replacements_xpk') == 855
+    bot.send_message.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_content_errors_from_recognition_are_unreadable_table(conn, monkeypatch):
+    from queue_bot.services.errors import UnreadableTable
+    monkeypatch.setattr(config, 'RECOGNITION_PROVIDER', 'openai')
+    monkeypatch.setattr(recognition, '_ask_ai', AsyncMock(return_value=dict(date='', replacements=[], confidence=.9)))
+    with pytest.raises(UnreadableTable):
+        await recognition.recognize_replacements_from_images([b'a'], conn=conn, allow_empty=True)
+    monkeypatch.setattr(recognition, '_ask_ai', AsyncMock(side_effect=BotError('Помилка OpenAI API (500): x.')))
+    with pytest.raises(BotError) as raised:
+        await recognition.recognize_replacements_from_images([b'a'], conn=conn, allow_empty=True)
+    assert not isinstance(raised.value, UnreadableTable)
