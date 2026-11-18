@@ -408,12 +408,22 @@ class PGCursorWrapper:
             yield PGRow(r)
 
 
+def _monotonic() -> float:
+    import time
+    return time.monotonic()
+
+
 class PGConnectionWrapper:
     """Обгортка над з'єднанням psycopg, що надає інтерфейс sqlite3.Connection
     (автоматично трансформує '?' в '%s', підтримує lastrowid та автоперепідключення)."""
 
+    # Pinging before every query doubled each round trip to a database in another region.
+    # A connection that was busy moments ago is alive; only one that sat idle is checked first.
+    PING_IDLE_SECONDS = 30
+
     def __init__(self, raw_conn, clean_url: str):
         self.raw = raw_conn
+        self._last_used = _monotonic()
         # Avoid stale result descriptors after additive migrations by another
         # deployment, including connections routed through a PostgreSQL pooler.
         self.raw.prepare_threshold = None
@@ -435,7 +445,7 @@ class PGConnectionWrapper:
         try:
             if self.raw.closed:
                 self.raw = self._connect_raw()
-            else:
+            elif _monotonic() - self._last_used >= self.PING_IDLE_SECONDS:
                 self.raw.execute("SELECT 1")
         except Exception:
             try:
@@ -508,6 +518,7 @@ class PGConnectionWrapper:
         else:
             cur.execute(pg_sql, params)
 
+        self._last_used = _monotonic()
         return PGCursorWrapper(cur, lastrowid=lastrowid)
 
     def close(self):
