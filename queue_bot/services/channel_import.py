@@ -14,12 +14,14 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 from queue_bot import config
 from queue_bot.services import recognition, diagnostics
-from queue_bot.services.errors import BotError
+from queue_bot.services.errors import BotError, UnreadableTable
 
 log = logging.getLogger(__name__)
 
 # Bump when recognition changes: drafts dated today or later are recognized and asked about once more.
 RECOGNIZER_VERSION = 4
+# One table arrives as one photo or two halves; larger albums are not tables.
+MAX_TABLE_PHOTOS = 2
 
 
 def format_no_replacements(date_str):
@@ -127,15 +129,34 @@ async def poll_once(bot, conn, session):
     for post in candidates:
         key = f'channel_draft:{channel}:{post["id"]}'
         draft = get_state(conn, key)
+        if draft is None and len(post['photos']) > MAX_TABLE_PHOTOS:
+            # A table is one or two photos; bigger albums in this channel are ads. Do not spend an AI request on them.
+            draft = dict(source=post['url'], status='skipped', reason='album', notified=True)
+            set_state(conn, key, draft)
         if draft is None or post['id'] in stale:
             if recognized:
                 break
             recognized = True
             images = await download_post_images(session, post, channel)
-            result = await recognition.recognize_replacements_from_images(
-                images, config.STUDENT_GROUP, conn, allow_empty=True)
-            datetime.date.fromisoformat(result['date'])
+            try:
+                result = await recognition.recognize_replacements_from_images(
+                    images, config.STUDENT_GROUP, conn, allow_empty=True)
+                datetime.date.fromisoformat(result['date'])
+            except UnreadableTable as error:
+                # Not a table (an announcement, a blurry shot): retrying the same photo every minute would block
+                # every later post forever, so hand it to the owner once and move on.
+                set_state(conn, key, dict(source=post['url'], status='failed', reason=str(error)[:700],
+                                          version=RECOGNIZER_VERSION, notified=True))
+                await bot.send_message(config.OWNER_ID,
+                                       f'⚠️ <a href="{post["url"]}">Допис №{post["id"]}</a> не вдалося розпізнати як таблицю замін.\n'
+                                       f'Причина: {html.escape(str(error)[:700])}\n'
+                                       'Перевірте фото вручну; бот перейшов до наступних дописів.')
+                set_state(conn, cursor_key, max(post['id'], get_state(conn, cursor_key) or 0))
+                continue
             draft = dict(result, source=post['url'], status='pending', version=RECOGNIZER_VERSION)
+            if draft['date'] < today:
+                # Caught up on an old post: its day is over, asking to announce it would only be noise.
+                draft.update(status='expired', notified=True)
             set_state(conn, key, draft)
         if not draft.get('notified'):
             from queue_bot.services.replacements import format_replacement

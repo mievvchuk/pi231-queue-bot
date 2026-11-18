@@ -7,7 +7,7 @@ import re
 import aiohttp
 
 from queue_bot import config
-from queue_bot.services.errors import BotError
+from queue_bot.services.errors import BotError, UnreadableTable
 from queue_bot.services.schedule_notes import normalize_group, resolve_header_notes
 
 log = logging.getLogger(__name__)
@@ -434,6 +434,16 @@ async def recognize_replacements_from_images(images: list[bytes], group_name: st
     else:
         result = await _ask_ai(images, group_name, next_work_date, allow_empty)
 
+    # The provider answered: whatever is wrong now is about the photo itself, and asking again will not fix it.
+    try:
+        return _parse_result(result, group_name, next_work_date, allow_empty)
+    except UnreadableTable:
+        raise
+    except BotError as error:
+        raise UnreadableTable(str(error)) from error
+
+
+def _parse_result(result, group_name: str, next_work_date: str, allow_empty: bool) -> dict:
     if not isinstance(result, dict):
         raise BotError('ШІ повернув некоректний формат таблиці. Повторіть розпізнавання.')
     date_str = result.get("date")

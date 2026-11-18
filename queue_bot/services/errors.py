@@ -4,3 +4,7 @@ class BotError(Exception):
 
 class PermissionDenied(BotError):
     pass
+
+
+class UnreadableTable(BotError):
+    """The photo was delivered and answered, but it is not a readable replacements table."""
