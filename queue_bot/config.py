@@ -1,6 +1,5 @@
 """Central environment configuration; no personal IDs or credentials in source."""
 import os
-from datetime import date
 from pathlib import Path
 import re
 from urllib.parse import urlsplit
@@ -60,10 +59,6 @@ OWNER_ID = integer('OWNER_ID', 0)
 GROUP_CHAT_ID = os.getenv('GROUP_CHAT_ID', '').strip()
 SUBJECTS_PATH = data_path('SUBJECTS_PATH', 'subjects.json')
 SCHEDULE_PATH = data_path('SCHEDULE_PATH', 'schedule.json')
-try:
-    SEMESTER_END_DATE = date.fromisoformat(os.getenv('SEMESTER_END_DATE', '2026-12-14').strip())
-except ValueError:
-    raise RuntimeError('SEMESTER_END_DATE must be a date in YYYY-MM-DD format') from None
 LAB_CATALOG_PATH = data_path('LAB_CATALOG_PATH', 'lab_catalog.json')
 COURSEWORK_PRIORITY_PATH = data_path('COURSEWORK_PRIORITY_PATH', 'coursework_priority.json')
 STUDENT_GROUP = os.getenv('STUDENT_GROUP', 'ПІ-231')

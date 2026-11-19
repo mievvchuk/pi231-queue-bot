@@ -32,6 +32,8 @@ class AdminUserState(StatesGroup):
 
 class AdminSubjectsState(StatesGroup):
     in_menu = State()
+    picking_pair_plan = State()
+    entering_pair_plan = State()
     select_subject_for_teacher = State()
     entering_teacher_name = State()
     entering_new_subject_name = State()

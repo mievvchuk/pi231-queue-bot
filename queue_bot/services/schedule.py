@@ -202,7 +202,7 @@ def get_upcoming_lesson(conn, schedule_data, *, now=None, group_name=None):
             if target == now.date() and end <= now.strftime('%H:%M'):
                 continue
             selected = [item for item in lessons if item['number'] == number and
-                        _is_scheduled_subject(item.get('subject'))]
+                        is_scheduled_subject(item.get('subject'))]
             if selected:
                 return dict(date=target.isoformat(), number=number, startTime=start, endTime=end,
                             ongoing=target == now.date() and start <= now.strftime('%H:%M') < end,
@@ -348,56 +348,93 @@ def _apply_replacements(base, replacements):
     return actual_lessons
 
 
-def _is_scheduled_subject(subject):
+def is_scheduled_subject(subject):
     return str(subject or "").strip().casefold() not in {
         "", "—", "-", "немає пари", "нема пари", "пари немає", "скасовано", "пару скасовано",
         "немає заняття", "заняття немає", "занять немає",
     }
 
 
-def get_remaining_pairs(conn, *, now: datetime | None = None) -> dict[str, tuple[str, int]]:
-    """Return the display name and number of remaining slots for each subject."""
+def save_subject_pair_plan(conn, subject: str, base_count: int, end_date: date, *, now=None) -> None:
     from queue_bot.services.lesson_scheduler import subject_name
+
+    now = now or datetime.now(UK_TZ)
+    conn.execute(
+        """INSERT INTO subject_pair_plans (subject_key, subject_name, base_count, end_date, saved_at)
+           VALUES (?, ?, ?, ?, ?)
+           ON CONFLICT (subject_key) DO UPDATE SET subject_name = excluded.subject_name,
+             base_count = excluded.base_count, end_date = excluded.end_date, saved_at = excluded.saved_at""",
+        (subject_name(subject), subject, base_count, end_date.isoformat(), int(now.timestamp())),
+    )
+
+
+def get_subject_pair_plans(conn) -> dict[str, dict]:
+    rows = conn.execute("SELECT * FROM subject_pair_plans ORDER BY subject_name").fetchall()
+    return {row["subject_key"]: dict(row) for row in rows}
+
+
+def _subject_slots(lessons, day):
+    from queue_bot.services.lesson_scheduler import subject_name
+
+    slots = {}
+    for lesson in lessons:
+        subject = lesson["subject"]
+        if is_scheduled_subject(subject):
+            end = time.max
+            with suppress(ValueError):
+                end = time.fromisoformat(lesson["endTime"]).replace(tzinfo=None)
+            slot = (lesson["number"], subject_name(subject))
+            slots[slot] = datetime.combine(day, end, tzinfo=UK_TZ)
+    return slots
+
+
+def get_remaining_pairs(conn, *, now: datetime | None = None) -> dict[str, dict]:
+    """Use the saved baseline, elapsed regular lessons and upcoming subject changes."""
     from queue_bot.services.working_days import list_working_saturdays
 
     now = (now or datetime.now(UK_TZ)).astimezone(UK_TZ)
     today = now.date()
-    end = config.SEMESTER_END_DATE
-    if end < today:
-        return {}
+    plans = get_subject_pair_plans(conn)
+    for plan in plans.values():
+        plan["remaining"] = 0
+    active = {key: plan for key, plan in plans.items() if plan["end_date"] >= today.isoformat()}
+    if not active:
+        return plans
 
+    saved = {key: datetime.fromtimestamp(plan["saved_at"], UK_TZ) for key, plan in active.items()}
+    start = min(instant.date() for instant in saved.values())
+    end_key = max(plan["end_date"] for plan in active.values())
     data = read_schedule(conn)
-    saturdays = {row["date"]: row for row in list_working_saturdays(conn, today.isoformat())}
-    replacements_by_date = defaultdict(list)
+    saturdays = {row["date"]: row for row in list_working_saturdays(conn, start.isoformat())}
+    changes = defaultdict(list)
     for item in get_replacements(conn, group_name=config.STUDENT_GROUP, from_date=today.isoformat()):
-        replacements_by_date[item["date"]].append(item)
+        if item["date"] <= end_key:
+            with suppress(ValueError):
+                changes[date.fromisoformat(item["date"])].append(item)
 
-    counts = Counter()
-    names = {}
-    for offset in range((end - today).days + 1):
-        day = today + timedelta(days=offset)
+    elapsed, added, removed = Counter(), Counter(), Counter()
+    elapsed_days = ((start + timedelta(days=offset)) for offset in range((today - start).days + 1))
+    affected_days = set(elapsed_days) | changes.keys()
+    for day in affected_days:
         date_key = day.isoformat()
-        lessons = _apply_replacements(
-            _planned_lessons(data, day, saturdays.get(date_key)), replacements_by_date.get(date_key, ()),
-        )
-        seen = set()
-        for lesson in lessons:
-            subject = lesson["subject"]
-            if not _is_scheduled_subject(subject):
-                continue
-            if day == today and lesson["endTime"]:
-                with suppress(ValueError):
-                    if now.time() >= time.fromisoformat(lesson["endTime"]).replace(tzinfo=None):
-                        continue
-            key = subject_name(subject)
-            slot = (lesson["number"], key)
-            if slot in seen:
-                continue
-            seen.add(slot)
-            counts[key] += 1
-            names.setdefault(key, subject)
+        regular = _planned_lessons(data, day, saturdays.get(date_key))
+        base_slots = _subject_slots(regular, day)
+        if day <= today:
+            for (_, key), finishes in base_slots.items():
+                if key in active and saved[key] < finishes <= now:
+                    elapsed[key] += 1
+        if day not in changes:
+            continue
+        final_slots = _subject_slots(_apply_replacements(regular, changes[day]), day)
+        for before, after, counter in ((base_slots, final_slots, removed), (final_slots, base_slots, added)):
+            for slot in before.keys() - after.keys():
+                _, key = slot
+                if key in active and date_key <= active[key]["end_date"] and before[slot] > now:
+                    counter[key] += 1
 
-    return {key: (names[key], count) for key, count in counts.items()}
+    for key, plan in active.items():
+        plan["remaining"] = max(0, plan["base_count"] - elapsed[key] - removed[key]) + added[key]
+    return plans
 
 
 def format_schedule_for_date(conn, schedule_data: dict, dt: date, group_name: str = "ПІ-231") -> str:

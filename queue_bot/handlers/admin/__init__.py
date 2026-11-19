@@ -5,6 +5,7 @@ from .guards import AdminOnly, _is_admin_filter, admin_state_filter
 from .presentation import get_open_session, get_admin_queue_menu, get_admin_student_menu, open_admin_queue_manager, open_admin_student_list, open_admin_student_manager, format_user_card, show_users_list
 from .panels import admin_quick_manage_from_student_view, admin_switch_to_student_queue_view, admin_panel_open, admin_more_panel, admin_reports_removed, permanent_queue_notice, admin_category_queues, admin_category_students
 from .subjects import admin_view_subjects_menu, admin_add_teacher_start, admin_add_teacher_subject_picked, admin_add_teacher_name_received, admin_add_new_subject_start, admin_add_new_subject_name_received, admin_add_new_subject_teacher_received, admin_rename_subject_start, admin_rename_subject_picked, admin_rename_subject_name_received, admin_remove_teacher_start, admin_remove_teacher_subject_picked, admin_remove_teacher_confirmed, admin_delete_subject_start, admin_delete_subject_picked, admin_delete_subject_confirmed
+from .subjects import admin_pick_pair_plan, admin_pair_plan_subject_selected, admin_save_pair_plan
 from .users import admin_category_users
 from .users import admin_list_users_start, admin_paginate_users, admin_open_user_card, admin_back_to_users, admin_start_add_user, admin_finish_add_user, admin_start_search_user, admin_finish_search_user, admin_ask_edit_name, admin_receive_new_name, admin_confirm_new_name, admin_toggle_user_block, admin_ask_delete_user, admin_confirm_delete_user, show_blocked_list, unblock_student_click
 from .settings import admin_category_settings
@@ -27,6 +28,9 @@ router.message(F.text.in_({'🔒 Відкрити/закрити', '🔒 Від�
 router.message(AdminPanelState.select_queue_for_close, F.text.startswith('📋 '))(permanent_queue_notice)
 router.message(F.text.in_({'📋 Черги та студенти', '📋 Черги', '🎓 Студенти в чергах', '👥 Студенти', '🔙 Назад до черг'}), StateFilter('*'))(admin_category_queues)
 router.message(F.text.in_({'📚 Предмети та викладачі', '📚 Предмети', '🔙 До предметів'}), StateFilter('*'))(admin_view_subjects_menu)
+router.message(F.text == '📅 Внести залишок пар', StateFilter('*'))(admin_pick_pair_plan)
+router.message(AdminSubjectsState.picking_pair_plan, F.text.startswith('📘 '))(admin_pair_plan_subject_selected)
+router.message(AdminSubjectsState.entering_pair_plan, F.text)(admin_save_pair_plan)
 router.message(F.text == '👨\u200d🏫 Додати викладача', StateFilter('*'))(admin_add_teacher_start)
 router.message(AdminSubjectsState.select_subject_for_teacher, F.text.startswith('📚 '))(admin_add_teacher_subject_picked)
 router.message(AdminSubjectsState.entering_teacher_name, F.text)(admin_add_teacher_name_received)

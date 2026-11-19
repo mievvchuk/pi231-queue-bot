@@ -1,4 +1,6 @@
 """Admin subjects handlers."""
+from datetime import datetime
+
 from .common import (
     AdminSubjectsState,
     BotError,
@@ -14,11 +16,11 @@ from .common import (
     subjects_module,
 )
 
+from queue_bot.services import schedule
+from queue_bot.services.lesson_scheduler import subject_name
+
 
 async def admin_view_subjects_menu(message: Message, state: FSMContext, conn, subjects):
-    from queue_bot.services import schedule
-    from queue_bot.services.lesson_scheduler import subject_name
-
     await state.clear()
     await state.set_state(AdminSubjectsState.in_menu)
     is_owner = admins.is_owner(conn, message.from_user.id)
@@ -29,9 +31,15 @@ async def admin_view_subjects_menu(message: Message, state: FSMContext, conn, su
         teachers_str = ", ".join(t["name"] for t in s.get("teachers", [])) or "— немає викладачів —"
         lines.append(f"{idx}. <b>{html.escape(s['name'])}</b>\n   👨‍🏫 {html.escape(teachers_str)}")
 
-        count = remaining.get(subject_name(s["name"]))
-        if count:
-            lines.append(f"   📅 Залишилось пар: <b>{count[1]}</b>")
+        plan = remaining.pop(subject_name(s["name"]), None)
+        if plan:
+            end = datetime.fromisoformat(plan["end_date"]).strftime("%d.%m.%Y")
+            lines.append(f"   📅 Залишилось пар: <b>{plan['remaining']}</b> · до {end}")
+
+    for plan in remaining.values():
+        end = datetime.fromisoformat(plan["end_date"]).strftime("%d.%m.%Y")
+        lines.append(f"<b>{html.escape(plan['subject_name'])}</b>")
+        lines.append(f"   📅 Залишилось пар: <b>{plan['remaining']}</b> · до {end}")
 
     lines.append("")
     if is_owner:
@@ -41,6 +49,61 @@ async def admin_view_subjects_menu(message: Message, state: FSMContext, conn, su
 
     await message.answer("\n".join(lines), reply_markup=get_admin_subjects_menu(is_owner=is_owner))
 
+
+
+async def admin_pick_pair_plan(message: Message, state: FSMContext, conn, subjects):
+    names = {key: plan["subject_name"] for key, plan in schedule.get_subject_pair_plans(conn).items()}
+    data = schedule.read_schedule(conn)
+    for day in schedule.DAY_KEYS:
+        for week in schedule.WEEK_NAMES_UK:
+            for lesson in schedule.get_base_schedule_for_day(data, day, week):
+                name = lesson["subject"]
+                if schedule.is_scheduled_subject(name):
+                    names.setdefault(subject_name(name), name)
+    names.update({subject_name(subject["name"]): subject["name"] for subject in subjects})
+    await state.set_data({"pair_plan_subjects": list(names.values())})
+    await state.set_state(AdminSubjectsState.picking_pair_plan)
+    rows = [[f"📘 {name}"] for name in sorted(names.values(), key=str.casefold)]
+    rows.append(["🔙 До предметів"])
+    await message.answer("Оберіть предмет, для якого потрібно внести залишок пар.", reply_markup=make_reply_keyboard(rows))
+
+
+async def admin_pair_plan_subject_selected(message: Message, state: FSMContext, conn):
+    name = message.text.removeprefix("📘 ")
+    selection = await state.get_data()
+    if name not in selection.get("pair_plan_subjects", []):
+        raise BotError("Оберіть предмет кнопкою зі списку.")
+    await state.set_data({"pair_plan_subject": name})
+    await state.set_state(AdminSubjectsState.entering_pair_plan)
+    plan = schedule.get_subject_pair_plans(conn).get(subject_name(name))
+    text = f"<b>{html.escape(name)}</b>\n"
+    if plan:
+        end = datetime.fromisoformat(plan["end_date"]).strftime("%d.%m.%Y")
+        text += f"Було внесено: {plan['base_count']} · остання пара {end}\n"
+    text += (
+        "\nНапишіть фактичний залишок за базовим розкладом і дату останньої пари, "
+        "наприклад <code>3 14.12.2026</code>. Почніть із <code>0</code>, якщо базових пар більше немає."
+    )
+    await message.answer(text, reply_markup=make_reply_keyboard([["🔙 До предметів"]]))
+
+
+async def admin_save_pair_plan(message: Message, state: FSMContext, conn, subjects):
+    try:
+        count, date_text = message.text.split()
+        if not count.isascii() or not count.isdecimal() or len(count) > 4:
+            raise ValueError
+        count = int(count)
+        end = datetime.strptime(date_text, "%d.%m.%Y").date()
+        if count and end < schedule.get_current_date():
+            raise ValueError
+    except ValueError:
+        raise BotError("Вкажіть залишок і дату останньої пари. Для додатного залишку дата має бути сьогодні або пізніше. Приклад: 3 14.12.2026.") from None
+    selection = await state.get_data()
+    name = selection["pair_plan_subject"]
+    schedule.save_subject_pair_plan(conn, name, count, end)
+    admins.log_action(conn, message.from_user.id, "edit_subject_pair_plan", f"{name}: {count}, {end}")
+    await message.answer(f"✅ {html.escape(name)} · внесено пар: {count} · до {end:%d.%m.%Y}")
+    await admin_view_subjects_menu(message, state, conn, subjects)
 
 
 async def admin_add_teacher_start(message: Message, state: FSMContext, subjects):

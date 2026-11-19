@@ -1,4 +1,5 @@
 import asyncio
+import html
 import logging
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -34,6 +35,38 @@ def mark_sent_today(conn, today_key: str) -> None:
         log.warning(f"Error saving schedule notification state: {e}")
 
 
+async def notify_remaining_pairs(bot, conn, *, now=None) -> None:
+    plans = schedule.get_remaining_pairs(conn, now=now)
+    due = []
+    for key, plan in plans.items():
+        count = plan["remaining"]
+        if count in (1, 2):
+            marker = f"subject_pairs_notice:{key}:{plan['end_date']}:{count}"
+            if conn.execute("SELECT 1 FROM bot_state WHERE key = ?", (marker,)).fetchone() is None:
+                due.append((marker, plan))
+    if not due:
+        return
+
+    recipients = updates.get_active_user_ids(conn)
+    if not recipients:
+        return
+
+    lines = []
+    for marker, plan in due:
+        claimed = conn.execute(
+            "INSERT INTO bot_state (key, value) VALUES (?, ?) ON CONFLICT (key) DO NOTHING RETURNING key",
+            (marker, "sent"),
+        ).fetchone()
+        if claimed:
+            count = plan["remaining"]
+            name = html.escape(plan["subject_name"])
+            lines.append(f"{name} — <b>{count} {'пара' if count == 1 else 'пари'}</b>")
+    if lines:
+        await updates.broadcast_message_to_users(
+            bot, recipients, "📅 <b>До завершення предметів залишилось</b>\n" + "\n".join(lines),
+        )
+
+
 async def start_schedule_notifier(bot: Bot, conn, interval_sec: int = 60) -> None:
     """Фонова задача для щоденної розсилки о 17:00 актуального розкладу на наступний день."""
     log.info(f"Schedule daily notifier started (target time: {config.NOTIFICATION_TIME} {config.TIMEZONE})")
@@ -42,6 +75,7 @@ async def start_schedule_notifier(bot: Bot, conn, interval_sec: int = 60) -> Non
     while True:
         try:
             now = datetime.now(UK_TZ)
+            await notify_remaining_pairs(bot, conn, now=now)
             today_key = f"evening_{now.strftime('%Y-%m-%d')}"
 
             # Надсилаємо у вечірній час (починаючи з 17:00 і до 22:00), якщо ще не надсилали вечірнє сповіщення сьогодні

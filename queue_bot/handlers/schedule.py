@@ -98,17 +98,20 @@ async def show_week_schedule(message: Message, conn):
 async def show_remaining_pairs(message: Message, conn, subjects):
     from queue_bot.services.lesson_scheduler import subject_name
 
-    remaining = schedule.get_remaining_pairs(conn)
-    end = config.SEMESTER_END_DATE.strftime("%d.%m.%Y")
-    if not remaining:
-        await message.answer(f"До {end} включно в розкладі більше немає пар.")
+    plans = schedule.get_remaining_pairs(conn)
+    if not plans:
+        await message.answer("Адміністратор ще не вніс залишок пар.")
+        return
+    if not any(plan["remaining"] for plan in plans.values()):
+        await message.answer("За предметами з внесеним залишком пар більше немає.")
         return
 
     catalog = {subject_name(subject["name"]): subject["name"] for subject in subjects}
-    rows = [(catalog.get(key, name), count) for key, (name, count) in remaining.items()]
-    lines = [f"📚 <b>Пари до кінця семестру</b> · до {end} включно", ""]
-    for name, count in sorted(rows, key=lambda row: row[0].casefold()):
-        lines.append(f"{html.escape(name)} — <b>{count}</b>")
+    rows = [(catalog.get(key, plan["subject_name"]), plan) for key, plan in plans.items() if plan["remaining"]]
+    lines = ["📚 <b>Пари до кінця семестру</b>", ""]
+    for name, plan in sorted(rows, key=lambda row: row[0].casefold()):
+        end = datetime.date.fromisoformat(plan["end_date"]).strftime("%d.%m.%Y")
+        lines.append(f"{html.escape(name)} — <b>{plan['remaining']}</b> · до {end}")
     await message.answer("\n".join(lines))
 
 

@@ -242,6 +242,13 @@ CREATE TABLE IF NOT EXISTS schedule_lessons (
     note TEXT NOT NULL,
     UNIQUE (day_key, week_type, pair, position)
 );
+CREATE TABLE IF NOT EXISTS subject_pair_plans (
+    subject_key TEXT PRIMARY KEY,
+    subject_name TEXT NOT NULL,
+    base_count INTEGER NOT NULL CHECK (base_count >= 0),
+    end_date TEXT NOT NULL,
+    saved_at BIGINT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS schedule_teachers (
     lesson_id INTEGER NOT NULL REFERENCES schedule_lessons(id) ON DELETE CASCADE,
     position INTEGER NOT NULL,
@@ -523,7 +530,7 @@ class PGConnectionWrapper:
         lastrowid = None
 
         cur = self.raw.cursor(row_factory=dict_row)
-        tables_without_id = {"bot_updates", "bot_state", "working_saturdays", "browser_sessions", "schedule_teachers"}
+        tables_without_id = {"bot_updates", "bot_state", "working_saturdays", "browser_sessions", "schedule_teachers", "subject_pair_plans"}
         table_match = re.search(r"insert\s+into\s+([a-zA-Z_0-9]+)", pg_sql, re.IGNORECASE)
         table_name = table_match.group(1).lower() if table_match else ""
 
