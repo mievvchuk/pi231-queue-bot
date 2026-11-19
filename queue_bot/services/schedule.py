@@ -2,6 +2,7 @@ import html
 import json
 import logging
 import os
+from collections import Counter
 from pathlib import Path
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -65,6 +66,7 @@ def load_schedule_data(path: str | None = None) -> dict:
 
 
 WEEK_NAMES_UK = {"numerator": "Чисельник", "denominator": "Знаменник"}
+EDIT_WEEK_NAMES_UK = {**WEEK_NAMES_UK, "both": "Обидва тижні"}
 _SCHEDULE_IMPORT_KEY = "base_schedule_imported"
 
 
@@ -139,31 +141,33 @@ def read_schedule(conn) -> dict:
 
 
 def set_schedule_pair(conn, day_key: str, week_type: str, number: int, lesson: dict | None) -> None:
-    if day_key not in DAY_KEYS or week_type not in WEEK_NAMES_UK or number not in PAIR_TIMES:
+    if day_key not in DAY_KEYS or week_type not in EDIT_WEEK_NAMES_UK or number not in PAIR_TIMES:
         raise ValueError("Невірний день, тип тижня або номер пари.")
 
     import_legacy_schedule(conn, config.SCHEDULE_PATH)
     with transaction(conn):
         # PostgreSQL тримає блокування цього рядка до кінця транзакції, навіть коли пара порожня.
         conn.execute("UPDATE bot_state SET value = value WHERE key = ?", (_SCHEDULE_IMPORT_KEY,))
-        params = (day_key, week_type, number)
-        current = conn.execute(
-            """SELECT lessons, start_time, end_time, note FROM schedule_lessons
-               WHERE day_key = ? AND week_type = ? AND pair = ?
-               ORDER BY position LIMIT 1""",
-            params,
-        ).fetchone()
-        conn.execute("DELETE FROM schedule_lessons WHERE day_key = ? AND week_type = ? AND pair = ?", params)
-        if lesson is not None:
-            start, end = PAIR_TIMES[number]
-            _insert_lesson(conn, day_key, week_type, 0, {
-                **lesson,
-                "number": number,
-                "lessons": current["lessons"] if current and current["lessons"] else f"{number * 2 - 1}-{number * 2}",
-                "startTime": current["start_time"] if current else start,
-                "endTime": current["end_time"] if current else end,
-                "note": lesson.get("note", current["note"] if current else ""),
-            })
+        weeks = WEEK_NAMES_UK if week_type == "both" else (week_type,)
+        for week in weeks:
+            params = (day_key, week, number)
+            current = conn.execute(
+                """SELECT lessons, start_time, end_time, note FROM schedule_lessons
+                   WHERE day_key = ? AND week_type = ? AND pair = ?
+                   ORDER BY position LIMIT 1""",
+                params,
+            ).fetchone()
+            conn.execute("DELETE FROM schedule_lessons WHERE day_key = ? AND week_type = ? AND pair = ?", params)
+            if lesson is not None:
+                start, end = PAIR_TIMES[number]
+                _insert_lesson(conn, day_key, week, 0, {
+                    **lesson,
+                    "number": number,
+                    "lessons": current["lessons"] if current and current["lessons"] else f"{number * 2 - 1}-{number * 2}",
+                    "startTime": current["start_time"] if current else start,
+                    "endTime": current["end_time"] if current else end,
+                    "note": lesson.get("note", current["note"] if current else ""),
+                })
 
 
 def replace_schedule_from_backup(conn, data: dict) -> None:
@@ -364,18 +368,60 @@ def format_schedule_for_date(conn, schedule_data: dict, dt: date, group_name: st
     return f"{header}\n\n{format_lesson_slots(lessons)}"
 
 
-def format_lesson_slots(lessons: list[dict], *, compact: bool = False) -> str:
+def _lesson_details(lesson: dict) -> tuple:
+    people = lesson["teachers_raw"] or [{"name": lesson["teacher"], "room": lesson["room"]}]
+    teachers = tuple(sorted((person.get("name") or "", person.get("room") or "") for person in people))
+    return lesson["subject"], teachers, lesson["startTime"], lesson["endTime"], lesson["note"]
+
+
+def get_base_week_slots(data: dict, day: str) -> dict[int, dict[str, list[dict]]]:
+    """Group each pair by week only if its lessons differ."""
+    weeks = {
+        week: {slot["number"]: slot["lessons"] for slot in get_day_slots(get_base_schedule_for_day(data, day, week))}
+        for week in WEEK_NAMES_UK
+    }
+    slots = {}
+    for pair in sorted(set(weeks["numerator"]) | set(weeks["denominator"])):
+        numerator = weeks["numerator"].get(pair, [])
+        denominator = weeks["denominator"].get(pair, [])
+        same = Counter(map(_lesson_details, numerator)) == Counter(map(_lesson_details, denominator))
+        slots[pair] = ({"both": numerator} if same else
+                       {"numerator": numerator, "denominator": denominator})
+    return slots
+
+
+def format_base_week_slots(slots: dict[int, dict[str, list[dict]]]) -> str:
+    def summary(lessons, *, details=False):
+        labels = []
+        for lesson in lessons:
+            label = lesson["subject"]
+            if details:
+                extra = " · ".join(value for value in (lesson["teacher"], lesson["room"], lesson["note"]) if value)
+                if extra:
+                    label += f" · {extra[:139]}…" if len(extra) > 140 else f" · {extra}"
+            labels.append(html.escape(label))
+        return " / ".join(labels) if labels else "немає заняття"
+
+    lines = []
+    for pair, variants in slots.items():
+        if "both" in variants:
+            lines.append(f"{pair} пара — {summary(variants['both'])}")
+        else:
+            same_subjects = summary(variants["numerator"]) == summary(variants["denominator"])
+            lines.append(f"<b>{pair} пара</b>")
+            for week, lessons in variants.items():
+                lines.append(f"{WEEK_NAMES_UK[week]} — {summary(lessons, details=same_subjects)}")
+    return "\n".join(lines)
+
+
+def format_lesson_slots(lessons: list[dict]) -> str:
     blocks = []
     for slot in get_day_slots(lessons):
-        number = slot["number"]
-        if not slot["lessons"]:
-            blocks.append(f"{number} пара — немає заняття")
-        for lesson in slot["lessons"]:
-            if compact:
-                blocks.append(f"{number} пара — {html.escape(lesson['subject'])}")
-            else:
-                blocks.append(_format_lesson(lesson))
-    return ("\n" if compact else "\n\n").join(blocks)
+        if slot["lessons"]:
+            blocks.extend(_format_lesson(lesson) for lesson in slot["lessons"])
+        else:
+            blocks.append(f"{slot['number']} пара — немає заняття")
+    return "\n\n".join(blocks)
 
 
 def _format_lesson(l: dict) -> str:

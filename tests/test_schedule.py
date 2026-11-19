@@ -515,14 +515,15 @@ def test_schedule_import_preserves_legacy_edits_and_runs_once(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_edit_schedule_pair_from_telegram(conn):
+@pytest.mark.parametrize("week", ["numerator", "both"])
+async def test_edit_schedule_pair_from_telegram(conn, week):
     from unittest.mock import AsyncMock, MagicMock
 
     from queue_bot.handlers import schedule as handler
 
     state = AsyncMock()
     callback = MagicMock()
-    callback.data = "base_pair:wednesday:numerator:2"
+    callback.data = f"base_pair:wednesday:{week}:2"
     callback.from_user.id = 100
     schedule.replace_schedule_from_backup(conn, {
         "wednesday": [{"pair": 2, "subject": "Попередній предмет", "note": "Примітка"}],
@@ -532,6 +533,13 @@ async def test_edit_schedule_pair_from_telegram(conn):
     await handler.select_schedule_pair(callback, state, conn)
     state.set_state.assert_awaited_once_with(handler.EditScheduleState.waiting_for_lesson)
     state.get_data.return_value = state.set_data.await_args.args[0]
+    if week == "both":
+        prompt = callback.message.answer.await_args
+        assert "Обидва тижні" in prompt.args[0]
+        buttons = prompt.kwargs["reply_markup"].inline_keyboard
+        assert [row[0].callback_data for row in buttons] == [
+            "base_pair:wednesday:numerator:2", "base_pair:wednesday:denominator:2",
+        ]
     message = MagicMock()
     message.from_user.id = 100
     message.text = "Новий предмет\nКогут В.С. | 235\nБарабаш Д.С."
@@ -550,10 +558,57 @@ async def test_edit_schedule_pair_from_telegram(conn):
     assert "4 пара — немає заняття" in text
     assert "5 пара — немає заняття" in text
 
+    next_wednesday = wednesday + datetime.timedelta(days=7)
+    denominator = schedule.get_base_schedule(data, next_wednesday)
+    assert denominator[0]["subject"] == ("Новий предмет" if week == "both" else "Попередній предмет")
+
     message.text = "-"
     await handler.save_schedule_pair(message, state, conn)
     data = schedule.read_schedule(conn)
     text = schedule.format_schedule_for_date(conn, data, wednesday)
     assert "2 пара — немає заняття" in text
     assert 2 not in {lesson["number"] for lesson in schedule.get_base_schedule(data, wednesday)}
-    assert 2 in {lesson["number"] for lesson in schedule.get_base_schedule(data, wednesday + datetime.timedelta(days=7))}
+    denominator = schedule.get_base_schedule(data, next_wednesday)
+    assert bool(denominator) == (week == "numerator")
+
+
+@pytest.mark.asyncio
+async def test_schedule_editor_groups_only_matching_pairs(conn):
+    from unittest.mock import AsyncMock, MagicMock
+
+    from queue_bot.handlers import schedule as handler
+
+    schedule.replace_schedule_from_backup(conn, {
+        "monday": [{"pair": 1, "subject": "Філософія"}],
+        "wednesday": [
+            {"pair": 2, "subject": "Архітектура", "week_type": "denominator"},
+            {"pair": 3, "subject": "Спільний предмет"},
+            {"pair": 4, "subject": "Програмування", "room": "231", "week_type": "numerator"},
+            {"pair": 4, "subject": "Програмування", "room": "235", "week_type": "denominator"},
+        ],
+    })
+    callback = MagicMock()
+    callback.from_user.id = 100
+    callback.answer = AsyncMock()
+    callback.message.edit_text = AsyncMock()
+    state = AsyncMock()
+
+    callback.data = "base_day:wednesday"
+    await handler.select_schedule_day(callback, state, conn)
+    view = callback.message.edit_text.await_args
+    text = view.args[0]
+    keyboard = view.kwargs["reply_markup"].inline_keyboard
+    assert text.count("1 пара — немає заняття") == 1
+    assert text.count("3 пара — Спільний предмет") == 1
+    assert "Чисельник — немає заняття\nЗнаменник — Архітектура" in text
+    assert "Чисельник — Програмування · 231\nЗнаменник — Програмування · 235" in text
+    assert [button.callback_data for button in keyboard[1]] == [
+        "base_pair:wednesday:numerator:2", "base_pair:wednesday:denominator:2",
+    ]
+    assert [button.callback_data for button in keyboard[2]] == ["base_pair:wednesday:both:3"]
+
+    callback.data = "base_day:monday"
+    await handler.select_schedule_day(callback, state, conn)
+    view = callback.message.edit_text.await_args
+    assert "Чисельник" not in view.args[0] and "Знаменник" not in view.args[0]
+    assert all(len(row) == 1 for row in view.kwargs["reply_markup"].inline_keyboard)

@@ -97,19 +97,17 @@ async def show_week_schedule(message: Message, conn):
 async def show_base_schedule(message: Message, conn):
     sch_data = schedule.read_schedule(conn)
     group = html.escape(config.STUDENT_GROUP)
-    for week_type, week_name in schedule.WEEK_NAMES_UK.items():
-        lines = [f"📌 <b>Базовий розклад групи {group} · {week_name}</b>"]
-        for day_key in schedule.DAY_KEYS:
-            lessons = schedule.get_base_schedule_for_day(sch_data, day_key, week_type)
-            if day_key in ("saturday", "sunday") and not lessons:
-                continue
-            slots = schedule.format_lesson_slots(lessons, compact=True)
-            day_text = f"<b>{schedule.DAY_NAMES_UK[day_key]}</b>\n{slots}"
-            if len("\n\n".join([*lines, day_text])) > 4096:
-                await message.answer("\n\n".join(lines))
-                lines.clear()
-            lines.append(day_text)
-        await message.answer("\n\n".join(lines))
+    lines = [f"📌 <b>Базовий розклад групи {group}</b>"]
+    for day_key in schedule.DAY_KEYS:
+        slots = schedule.get_base_week_slots(sch_data, day_key)
+        if day_key in ("saturday", "sunday") and not any(any(variants.values()) for variants in slots.values()):
+            continue
+        day_text = f"<b>{schedule.DAY_NAMES_UK[day_key]}</b>\n{schedule.format_base_week_slots(slots)}"
+        if len("\n\n".join([*lines, day_text])) > 4096:
+            await message.answer("\n\n".join(lines))
+            lines.clear()
+        lines.append(day_text)
+    await message.answer("\n\n".join(lines))
 
 
 # ---------- Заміни ----------
@@ -780,21 +778,22 @@ async def select_schedule_day(callback: CallbackQuery, state: FSMContext, conn):
         return
 
     await state.clear()
-    data = schedule.read_schedule(conn)
-    lines = [f"<b>{schedule.DAY_NAMES_UK[day]}</b>"]
-    keyboard = []
-    for week, label in schedule.WEEK_NAMES_UK.items():
-        lessons = schedule.get_base_schedule_for_day(data, day, week)
-        slots = schedule.format_lesson_slots(lessons, compact=True)
-        lines.append(f"<b>{label}</b>\n{slots}")
-        keyboard.append([
-            InlineKeyboardButton(text=f"{label[:3]}. {pair}", callback_data=f"base_pair:{day}:{week}:{pair}")
-            for pair in schedule.PAIR_TIMES
-        ])
+    slots = schedule.get_base_week_slots(schedule.read_schedule(conn), day)
+    keyboard = [
+        [
+            InlineKeyboardButton(
+                text=f"{pair} пара" if week == "both" else f"{pair} пара · {schedule.WEEK_NAMES_UK[week]}",
+                callback_data=f"base_pair:{day}:{week}:{pair}",
+            )
+            for week in variants
+        ]
+        for pair, variants in slots.items()
+        if pair in schedule.PAIR_TIMES
+    ]
     keyboard.append([InlineKeyboardButton(text="🔙 До днів", callback_data="base_days")])
     await callback.answer()
     await callback.message.edit_text(
-        "\n\n".join(lines),
+        f"<b>{schedule.DAY_NAMES_UK[day]}</b>\n\n{schedule.format_base_week_slots(slots)}",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard),
     )
 
@@ -822,18 +821,25 @@ async def select_schedule_pair(callback: CallbackQuery, state: FSMContext, conn)
         return
     _, day, week, pair_key = parts
     pair = int(pair_key) if pair_key.isascii() and pair_key.isdecimal() else 0
-    if day not in schedule.DAY_KEYS or week not in schedule.WEEK_NAMES_UK or pair not in schedule.PAIR_TIMES:
+    if day not in schedule.DAY_KEYS or week not in schedule.EDIT_WEEK_NAMES_UK or pair not in schedule.PAIR_TIMES:
         await callback.answer("Оберіть пару ще раз.", show_alert=True)
         return
 
     await state.set_data({"day": day, "week": week, "pair": pair})
     await state.set_state(EditScheduleState.waiting_for_lesson)
     await callback.answer()
+    markup = None
+    if week == "both":
+        markup = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text=f"Лише {label.lower()}", callback_data=f"base_pair:{day}:{scope}:{pair}")]
+            for scope, label in schedule.WEEK_NAMES_UK.items()
+        ])
     await callback.message.answer(
-        f"<b>{schedule.DAY_NAMES_UK[day]} · {schedule.WEEK_NAMES_UK[week]} · {pair} пара</b>\n\n"
+        f"<b>{schedule.DAY_NAMES_UK[day]} · {schedule.EDIT_WEEK_NAMES_UK[week]} · {pair} пара</b>\n\n"
         "У першому рядку напишіть назву предмета. З наступного рядка можна вказати "
         "викладачів у форматі <code>Ім’я | аудиторія</code>, по одному на рядок. За потреби додайте рядок <code>Примітка: текст</code>.\n\n"
-        "Надішліть <code>-</code>, щоб прибрати заняття, або /cancel, щоб скасувати редагування."
+        "Надішліть <code>-</code>, щоб прибрати заняття, або /cancel, щоб скасувати редагування.",
+        reply_markup=markup,
     )
 
 
@@ -884,7 +890,7 @@ async def save_schedule_pair(message: Message, state: FSMContext, conn):
     admins.log_action(conn, message.from_user.id, "edit_schedule", f"{day}:{week}:{pair}")
     summary = html.escape(lesson["subject"]) if lesson else "немає заняття"
     await message.answer(
-        f"✅ {schedule.DAY_NAMES_UK[day]} · {schedule.WEEK_NAMES_UK[week]}\n"
+        f"✅ {schedule.DAY_NAMES_UK[day]} · {schedule.EDIT_WEEK_NAMES_UK[week]}\n"
         f"{pair} пара — {summary}",
         reply_markup=_schedule_day_keyboard(),
     )
