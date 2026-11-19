@@ -41,20 +41,60 @@ def subject_name(value):
     return aliases.get(key, key)
 
 
-def matches(subjects, session, lesson):
-    if session['queue_type'] != 'lesson':
+def _teacher_names(lesson):
+    if lesson.get('teachers_raw'):
+        return [t.get('name', '') for t in lesson['teachers_raw']]
+    text = re.sub(r'\([^)]*\)', '', str(lesson.get('teacher') or ''))
+    return [name.strip() for name in re.split(r'[,;/\n]+', text)]
+
+
+def _matches_teacher(subject, teacher, names, *, allow_surname=False):
+    keys = {normalized(name) for name in names}
+    if normalized(teacher['name']) in keys:
+        return True
+    if not allow_surname:
         return False
-    subject = find_subject(subjects, session['subject_id'])
-    teacher = find_teacher(subject, session['teacher_id']) if subject else None
-    if not teacher or subject_name(subject['name']) != subject_name(lesson.get('subject')):
-        return False
-    raw = lesson.get('teachers_raw')
-    if raw:
-        names = [t.get('name', '') for t in raw]
-    else:
-        text = re.sub(r'\([^)]*\)', '', str(lesson.get('teacher') or ''))
-        names = re.split(r'[,;/\n]+', text)
-    return normalized(teacher['name']) in {normalized(name) for name in names if normalized(name)}
+    surname = normalized(teacher['name'].split()[0])
+    return surname in keys and sum(
+        normalized(person['name'].split()[0]) == surname for person in subject['teachers']
+    ) == 1
+
+
+def _queues_for_lesson(conn, catalog, sessions, lesson, replacement, planned_lessons):
+    lesson_subject = subject_name(lesson.get('subject'))
+    candidates = []
+    for session in sessions:
+        if session['queue_type'] != 'lesson':
+            continue
+        subject = find_subject(catalog, session['subject_id'])
+        if not subject or subject_name(subject['name']) != lesson_subject:
+            continue
+        teacher = find_teacher(subject, session['teacher_id'])
+        if teacher:
+            candidates.append((session['id'], subject, teacher))
+
+    if not replacement:
+        names = _teacher_names(lesson)
+        return [sid for sid, subject, teacher in candidates if _matches_teacher(subject, teacher, names)]
+
+    names = _teacher_names(replacement)
+    if any(normalized(name) not in {'', 'невідомо', 'невказано', 'немає'} for name in names):
+        return [sid for sid, subject, teacher in candidates
+                if _matches_teacher(subject, teacher, names, allow_surname=True)]
+
+    # When only the room changes, keep the matching teacher from the original pair.
+    planned = [item for item in planned_lessons if item['number'] == lesson['number']
+               and subject_name(item['subject']) == lesson_subject]
+    names = [name for item in planned for name in _teacher_names(item)]
+    if any(normalized(name) for name in names):
+        return [sid for sid, subject, teacher in candidates
+                if _matches_teacher(subject, teacher, names, allow_surname=True)]
+
+    # A missing teacher must not block a replacement with one identifiable queue.
+    if len(candidates) == 1:
+        return [candidates[0][0]]
+    occupied = [sid for sid, _, _ in candidates if any(entry['user_id'] for entry in queues.get_entries(conn, sid))]
+    return occupied if len(occupied) == 1 else []
 
 
 def slot_times(day, lesson):
@@ -87,16 +127,23 @@ def sync_schedule(conn, subjects, *, now=None, schedule_data=None):
         return
     local = datetime.fromtimestamp(now, schedule.UK_TZ)
     data = schedule.read_schedule(conn) if schedule_data is None else schedule_data
-    lessons, _ = schedule.get_actual_schedule(conn, data, local.date(), config.STUDENT_GROUP)
-    current = []
+    lessons, replacements = schedule.get_actual_schedule(conn, data, local.date(), config.STUDENT_GROUP)
+    replacements_by_pair = {int(item['lesson_number']): item for item in replacements}
+    planned_lessons = schedule.get_planned_schedule(conn, data, local.date()) if replacements else []
+    sessions = queues.list_sessions(conn, ('open', 'closed'))
+    matching_by_queue = {}
     for lesson in lessons:
         times = slot_times(local.date(), lesson)
-        if times and times[0] <= now < times[1]:
-            current.append((lesson, *times))
+        if not times or not times[0] <= now < times[1]:
+            continue
+        replacement = replacements_by_pair.get(lesson['number'])
+        for sid in _queues_for_lesson(conn, subjects, sessions, lesson, replacement, planned_lessons):
+            matching_by_queue.setdefault(sid, (lesson, *times))
+
     # The key persists even after stop/restart, independently of any in-memory timer.
-    for session in queues.list_sessions(conn, ('open', 'closed')):
+    for session in sessions:
         sid = session['id']
-        matching = [(lesson, start, end) for lesson, start, end in current if matches(subjects, session, lesson)]
+        matching = matching_by_queue.get(sid)
         with transaction(conn):
             attendance._lock(conn, sid)
             session = queues.get_session(conn, sid)
@@ -112,7 +159,7 @@ def sync_schedule(conn, subjects, *, now=None, schedule_data=None):
                     run = None
             if not matching:
                 continue
-            lesson, begin, end = matching[0]
+            lesson, begin, end = matching
             if now < begin + START_DELAY_SECONDS:
                 continue
             key = key_for(sid, local.date(), lesson['number'])

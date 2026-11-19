@@ -186,6 +186,71 @@ async def test_friday_replacement_starts_lmv_timer_at_1155_and_catches_up(conn, 
     assert conn.execute('SELECT COUNT(*) FROM lesson_runs').fetchone()[0] == 1
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize('replacement_teacher', [None, '—', 'Кондратюк'])
+async def test_replacement_delivers_presence_when_teacher_is_missing_or_only_surname(
+    conn, make_user, replacement_teacher,
+):
+    from queue_bot.services import replacements
+
+    subject = SUBJECTS[0]
+    make_user(1, 'Петренко Іван')
+    sid = queues.create_session(conn, 100, 1, 2)
+    other = queues.create_session(conn, 100, 1, 1)
+    queues.join_queue(conn, 1, sid)
+    schedule.replace_schedule_from_backup(conn, {
+        'tuesday': [{'pair': 1, 'subject': 'ЛМВ', 'teacher': 'Щуцький С.В.'}],
+    })
+    replacements.save_replacement(conn, {
+        'date': '2026-11-03', 'lesson_number': 1,
+        'new_subject': 'Конструювання програмного забезпечення (КПЗ)',
+        'teacher': replacement_teacher,
+    })
+
+    now = at('2026-11-03T08:35:00')
+    sync_schedule(conn, [subject], now=now)
+    assert attendance.active_run(conn, sid, now=now)
+    assert attendance.active_run(conn, other, now=now) is None
+    bot = AsyncMock()
+    await deliver(bot, conn, [subject], now=now)
+    bot.send_message.assert_awaited_once()
+    user_id, text = bot.send_message.await_args.args
+    assert user_id == 1 and 'Ви вже на місці?' in text
+
+
+@pytest.mark.parametrize('replacement_teacher', [None, 'Кондратюк А.Б.'])
+def test_ambiguous_or_unmatched_replacement_does_not_start_wrong_queue(conn, make_user, replacement_teacher):
+    from queue_bot.services import replacements
+
+    make_user(1, 'Петренко Іван')
+    first = queues.create_session(conn, 100, 1, 1)
+    queues.join_queue(conn, 1, first)
+    if replacement_teacher is None:
+        second = queues.create_session(conn, 100, 1, 2)
+        queues.join_queue(conn, 1, second)
+    replacements.save_replacement(conn, {
+        'date': '2026-11-03', 'lesson_number': 1, 'new_subject': 'КПЗ', 'teacher': replacement_teacher,
+    })
+
+    sync_schedule(conn, SUBJECTS, now=at('2026-11-03T08:35:00'), schedule_data={})
+    assert conn.execute('SELECT COUNT(*) FROM lesson_runs').fetchone()[0] == 0
+
+
+def test_room_only_replacement_uses_planned_teacher(conn, queue):
+    from queue_bot.services import replacements
+
+    other = queues.create_session(conn, 100, 1, 2)
+    queues.join_queue(conn, 1, other)
+    replacements.save_replacement(conn, {
+        'date': '2026-11-03', 'lesson_number': 1,
+        'new_subject': 'Конструювання програмного забезпечення', 'room': '230',
+    })
+    now = at('2026-11-03T08:35:00')
+    sync_schedule(conn, SUBJECTS, now=now, schedule_data=DATA)
+    assert attendance.active_run(conn, queue, now=now)
+    assert attendance.active_run(conn, other, now=now) is None
+
+
 def test_missed_replacement_launch_recovers_during_class(conn, make_user):
     subjects = [{'id': 2, 'name': 'Людино-машинна взаємодія',
                  'teachers': [{'id': 2, 'name': 'Кондратюк Є.С.'}]}]
