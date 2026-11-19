@@ -297,43 +297,13 @@ test("a successful mutation refresh releases the global busy controls", async ()
   assert.deepEqual(busy, [true, false]);
 });
 
-test("schedule JSON import previews text safely and requires separate confirmation", async () => {
-  const requests = [],
-    { features, S, panels } = setup(
-      async (path, body) => {
-        requests.push([path, body]);
-        return { active: [], archived: [] };
-      },
-      { download: async () => {} },
-    );
+test("schedule edits are available from Telegram instead of a file input", async () => {
+  const { features, S } = setup(async () => ({ active: [] }));
   S.mode = "admin";
   await features.open("admin-replacements");
   const page = features.page("admin-replacements");
-  const file = descendants(page).find(
-    (node) =>
-      node.tag === "input" && node.attrs.accept === "application/json,.json",
-  );
-  assert.ok(file, "JSON import input exists");
-  file.files = [
-    {
-      size: 80,
-      text: async () => '{"monday":[{"subject":"<script>test</script>"}]}',
-    },
-  ];
-  const importForm = descendants(page).find(
-    (node) => node.tag === "form" && descendants(node).includes(file),
-  );
-  await importForm.events.submit({ preventDefault() {} });
-  assert.equal(requests.filter(([, body]) => body).length, 0);
-  assert.match(panels[0].textContent, /<script>test<\/script>/);
-  const confirmation = descendants(panels[0]).find(
-    (node) => node.tag === "form",
-  );
-  await confirmation.events.submit({ preventDefault() {} });
-  assert.equal(
-    requests.find(([, body]) => body)?.[1].action,
-    "import_schedule",
-  );
+  assert.match(page.textContent, /\/edit_schedule/);
+  assert.equal(descendants(page).some((node) => node.attrs.type === "file"), false);
 });
 
 test("bug screenshots still open the authenticated image helper", async () => {
@@ -354,39 +324,6 @@ test("removed reports cannot open or issue API requests", async()=>{
   await features.open('admin-reports');
   assert.deepEqual(requests,[]);
   assert.notEqual(S.feature,'admin-reports');
-});
-
-test("schedule import rejects oversized files before reading or uploading", async () => {
-  let uploads = 0,
-    reads = 0;
-  const { features, S, panels } = setup(async (path, body) => {
-    if (body) uploads++;
-    return { active: [], archived: [] };
-  });
-  S.mode = "admin";
-  await features.open("admin-replacements");
-  const page = features.page("admin-replacements");
-  const file = descendants(page).find(
-    (node) =>
-      node.tag === "input" && node.attrs.accept === "application/json,.json",
-  );
-  file.files = [
-    {
-      size: 65537,
-      text: async () => {
-        reads++;
-        return "{}";
-      },
-    },
-  ];
-  const form = descendants(page).find(
-    (node) => node.tag === "form" && descendants(node).includes(file),
-  );
-  await form.events.submit({ preventDefault() {} });
-  assert.match(form.textContent, /64 КБ/);
-  assert.equal(reads, 0);
-  assert.equal(uploads, 0);
-  assert.equal(panels.length, 0);
 });
 
 test("every feature page action has a real click handler or a submitted form", async () => {

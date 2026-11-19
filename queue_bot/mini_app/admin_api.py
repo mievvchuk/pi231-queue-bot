@@ -3,9 +3,7 @@ import base64
 import binascii
 import html
 import json
-import os
 import re
-import tempfile
 from datetime import date, datetime
 
 from aiohttp import web
@@ -150,7 +148,7 @@ async def manage(request):
             return await api.admin_users(request)
         if section == 'replacements':
             if request.query.get('format') == 'schedule':
-                return web.json_response(schedule.load_schedule_data(), headers={'Content-Disposition': 'attachment; filename="schedule.json"'})
+                return web.json_response(schedule.read_schedule(conn), headers={'Content-Disposition': 'attachment; filename="schedule.json"'})
             keys = ('date', 'lesson_number', 'old_subject', 'new_subject', 'teacher', 'room')
             project = lambda rows: [{k: row.get(k) for k in keys} for row in rows]
             from queue_bot.services.channel_import import confirmed_results, format_no_replacements
@@ -208,17 +206,7 @@ async def manage(request):
     elif section == 'replacements':
         if action == 'import_schedule':
             parsed = validate_schedule(data.get('schedule'))
-            # Only the configured schedule file can be written. Replace it
-            # atomically after validation; upload filenames are never paths.
-            target = os.path.abspath(config.SCHEDULE_PATH)
-            temp_name = None
-            try:
-                with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', dir=os.path.dirname(target), prefix='.schedule-', suffix='.json', delete=False) as stream:
-                    temp_name = stream.name
-                    json.dump(parsed, stream, ensure_ascii=False, indent=2)
-                os.replace(temp_name, target)
-            finally:
-                if temp_name and os.path.exists(temp_name): os.unlink(temp_name)
+            schedule.replace_schedule_from_backup(conn, parsed)
             admins.log_action(conn, uid, 'upload_schedule', 'miniapp')
             return response({'message': 'Розклад оновлено.'})
         if action == 'recognize':

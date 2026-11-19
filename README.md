@@ -163,7 +163,7 @@ See [`.env.example`](.env.example) and [`docs/CONFIGURATION.md`](docs/CONFIGURAT
 | `STUDENT_GROUP` | Group name (default: PI-231 in Ukrainian) |
 | `TZ` | IANA time zone (default: `Europe/Kyiv`) |
 | `NOTIFICATION_TIME` | Schedule notification time, `HH:MM` (default: `17:00`) |
-| `SUBJECTS_PATH`, `SCHEDULE_PATH` | Optional alternate JSON files for subjects and timetable |
+| `SUBJECTS_PATH`, `SCHEDULE_PATH` | Optional subject catalog file and one-time timetable import source |
 | `LAB_CATALOG_PATH` | Optional lab catalog JSON file |
 | `MINI_APP_URL` | Optional public HTTPS URL ending in `/app/` to expose Mini App launch controls |
 | `TELEGRAM_LOGIN_CLIENT_ID`, `TELEGRAM_LOGIN_CLIENT_SECRET` | Optional Telegram Login credentials for browser/PWA access; both required together with `MINI_APP_URL` |
@@ -225,7 +225,7 @@ GitHub Actions runs the Python suite with a PostgreSQL 16 service, runs the two 
 - Database migrations are additive and retain existing user, queue, and historical records. SQLite migrations use `PRAGMA user_version`; PostgreSQL has its own migration path.
 - The bot uses in-memory FSM dialogue state. **Unfinished multi-step conversations are lost on process restart**, while persisted database records remain.
 - Pending two-photo Telegram album collection must be restarted after a process restart.
-- The timetable source can be overridden via `SCHEDULE_PATH`; modifying the repository's default JSON does not overwrite a separately configured live timetable.
+- The bot imports the legacy timetable into the database on first use. Admins can then edit individual pairs with `/edit_schedule` in a private chat with the bot.
 - Browser/PWA sessions last seven days from sign-in and are stored in the database (only a hash of the cookie token). They survive application restarts and deployments when the same persistent database is used. Logout revokes the session; clearing browser data or switching browsers requires another sign-in. Login attempts in progress still expire after ten minutes or a restart.
 - Keep bot tokens, database credentials, recognition keys, and Telegram Login secrets out of commits and PR descriptions.
 

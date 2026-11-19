@@ -428,22 +428,24 @@ async def recognize_replacements_from_images(images: list[bytes], group_name: st
         now_dt = datetime.now(ZoneInfo(config.TIMEZONE)).date()
         next_work_date = (now_dt + timedelta(days=1)).strftime("%Y-%m-%d")
 
+    from queue_bot.services import schedule
+    schedule_data = schedule.read_schedule(conn)
     if config.RECOGNITION_PROVIDER == "ocr":
         from queue_bot.services import table_ocr
-        result = await asyncio.to_thread(table_ocr.recognize, list(images), group_name)
+        result = await asyncio.to_thread(table_ocr.recognize, list(images), group_name, schedule_data)
     else:
         result = await _ask_ai(images, group_name, next_work_date, allow_empty)
 
     # The provider answered: whatever is wrong now is about the photo itself, and asking again will not fix it.
     try:
-        return _parse_result(result, group_name, next_work_date, allow_empty)
+        return _parse_result(result, group_name, next_work_date, allow_empty, schedule_data)
     except UnreadableTable:
         raise
     except BotError as error:
         raise UnreadableTable(str(error)) from error
 
 
-def _parse_result(result, group_name: str, next_work_date: str, allow_empty: bool) -> dict:
+def _parse_result(result, group_name: str, next_work_date: str, allow_empty: bool, schedule_data=None) -> dict:
     if not isinstance(result, dict):
         raise BotError('ШІ повернув некоректний формат таблиці. Повторіть розпізнавання.')
     date_str = result.get("date")
@@ -492,7 +494,7 @@ def _parse_result(result, group_name: str, next_work_date: str, allow_empty: boo
                     "room": str(r.get("room")) if r.get("room") is not None else None,
                 })
 
-    filtered = resolve_header_notes(result, date_str, group_name, filtered)
+    filtered = resolve_header_notes(result, date_str, group_name, filtered, schedule_data)
     absent = result.get("noReplacements") is True
     if not filtered and not (allow_empty and result.get("tableReadable") is True and absent and confidence >= 0.8 and not raw_replacements):
         raise BotError(f"Для групи {group_name} замін на фото не знайдено.")

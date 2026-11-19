@@ -35,11 +35,10 @@ def fold(text: str) -> str:
     return str(text).lower().translate(FOLD)
 
 
-@lru_cache(maxsize=1)
-def vocabulary() -> dict:
+def vocabulary(schedule_data=None) -> dict:
     from queue_bot.services import recognition, schedule
     texts = [WORDS, *recognition.SUBJECT_ABBREVIATIONS.values(), *recognition.TEACHER_EXPANSIONS.values()]
-    stack = [schedule.load_schedule_data()]
+    stack = [schedule.load_schedule_data() if schedule_data is None else schedule_data]
     while stack:
         item = stack.pop()
         if isinstance(item, dict):
@@ -59,12 +58,11 @@ def shape(word: str) -> str:
     return word.lower().translate(SHAPE)
 
 
-@lru_cache(maxsize=1)
-def shapes() -> dict:
-    return {shape(word): word for word in vocabulary().values() if len(word) >= 5}
+def shapes(words) -> dict:
+    return {shape(word): word for word in words.values() if len(word) >= 5}
 
 
-def fix_text(text: str, cutoff: float = 0.85) -> str:
+def fix_text(text: str, cutoff: float = 0.85, *, words, word_shapes) -> str:
     """Latin look-alikes inside Cyrillic words and «и»/«і» mix-ups, restored from known words.
 
     cutoff repairs a dropped or wrong letter; notes use a looser one, their words are all known."""
@@ -73,23 +71,23 @@ def fix_text(text: str, cutoff: float = 0.85) -> str:
         # The tables are Ukrainian: a word made only of look-alikes ('JMB') is Cyrillic too.
         if re.search('[а-яіїєґА-ЯІЇЄҐ]', token) or set(token) <= set(LATIN_CHARS):
             token = token.translate(LATIN)
-        known = vocabulary().get(fold(token))
+        known = words.get(fold(token))
         if not known and not re.search('[а-яіїєґА-ЯІЇЄҐ]', token) and len(token) >= 5:
             # A smeared cell comes out in Latin ('Abxirekrvoa'): compare letter shapes instead.
-            close = difflib.get_close_matches(shape(token), shapes(), n=1, cutoff=0.8)
-            known = shapes()[close[0]] if close else None
+            close = difflib.get_close_matches(shape(token), word_shapes, n=1, cutoff=0.8)
+            known = word_shapes[close[0]] if close else None
         if not known and len(token) >= 4:
-            close = difflib.get_close_matches(fold(token), vocabulary(), n=1, cutoff=cutoff)
-            known = vocabulary()[close[0]] if close else None
+            close = difflib.get_close_matches(fold(token), words, n=1, cutoff=cutoff)
+            known = words[close[0]] if close else None
         if not known:
             return token
         return known.upper() if token.isupper() and len(token) > 1 else known[0].upper() + known[1:] if token[0].isupper() else known
     return WORD.sub(word, ' '.join(str(text).split()))
 
 
-def fix_note(text: str) -> str:
+def fix_note(text: str, *, words, word_shapes) -> str:
     """'З-Ї ПАВН ПОНЕДІЛКА' -> '3-ї пари ПОНЕДІЛКА': after an ordinal number only «пари» can follow."""
-    text = re.sub(r'(?<!\w)[Зз](?=\s*-\s*[ЇїІіИи](?!\w))', '3', fix_text(text, cutoff=0.75))
+    text = re.sub(r'(?<!\w)[Зз](?=\s*-\s*[ЇїІіИи](?!\w))', '3', fix_text(text, cutoff=0.75, words=words, word_shapes=word_shapes))
     return re.sub(r'(\d)\s*-\s*[ЇїІіИи]\s+[^\s(]+', r'\1-ї пари', text)
 
 
@@ -259,11 +257,13 @@ def read_table(image: bytes) -> dict:
     return {'header': header, 'rows': rows[lead:], 'scores': scores}
 
 
-def recognize(images: list[bytes], group_name: str) -> dict:
+def recognize(images: list[bytes], group_name: str, schedule_data=None) -> dict:
     from queue_bot.services.recognition import expand_groups, parse_header_note
     from queue_bot.services.schedule_notes import normalize_group
     tables = sorted((read_table(image) for image in images), key=lambda t: parse_date(t['header']) is None)
-    header = [fix_note(line) for t in tables for line in t['header']]
+    words = vocabulary(schedule_data)
+    spelling = {"words": words, "word_shapes": shapes(words)}
+    header = [fix_note(line, **spelling) for t in tables for line in t['header']]
     week = next((key for word, key in (('знаменник', 'denominator'), ('чисельник', 'numerator'))
                  if fold(word) in fold(' '.join(header))), None)
     notes, rows, readable = [], [], True
@@ -271,7 +271,7 @@ def recognize(images: list[bytes], group_name: str) -> dict:
     for table in tables:
         for row in table['rows']:
             if 'note' in row:
-                notes.append(fix_note(row['note']))
+                notes.append(fix_note(row['note'], **spelling))
                 continue
             group_cell, lessons, replaced, subject, teacher, room = row['cells']
             if not re.search(r'\d', group_cell + lessons):
@@ -282,8 +282,8 @@ def recognize(images: list[bytes], group_name: str) -> dict:
             digits = set(re.findall(r'\d{3}', group_cell))
             readable &= group is not None or bool(digits and not digits & target_digits)
             rows.append({'group': group if group is not None else group_cell, 'lessons': lessons,
-                         'replaced': fix_text(replaced), 'subject': fix_text(subject),
-                         'teacher': fix_text(teacher), 'room': room.translate(LATIN).strip()})
+                         'replaced': fix_text(replaced, **spelling), 'subject': fix_text(subject, **spelling),
+                         'teacher': fix_text(teacher, **spelling), 'room': room.translate(LATIN).strip()})
     notes += [line for line in header if fold('розклад') in fold(line) and fold('замін') not in fold(line)]
     notes = [n for n in notes if not re.search(fold('черговий|виходить на навчання'), fold(n))]
     target = normalize_group(group_name)

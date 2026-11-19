@@ -1,4 +1,5 @@
 import base64
+from pathlib import Path
 from io import BytesIO
 from datetime import datetime, timedelta
 from types import SimpleNamespace
@@ -156,16 +157,19 @@ async def test_recognition_rechecks_role_after_network_wait(admin_client, conn, 
 
 
 @pytest.mark.asyncio
-async def test_schedule_import_is_validated_and_exports_saved_data(admin_client):
+async def test_schedule_import_is_validated_and_exports_saved_data(admin_client, conn):
     from queue_bot.services import schedule
     invalid = {'monday': [{'pair': True, 'subject': 'Назва'}]}
     assert (await post(admin_client, 'replacements', {'action': 'import_schedule', 'schedule': invalid})).status == 400
     assert schedule.load_schedule_data()['monday'] == []
     document = {'monday': [{'pair': 2, 'subject': 'Алгебра', 'teachers': [{'name': 'Викладач', 'room': '231'}], 'week_type': 'both'}]}
     assert (await post(admin_client, 'replacements', {'action': 'import_schedule', 'schedule': document, 'filename': '../../untrusted.json'})).status == 200
-    assert schedule.load_schedule_data() == document
+    assert not Path(config.SCHEDULE_PATH).exists()
+    saved = schedule.read_schedule(conn)
+    assert saved["monday"]["numerator"][0]["subject"] == "Алгебра"
+    assert saved["monday"]["denominator"] == saved["monday"]["numerator"]
     downloaded = await admin_client.get('/api/miniapp/admin/manage/replacements?format=schedule&mode=admin', headers=headers(100))
-    assert downloaded.status == 200 and await downloaded.json() == document
+    assert downloaded.status == 200 and await downloaded.json() == saved
     assert 'schedule.json' in downloaded.headers['Content-Disposition']
 
 

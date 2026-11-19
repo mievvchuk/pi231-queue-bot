@@ -181,8 +181,7 @@ def test_admin_schedule_keyboards():
 
     sch_menu = get_admin_schedule_menu()
     sch_button_texts = [btn.text for row in sch_menu.keyboard for btn in row]
-    assert "📥 Отримати schedule.json" in sch_button_texts
-    assert "📤 Завантажити розклад" in sch_button_texts
+    assert "✏️ Редагувати розклад" in sch_button_texts
     assert "🏢 Робоча субота" in sch_button_texts
     assert "🗑 Очистити всі заміни" not in sch_button_texts
     assert "🟢 Статус системи" not in sch_button_texts
@@ -476,3 +475,85 @@ def test_lesson_note_from_schedule_json_reaches_text_and_mini_app(conn):
     assert web['note'] == 'Остання пара'
     assert '📝 <i>Остання пара</i>' in schedule.format_schedule_for_date(conn, data, thursday)
     assert all(not item['note'] for item in lessons if item is not web)
+
+def test_schedule_import_preserves_legacy_edits_and_runs_once(tmp_path):
+    import json
+
+    from queue_bot.storage import database as db
+
+    source = tmp_path / "edited_schedule.json"
+    source.write_text(json.dumps({
+        "wednesday": {
+            "numerator": [{"pair": 3, "subject": "Чисельник", "teachers": [
+                {"name": "Перший", "room": "101"}, {"name": "Другий", "room": None},
+            ]}],
+            "denominator": [{"number": 2, "subject": "Знаменник", "teacher": "Третій", "room": "102"}],
+        },
+    }), encoding="utf-8")
+    database = str(tmp_path / "schedule.db")
+    conn = db.connect(database)
+    schedule.import_legacy_schedule(conn, str(source))
+    data = schedule.read_schedule(conn)
+    numerator = schedule.get_base_schedule_for_day(data, "wednesday", "numerator")
+    assert numerator[0]["teachers_raw"] == [{"name": "Перший", "room": "101"}, {"name": "Другий", "room": None}]
+    schedule.set_schedule_pair(conn, "wednesday", "numerator", 3, None)
+    conn.close()
+
+    source.unlink()
+    conn = db.connect(database)
+    try:
+        schedule.import_legacy_schedule(conn, str(source))
+        data = schedule.read_schedule(conn)
+        assert schedule.get_base_schedule_for_day(data, "wednesday", "numerator") == []
+        denominator = schedule.get_base_schedule_for_day(data, "wednesday", "denominator")
+        assert [(lesson["number"], lesson["subject"], lesson["room"]) for lesson in denominator] == [
+            (2, "Знаменник", "102"),
+        ]
+        assert conn.execute("SELECT COUNT(*) FROM schedule_teachers").fetchone()[0] == 0
+    finally:
+        conn.close()
+
+
+@pytest.mark.asyncio
+async def test_edit_schedule_pair_from_telegram(conn):
+    from unittest.mock import AsyncMock, MagicMock
+
+    from queue_bot.handlers import schedule as handler
+
+    state = AsyncMock()
+    callback = MagicMock()
+    callback.data = "base_pair:wednesday:numerator:2"
+    callback.from_user.id = 100
+    schedule.replace_schedule_from_backup(conn, {
+        "wednesday": [{"pair": 2, "subject": "Попередній предмет", "note": "Примітка"}],
+    })
+    callback.answer = AsyncMock()
+    callback.message.answer = AsyncMock()
+    await handler.select_schedule_pair(callback, state, conn)
+    state.set_state.assert_awaited_once_with(handler.EditScheduleState.waiting_for_lesson)
+    state.get_data.return_value = state.set_data.await_args.args[0]
+    message = MagicMock()
+    message.from_user.id = 100
+    message.text = "Новий предмет\nКогут В.С. | 235\nБарабаш Д.С."
+    message.answer = AsyncMock()
+    await handler.save_schedule_pair(message, state, conn)
+
+    wednesday = datetime.date(2026, 11, 18)
+    data = schedule.read_schedule(conn)
+    text = schedule.format_schedule_for_date(conn, data, wednesday)
+    assert "1 пара — немає заняття" in text
+    assert "2 пара</b> (10:00–11:20)" in text
+    assert "Новий предмет" in text
+    assert "Примітка" in text
+    assert "Когут В.С. (ауд. 235)" in text
+    assert "Барабаш Д.С." in text
+    assert "4 пара — немає заняття" in text
+    assert "5 пара — немає заняття" in text
+
+    message.text = "-"
+    await handler.save_schedule_pair(message, state, conn)
+    data = schedule.read_schedule(conn)
+    text = schedule.format_schedule_for_date(conn, data, wednesday)
+    assert "2 пара — немає заняття" in text
+    assert 2 not in {lesson["number"] for lesson in schedule.get_base_schedule(data, wednesday)}
+    assert 2 in {lesson["number"] for lesson in schedule.get_base_schedule(data, wednesday + datetime.timedelta(days=7))}

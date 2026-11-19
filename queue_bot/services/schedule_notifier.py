@@ -51,7 +51,7 @@ async def start_schedule_notifier(bot: Bot, conn, interval_sec: int = 60) -> Non
             )
 
             if is_time_to_send and not has_sent_today(conn, today_key):
-                sch_data = schedule.load_schedule_data(config.SCHEDULE_PATH)
+                sch_data = schedule.read_schedule(conn)
                 tomorrow_dt = now.date() + timedelta(days=1)
                 lessons, reps = schedule.get_actual_schedule(conn, sch_data, tomorrow_dt, config.STUDENT_GROUP)
 

@@ -226,6 +226,31 @@ MIGRATIONS.append(JOURNAL_SCHEMA)
 from queue_bot.storage.journal_grid_schema import GRID_SCHEMA, GRID_COPY
 MIGRATIONS.append(GRID_SCHEMA + GRID_COPY)
 
+SCHEDULE_SCHEMA = """
+CREATE TABLE IF NOT EXISTS schedule_lessons (
+    id INTEGER PRIMARY KEY,
+    day_key TEXT NOT NULL,
+    week_type TEXT NOT NULL CHECK (week_type IN ('numerator', 'denominator')),
+    pair INTEGER NOT NULL CHECK (pair > 0),
+    position INTEGER NOT NULL,
+    subject TEXT NOT NULL,
+    teacher TEXT NOT NULL,
+    room TEXT NOT NULL,
+    lessons TEXT NOT NULL,
+    start_time TEXT NOT NULL,
+    end_time TEXT NOT NULL,
+    note TEXT NOT NULL,
+    UNIQUE (day_key, week_type, pair, position)
+);
+CREATE TABLE IF NOT EXISTS schedule_teachers (
+    lesson_id INTEGER NOT NULL REFERENCES schedule_lessons(id) ON DELETE CASCADE,
+    position INTEGER NOT NULL,
+    name TEXT NOT NULL,
+    room TEXT,
+    PRIMARY KEY (lesson_id, position)
+);
+"""
+
 PG_SCHEMA = BROWSER_SESSIONS_SCHEMA + """
 CREATE TABLE IF NOT EXISTS working_saturdays (
     date TEXT PRIMARY KEY,
@@ -457,6 +482,7 @@ class PGConnectionWrapper:
     def _init_schema(self):
         with self.raw.cursor() as cur:
             cur.execute(PG_SCHEMA)
+            cur.execute(SCHEDULE_SCHEMA.replace("id INTEGER PRIMARY KEY", "id SERIAL PRIMARY KEY", 1))
             cur.execute('ALTER TABLE lesson_attendance ADD COLUMN IF NOT EXISTS turn_due BIGINT;')
             cur.execute('ALTER TABLE users ADD COLUMN IF NOT EXISTS deleted_at TEXT;')
             cur.execute('ALTER TABLE working_saturdays ADD COLUMN IF NOT EXISTS pairs_count INTEGER;')
@@ -497,7 +523,7 @@ class PGConnectionWrapper:
         lastrowid = None
 
         cur = self.raw.cursor(row_factory=dict_row)
-        tables_without_id = {"bot_updates", "bot_state", "working_saturdays", "browser_sessions"}
+        tables_without_id = {"bot_updates", "bot_state", "working_saturdays", "browser_sessions", "schedule_teachers"}
         table_match = re.search(r"insert\s+into\s+([a-zA-Z_0-9]+)", pg_sql, re.IGNORECASE)
         table_name = table_match.group(1).lower() if table_match else ""
 
@@ -563,6 +589,7 @@ def connect(db_target: str):
         conn.execute('ALTER TABLE working_saturdays ADD COLUMN pairs_count INTEGER')
     if 'source_note' not in {row[1] for row in conn.execute('PRAGMA table_info(replacements)')}:
         conn.execute('ALTER TABLE replacements ADD COLUMN source_note TEXT')
+    conn.executescript(SCHEDULE_SCHEMA)
     return conn
 
 

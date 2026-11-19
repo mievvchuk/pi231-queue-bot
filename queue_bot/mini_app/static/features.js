@@ -1010,73 +1010,13 @@ window.createPI231Features = function (H) {
     );
   }
   function replacementsPage(data) {
-    const path = adminPath("admin-replacements");
-    const scheduleFile = input({
-      type: "file",
-      accept: "application/json,.json",
-    });
     return [
       card(el("p", { class: "notice" }, "Заміни надходять автоматично з каналу. Підтвердження й редагування до та після збереження доступні у чаті з ботом.")),
       rows(data.confirmed).filter((item) => item.no_replacements).map((item) =>
         el("p", { class: "notice" }, item.message)),
       el("h2", {}, "Активні заміни"),
       list(rows(data.active), replacementCard),
-      card(
-        el("h2", {}, "Файл розкладу"),
-        H.download
-          ? btn(
-              "Завантажити розклад JSON",
-              () =>
-                externalAction(() =>
-                  H.download(path + "?format=schedule", "pi231-schedule.json"),
-                ),
-              "button secondary",
-            )
-          : null,
-        form(
-          [field("Новий розклад JSON до 64 КБ", scheduleFile)],
-          "Перевірити розклад",
-          async (ctx) => {
-            const file = scheduleFile.files?.[0];
-            if (!file) throw new Error("Обери JSON-файл розкладу.");
-            if (file.size > 64 * 1024)
-              throw new Error("Розклад має бути до 64 КБ.");
-            let parsed;
-            try {
-              parsed = JSON.parse(await file.text());
-            } catch {
-              throw new Error(
-                "Не вдалося прочитати JSON. Перевір формат файлу.",
-              );
-            }
-            if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
-              throw new Error("Розклад має містити об’єкт із днями тижня.");
-            if (!current(ctx.token, ctx.epoch, ctx.key)) return;
-            const preview = sheet(
-              "Замінити розклад?",
-              "Перевір вміст. Після підтвердження цей розклад замінить поточний файл; заміни пар зберігаються окремо.",
-            );
-            preview.append(
-              el(
-                "pre",
-                {
-                  class: "schedule-json-preview",
-                  style:
-                    "max-height:320px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere",
-                },
-                JSON.stringify(parsed, null, 2),
-              ),
-              form([], "Підтвердити заміну розкладу", (submitCtx) =>
-                send(
-                  path,
-                  { action: "import_schedule", schedule: parsed },
-                  submitCtx,
-                ),
-              ),
-            );
-          },
-        ),
-      ),
+      card(el("p", { class: "notice" }, "Базовий розклад можна змінити в чаті з ботом командою /edit_schedule.")),
     ];
   }
   function replacementCard(item) {

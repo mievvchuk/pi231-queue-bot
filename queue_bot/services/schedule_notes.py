@@ -33,13 +33,13 @@ def teacher_and_room(lesson):
             ', '.join(p['room'] for p in people if p.get('room')) or '—')
 
 
-def resolve_header_notes(result, date_str, group_name, rows):
+def resolve_header_notes(result, date_str, group_name, rows, schedule_data=None):
     if result.get('unparsedNotes'):
         raise BotError('Не вдалося однозначно прочитати примітку над таблицею. Надішліть чіткіше фото або внесіть заміну вручну.')
     overrides = result.get('scheduleOverrides', [])
     if not isinstance(overrides, list) or len(overrides) > 10:
         raise BotError('Некоректні примітки над таблицею. Перевірте фото.')
-    data = schedule.load_schedule_data()
+    data = schedule.load_schedule_data() if schedule_data is None else schedule_data
     try:
         target_date = date.fromisoformat(date_str)
     except (ValueError, TypeError):
@@ -60,7 +60,7 @@ def resolve_header_notes(result, date_str, group_name, rows):
             raise BotError('Не вдалося визначити пару, день або чисельник/знаменник у примітці. Уточніть заміну вручну.')
         lessons = [x for x in schedule.get_base_schedule_for_day(data, day, week) if x['number'] == source]
         if len(lessons) != 1 or not lessons[0]['subject']:
-            raise BotError(f'Примітка посилається на пару №{source}, якої немає або яку неоднозначно задано в збереженому розкладі. Перевірте schedule.json.')
+            raise BotError(f'Примітка посилається на пару №{source}, якої немає або яку неоднозначно задано в збереженому розкладі. Перевірте базовий розклад.')
         if target in mapped:
             raise BotError('Кілька приміток змінюють одну пару. Уточніть заміну вручну.')
         lesson = lessons[0]

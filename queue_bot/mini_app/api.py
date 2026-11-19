@@ -171,7 +171,7 @@ async def bootstrap(request):
     if request[REQ_USER] is None:
         return web.json_response({'me': {'name': None, 'is_registered': False, 'is_admin': False, 'is_owner': False}, 'queues': [], 'swaps': [], 'today': schedule.get_current_date().isoformat()})
     try:
-        next_lesson = schedule.get_upcoming_lesson(ctx['conn'], schedule.load_schedule_data())
+        next_lesson = schedule.get_upcoming_lesson(ctx['conn'], schedule.read_schedule(ctx['conn']))
     except (ValueError, TypeError, KeyError, AttributeError):
         # A malformed imported timetable must not make personal queues unusable.
         log.warning('Upcoming lesson unavailable: invalid schedule format')
@@ -308,7 +308,8 @@ async def timetable(request):
         dt = date.fromisoformat(request.query.get('date', schedule.get_current_date().isoformat()))
     except ValueError:
         raise BotError('Оберіть правильну дату.')
-    lessons, replacements = schedule.get_actual_schedule(request[REQ_CONTEXT]['conn'], schedule.load_schedule_data(), dt, config.STUDENT_GROUP)
+    conn = request[REQ_CONTEXT]['conn']
+    lessons, replacements = schedule.get_actual_schedule(conn, schedule.read_schedule(conn), dt, config.STUDENT_GROUP)
     working_day = working_days.get_working_saturday(request[REQ_CONTEXT]['conn'], dt.isoformat())
     from queue_bot.services.channel_import import confirmed_results, format_no_replacements
     confirmed = confirmed_results(request[REQ_CONTEXT]['conn'], dt.isoformat())

@@ -86,7 +86,7 @@ def sync_schedule(conn, subjects, *, now=None, schedule_data=None):
     if air_alerts.blocked(conn, now):
         return
     local = datetime.fromtimestamp(now, schedule.UK_TZ)
-    data = schedule.load_schedule_data() if schedule_data is None else schedule_data
+    data = schedule.read_schedule(conn) if schedule_data is None else schedule_data
     lessons, _ = schedule.get_actual_schedule(conn, data, local.date(), config.STUDENT_GROUP)
     current = []
     for lesson in lessons:

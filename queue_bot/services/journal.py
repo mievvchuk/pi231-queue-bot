@@ -26,9 +26,9 @@ def period_value(value):
     return value
 
 
-def catalog(subjects, schedule_data=None):
+def catalog(subjects, schedule_data=None, *, conn=None):
     names = {subject_name(s['name']): s['name'] for s in subjects}
-    data = schedule.load_schedule_data() if schedule_data is None else schedule_data
+    data = schedule.read_schedule(conn) if schedule_data is None else schedule_data
     def walk(value):
         if isinstance(value, dict):
             if isinstance(value.get('subject'), str) and value['subject'].strip():
@@ -91,7 +91,7 @@ def submit(conn, uid, subjects, data, *, admin_mode=False):
             raise PermissionDenied('Можна змінювати лише власні оцінки.')
         admins.require_admin(conn, uid)
     period = period_value(data.get('period', current_period()))
-    subject = next((s for s in catalog(subjects) if s['key'] == data.get('subject_key')), None)
+    subject = next((s for s in catalog(subjects, conn=conn) if s['key'] == data.get('subject_key')), None)
     if not subject:
         raise BotError('Оберіть предмет зі списку журналу.')
     kind = data.get('kind')
@@ -147,7 +147,7 @@ def set_date(conn, uid, subjects, data):
     admins.require_owner(conn, uid)
     period = period_value(data.get('period', current_period()))
     key = data.get('subject_key')
-    if not any(s['key'] == key for s in catalog(subjects)):
+    if not any(s['key'] == key for s in catalog(subjects, conn=conn)):
         raise BotError('Оберіть предмет зі списку журналу.')
     number = _number(data.get('number'))
     raw = data.get('due_date')
@@ -185,7 +185,7 @@ def view(conn, uid, subjects, *, group=False, period=None):
             record.pop('note', None)
     periods = {current_period(), period}
     periods.update(row['period'] for row in conn.execute('SELECT DISTINCT period FROM journal_cells').fetchall())
-    subject_rows = catalog(subjects)
+    subject_rows = catalog(subjects, conn=conn)
     known = {row['key'] for row in subject_rows}
     for record in records:
         if record['subject_key'] not in known:

@@ -65,12 +65,15 @@ async def test_retired_manual_buttons_do_not_change_active_lesson(conn, app):
 
 
 @pytest.mark.parametrize('numbers', [[2], [1, 2, 5], [3, 4]])
-def test_schedule_shows_leading_and_internal_gaps(conn, numbers):
+def test_schedule_shows_all_empty_weekday_slots(conn, numbers):
     data = {'monday': [{'number': n, 'subject': f'Предмет {n}'} for n in numbers]}
     text = schedule.format_schedule_for_date(conn, data, date(2026, 11, 2))
-    for number in range(1, max(numbers) + 1):
+    for number in schedule.PAIR_TIMES:
         assert f'{number} пара' in text
         if number not in numbers:
             assert f'{number} пара — немає заняття' in text
     empty = schedule.format_schedule_for_date(conn, {}, date(2026, 11, 2))
-    assert 'Занять немає' in empty and '1 пара' not in empty
+    for number in schedule.PAIR_TIMES:
+        assert f'{number} пара — немає заняття' in empty
+    weekend = schedule.format_schedule_for_date(conn, {}, date(2026, 11, 8))
+    assert 'Занять немає' in weekend and '1 пара' not in weekend

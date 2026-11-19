@@ -2,11 +2,13 @@ import html
 import json
 import logging
 import os
+from pathlib import Path
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from queue_bot import config
 from queue_bot.services.replacements import get_replacements
+from queue_bot.storage.database import transaction
 
 log = logging.getLogger(__name__)
 
@@ -60,6 +62,117 @@ def load_schedule_data(path: str | None = None) -> dict:
     except Exception as e:
         log.warning(f"Error loading schedule from {path}: {e}")
         return {k: [] for k in DAY_KEYS}
+
+
+WEEK_NAMES_UK = {"numerator": "Чисельник", "denominator": "Знаменник"}
+_SCHEDULE_IMPORT_KEY = "base_schedule_imported"
+
+
+def _insert_lesson(conn, day_key, week_type, position, lesson):
+    cur = conn.execute(
+        """INSERT INTO schedule_lessons
+           (day_key, week_type, pair, position, subject, teacher, room, lessons, start_time, end_time, note)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (
+            day_key, week_type, lesson["number"], position, lesson["subject"],
+            "" if lesson.get("teachers_raw") else lesson.get("teacher") or "",
+            lesson.get("room") or "",
+            lesson.get("lessons") or "", lesson.get("startTime") or "", lesson.get("endTime") or "",
+            lesson.get("note") or "",
+        ),
+    )
+    for index, teacher in enumerate(lesson.get("teachers_raw") or []):
+        conn.execute(
+            "INSERT INTO schedule_teachers (lesson_id, position, name, room) VALUES (?, ?, ?, ?)",
+            (cur.lastrowid, index, teacher.get("name") or "", teacher.get("room")),
+        )
+
+
+def import_legacy_schedule(conn, path: str) -> None:
+    """Одноразово переносить чинний файл у базу разом із позначкою про імпорт."""
+    with transaction(conn):
+        claimed = conn.execute(
+            "INSERT INTO bot_state (key, value) VALUES (?, ?) ON CONFLICT (key) DO NOTHING RETURNING key",
+            (_SCHEDULE_IMPORT_KEY, "1"),
+        ).fetchone()
+        if claimed is None:
+            return
+
+        source = Path(path)
+        data = json.loads(source.read_text(encoding="utf-8-sig")) if source.exists() else {}
+        _import_lessons(conn, data)
+
+
+def _import_lessons(conn, data):
+    for day_key in DAY_KEYS:
+        for week_type in WEEK_NAMES_UK:
+            for position, lesson in enumerate(get_base_schedule_for_day(data, day_key, week_type)):
+                if lesson["number"] > 0 and (lesson["subject"] or "").strip():
+                    _insert_lesson(conn, day_key, week_type, position, lesson)
+
+
+def read_schedule(conn) -> dict:
+    if conn is None:
+        return load_schedule_data()
+    if conn.execute("SELECT 1 FROM bot_state WHERE key = ?", (_SCHEDULE_IMPORT_KEY,)).fetchone() is None:
+        import_legacy_schedule(conn, config.SCHEDULE_PATH)
+
+    data = {day: {week: [] for week in WEEK_NAMES_UK} for day in DAY_KEYS}
+    lessons = {}
+    rows = conn.execute(
+        """SELECT l.*, t.position AS teacher_position, t.name AS teacher_name, t.room AS teacher_room
+           FROM schedule_lessons l LEFT JOIN schedule_teachers t ON t.lesson_id = l.id
+           ORDER BY l.pair, l.position, t.position"""
+    )
+    for row in rows:
+        lesson_id = row["id"]
+        if lesson_id not in lessons:
+            lessons[lesson_id] = {
+                "pair": row["pair"], "subject": row["subject"], "teacher": row["teacher"],
+                "room": row["room"], "lessons": row["lessons"], "startTime": row["start_time"],
+                "endTime": row["end_time"], "note": row["note"], "teachers": [],
+            }
+            data[row["day_key"]][row["week_type"]].append(lessons[lesson_id])
+        if row["teacher_position"] is not None:
+            lessons[lesson_id]["teachers"].append({"name": row["teacher_name"], "room": row["teacher_room"]})
+    return data
+
+
+def set_schedule_pair(conn, day_key: str, week_type: str, number: int, lesson: dict | None) -> None:
+    if day_key not in DAY_KEYS or week_type not in WEEK_NAMES_UK or number not in PAIR_TIMES:
+        raise ValueError("Невірний день, тип тижня або номер пари.")
+
+    import_legacy_schedule(conn, config.SCHEDULE_PATH)
+    with transaction(conn):
+        # PostgreSQL тримає блокування цього рядка до кінця транзакції, навіть коли пара порожня.
+        conn.execute("UPDATE bot_state SET value = value WHERE key = ?", (_SCHEDULE_IMPORT_KEY,))
+        params = (day_key, week_type, number)
+        current = conn.execute(
+            """SELECT lessons, start_time, end_time, note FROM schedule_lessons
+               WHERE day_key = ? AND week_type = ? AND pair = ?
+               ORDER BY position LIMIT 1""",
+            params,
+        ).fetchone()
+        conn.execute("DELETE FROM schedule_lessons WHERE day_key = ? AND week_type = ? AND pair = ?", params)
+        if lesson is not None:
+            start, end = PAIR_TIMES[number]
+            _insert_lesson(conn, day_key, week_type, 0, {
+                **lesson,
+                "number": number,
+                "lessons": current["lessons"] if current and current["lessons"] else f"{number * 2 - 1}-{number * 2}",
+                "startTime": current["start_time"] if current else start,
+                "endTime": current["end_time"] if current else end,
+                "note": lesson.get("note", current["note"] if current else ""),
+            })
+
+
+def replace_schedule_from_backup(conn, data: dict) -> None:
+    """Restore a legacy backup atomically into the same database used by the editor."""
+    import_legacy_schedule(conn, config.SCHEDULE_PATH)
+    with transaction(conn):
+        conn.execute("UPDATE bot_state SET value = value WHERE key = ?", (_SCHEDULE_IMPORT_KEY,))
+        conn.execute("DELETE FROM schedule_lessons")
+        _import_lessons(conn, data)
 
 
 def get_current_date() -> date:
@@ -147,7 +260,7 @@ def get_base_schedule_for_day(schedule_data: dict, day_key: str, w_type: str) ->
             "lessons": item.get("lessons", ""),
             "startTime": start_time,
             "endTime": end_time,
-            "note": str(item.get("note") or "").strip(),  # free text from schedule.json, e.g. «Остання пара»
+            "note": str(item.get("note") or "").strip(),
         })
 
     return filtered
@@ -246,36 +359,44 @@ def format_schedule_for_date(conn, schedule_data: dict, dt: date, group_name: st
     confirmed = confirmed_results(conn, dt.isoformat())
     if confirmed and not replacements and not confirmed[0]['replacements']:
         header += '\n✅ ' + format_no_replacements(dt.isoformat())
-    if not lessons:
+    if not lessons and dt.weekday() >= 5 and not ws:
         return f"{header}\n\n🏖 <i>Занять немає (вихідний або вільний день).</i>"
+    return f"{header}\n\n{format_lesson_slots(lessons)}"
 
-    lines = [header, ""]
-    present_numbers = {int(item['number']) for item in lessons}
-    missing = iter(sorted(set(range(1, max(present_numbers) + 1)) - present_numbers))
-    next_missing = next(missing, None)
-    for l in lessons:
-        while next_missing is not None and next_missing < int(l['number']):
-            lines.append(f"{next_missing} пара — немає заняття")
-            lines.append("")
-            next_missing = next(missing, None)
-        time_part = f" ({l['startTime']}–{l['endTime']})" if l.get("startTime") and l.get("endTime") else ""
-        badge = " ⚠️ <b>[ЗАМІНА]</b>" if l.get("is_replacement") else ""
-        lines.append(f"⏰ <b>{l['number']} пара</b>{time_part}{badge}")
-        lines.append(f"📚 <b>{html.escape(l.get('subject', ''))}</b>")
 
-        if l.get("teachers_raw"):
-            for t in l["teachers_raw"]:
-                t_name = html.escape(t.get("name", ""))
-                t_room = f" (ауд. {html.escape(t['room'])})" if t.get("room") else ""
-                lines.append(f"👨‍🏫 {t_name}{t_room}")
-        else:
-            if l.get("teacher"):
-                lines.append(f"👨‍🏫 {html.escape(l['teacher'])}")
-            if l.get("room"):
-                lines.append(f"🚪 Ауд. {html.escape(l['room'])}")
-        if l.get("note"):
-            lines.append(f"📝 <i>{html.escape(l['note'])}</i>")
-        lines.append("")
+def format_lesson_slots(lessons: list[dict], *, compact: bool = False) -> str:
+    blocks = []
+    for slot in get_day_slots(lessons):
+        number = slot["number"]
+        if not slot["lessons"]:
+            blocks.append(f"{number} пара — немає заняття")
+        for lesson in slot["lessons"]:
+            if compact:
+                blocks.append(f"{number} пара — {html.escape(lesson['subject'])}")
+            else:
+                blocks.append(_format_lesson(lesson))
+    return ("\n" if compact else "\n\n").join(blocks)
+
+
+def _format_lesson(l: dict) -> str:
+    lines = []
+    time_part = f" ({l['startTime']}–{l['endTime']})" if l.get("startTime") and l.get("endTime") else ""
+    badge = " ⚠️ <b>[ЗАМІНА]</b>" if l.get("is_replacement") else ""
+    lines.append(f"⏰ <b>{l['number']} пара</b>{time_part}{badge}")
+    lines.append(f"📚 <b>{html.escape(l.get('subject', ''))}</b>")
+
+    if l.get("teachers_raw"):
+        for t in l["teachers_raw"]:
+            t_name = html.escape(t.get("name", ""))
+            t_room = f" (ауд. {html.escape(t['room'])})" if t.get("room") else ""
+            lines.append(f"👨‍🏫 {t_name}{t_room}")
+    else:
+        if l.get("teacher"):
+            lines.append(f"👨‍🏫 {html.escape(l['teacher'])}")
+        if l.get("room"):
+            lines.append(f"🚪 Ауд. {html.escape(l['room'])}")
+    if l.get("note"):
+        lines.append(f"📝 <i>{html.escape(l['note'])}</i>")
 
     return "\n".join(lines).strip()
 

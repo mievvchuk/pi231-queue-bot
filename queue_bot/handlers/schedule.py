@@ -36,10 +36,6 @@ class EditReplacementState(StatesGroup):
     waiting_for_value = State()
 
 
-def get_schedule_data() -> dict:
-    return schedule.load_schedule_data(config.SCHEDULE_PATH)
-
-
 # ---------- Розклад: Сьогодні / Завтра / Тиждень ----------
 
 _private_only = F.chat.type == "private"
@@ -48,7 +44,7 @@ _private_only = F.chat.type == "private"
 @router.message(_private_only, F.text == "📅 Розклад", StateFilter("*"))
 async def open_schedule_menu(message: Message, state: FSMContext, conn):
     await state.clear()
-    sch_data = get_schedule_data()
+    sch_data = schedule.read_schedule(conn)
     now = datetime.datetime.now(ZoneInfo(config.TIMEZONE))
 
     if now.hour >= 15:
@@ -72,7 +68,7 @@ async def open_schedule_menu(message: Message, state: FSMContext, conn):
 @router.message(_private_only, F.text == "📅 Сьогодні", StateFilter("*"))
 @router.message(Command("today"), StateFilter("*"))
 async def show_today_schedule(message: Message, conn):
-    sch_data = get_schedule_data()
+    sch_data = schedule.read_schedule(conn)
     today_dt = schedule.get_current_date()
     text = schedule.format_schedule_for_date(conn, sch_data, today_dt, config.STUDENT_GROUP)
     await message.answer(text)
@@ -81,7 +77,7 @@ async def show_today_schedule(message: Message, conn):
 @router.message(_private_only, F.text == "➡️ Завтра", StateFilter("*"))
 @router.message(Command("tomorrow"), StateFilter("*"))
 async def show_tomorrow_schedule(message: Message, conn):
-    sch_data = get_schedule_data()
+    sch_data = schedule.read_schedule(conn)
     tomorrow_dt = schedule.get_tomorrow_date()
     text = schedule.format_schedule_for_date(conn, sch_data, tomorrow_dt, config.STUDENT_GROUP)
     await message.answer(text)
@@ -90,7 +86,7 @@ async def show_tomorrow_schedule(message: Message, conn):
 @router.message(_private_only, F.text == "🗓 Весь тиждень", StateFilter("*"))
 @router.message(Command("week"), StateFilter("*"))
 async def show_week_schedule(message: Message, conn):
-    sch_data = get_schedule_data()
+    sch_data = schedule.read_schedule(conn)
     today_dt = schedule.get_current_date()
     days = schedule.format_week_schedule(conn, sch_data, today_dt, config.STUDENT_GROUP)
     for day_text in days:
@@ -98,37 +94,22 @@ async def show_week_schedule(message: Message, conn):
 
 
 @router.message(Command("schedule"), StateFilter("*"))
-async def show_base_schedule(message: Message):
-    sch_data = get_schedule_data()
-    lines = [f"📌 <b>Базовий розклад групи {html.escape(config.STUDENT_GROUP)}:</b>\n"]
-    for day_key in schedule.DAY_KEYS[:5]:  # Пн-Пт
-        day_uk = schedule.DAY_NAMES_UK.get(day_key, day_key.capitalize())
-        content = sch_data.get(day_key, [])
-        lines.append(f"<b>{day_uk}:</b>")
-        if isinstance(content, list):
-            if not content:
-                lines.append("<i>Занять немає</i>\n")
-            else:
-                for l in content:
-                    lines.append(f"• {l.get('number', '?')}. {l.get('subject', '')} ({l.get('startTime', '')}–{l.get('endTime', '')})")
-                lines.append("")
-        elif isinstance(content, dict):
-            reg = content.get("regular") or []
-            num = content.get("numerator") or []
-            den = content.get("denominator") or []
-            if reg:
-                for l in reg:
-                    lines.append(f"• {l.get('number', '?')}. {l.get('subject', '')} ({l.get('startTime', '')}–{l.get('endTime', '')})")
-            if num:
-                lines.append("<i>(Чисельник)</i>")
-                for l in num:
-                    lines.append(f"• {l.get('number', '?')}. {l.get('subject', '')}")
-            if den:
-                lines.append("<i>(Знаменник)</i>")
-                for l in den:
-                    lines.append(f"• {l.get('number', '?')}. {l.get('subject', '')}")
-            lines.append("")
-    await message.answer("\n".join(lines))
+async def show_base_schedule(message: Message, conn):
+    sch_data = schedule.read_schedule(conn)
+    group = html.escape(config.STUDENT_GROUP)
+    for week_type, week_name in schedule.WEEK_NAMES_UK.items():
+        lines = [f"📌 <b>Базовий розклад групи {group} · {week_name}</b>"]
+        for day_key in schedule.DAY_KEYS:
+            lessons = schedule.get_base_schedule_for_day(sch_data, day_key, week_type)
+            if day_key in ("saturday", "sunday") and not lessons:
+                continue
+            slots = schedule.format_lesson_slots(lessons, compact=True)
+            day_text = f"<b>{schedule.DAY_NAMES_UK[day_key]}</b>\n{slots}"
+            if len("\n\n".join([*lines, day_text])) > 4096:
+                await message.answer("\n\n".join(lines))
+                lines.clear()
+            lines.append(day_text)
+        await message.answer("\n\n".join(lines))
 
 
 # ---------- Заміни ----------
@@ -533,7 +514,7 @@ async def edit_field_prompt_handler(callback: CallbackQuery, state: FSMContext, 
     await state.set_state(EditReplacementState.waiting_for_value)
     await state.update_data(token=token, idx=idx, field=field, message_id=callback.message.message_id)
 
-    choices = schedule_choices(field)
+    choices = schedule_choices(field, conn)
     buttons = [InlineKeyboardButton(text=value[:40], callback_data=f"rec_pk:{token}:{idx}:{field}:{i}")
                for i, value in enumerate(choices)]
     rows = [buttons[i:i + 2] for i in range(0, len(buttons), 2)]
@@ -548,15 +529,16 @@ async def edit_field_prompt_handler(callback: CallbackQuery, state: FSMContext, 
     )
 
 
-def schedule_choices(field: str) -> list[str]:
-    """Subjects, teachers or rooms from schedule.json, so values can be tapped instead of typed."""
-    days = schedule.load_schedule_data().values()
-    items = [x for day in days if isinstance(day, list) for x in day if isinstance(x, dict)]
+def schedule_choices(field: str, conn=None) -> list[str]:
+    """Subjects, teachers or rooms from the saved timetable."""
+    data = schedule.read_schedule(conn)
+    items = [item for day in schedule.DAY_KEYS for week in schedule.WEEK_NAMES_UK
+             for item in schedule.get_base_schedule_for_day(data, day, week)]
     if field in ("new_subject", "old_subject"):
         values = [x.get("subject") for x in items]
     elif field in ("teacher", "room"):
         key = "name" if field == "teacher" else "room"
-        values = [t.get(key) for x in items for t in (x.get("teachers") or []) if isinstance(t, dict)]
+        values = [t.get(key) for x in items for t in (x.get("teachers_raw") or [{key: x.get(field)}])]
     else:
         return []
     return sorted({str(v) for v in values if v})[:30]
@@ -570,7 +552,7 @@ async def pick_field_value_handler(callback: CallbackQuery, state: FSMContext, c
     _, token, idx_str, field, choice = callback.data.split(":")
     reps = _PENDING_RECOGNITIONS.get(token)
     idx, choice = int(idx_str), int(choice)
-    choices = schedule_choices(field)
+    choices = schedule_choices(field, conn)
     if reps is None or idx >= len(reps) or choice >= len(choices) or field not in FIELD_NAMES_UK:
         await callback.answer("Дані застаріли.", show_alert=True)
         return
@@ -763,76 +745,149 @@ async def process_field_value_text(message: Message, state: FSMContext, conn):
     await message.answer(text, reply_markup=kb)
 
 
-# ---------- Завантаження та вивантаження файлу розкладу ----------
+# ---------- Редагування базового розкладу ----------
 
-@router.message(_private_only, Command("get_schedule"), StateFilter("*"))
-@router.message(_private_only, Command("export_schedule"), StateFilter("*"))
-async def export_schedule_file(message: Message, conn):
-    import os
-    from aiogram.types import FSInputFile
+class EditScheduleState(StatesGroup):
+    waiting_for_lesson = State()
 
+
+def _schedule_day_keyboard():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=label, callback_data=f"base_day:{day}")]
+        for day, label in schedule.DAY_NAMES_UK.items()
+    ])
+
+
+@router.message(_private_only, F.text == "✏️ Редагувати розклад", StateFilter("*"))
+@router.message(_private_only, Command("edit_schedule"), StateFilter("*"))
+async def open_schedule_editor(message: Message, state: FSMContext, conn):
     if not admins.is_admin(conn, message.from_user.id):
-        raise BotError("Ця функція доступна лише адміністраторам.")
+        raise BotError("Редагувати розклад можуть лише адміністратори.")
 
-    if not os.path.exists(config.SCHEDULE_PATH):
-        raise BotError("Файл розкладу не знайдено.")
+    await state.clear()
+    await message.answer("Оберіть день для редагування розкладу.", reply_markup=_schedule_day_keyboard())
 
-    file = FSInputFile(config.SCHEDULE_PATH, filename="schedule.json")
-    await message.answer_document(
-        file,
-        caption=(
-            "📄 <b>Файл базового розкладу schedule.json</b>\n\n"
-            "<b>Як оновити розклад:</b>\n"
-            "1. Завантажте цей файл на пристрій.\n"
-            "2. Відредагуйте пари для кожного дня (monday–friday).\n"
-            "3. Надішліть збережений файл <code>schedule.json</code> прямо в цей чат.\n\n"
-            "Бот автоматично збереже його та оновить розклад для всієї групи!"
-        ),
+
+@router.callback_query(F.message.chat.type == "private", F.data.startswith("base_day:"))
+async def select_schedule_day(callback: CallbackQuery, state: FSMContext, conn):
+    if not admins.is_admin(conn, callback.from_user.id):
+        await callback.answer("У вас немає прав адміністратора.", show_alert=True)
+        return
+
+    day = callback.data.split(":")[1]
+    if day not in schedule.DAY_KEYS:
+        await callback.answer("Оберіть день ще раз.", show_alert=True)
+        return
+
+    await state.clear()
+    data = schedule.read_schedule(conn)
+    lines = [f"<b>{schedule.DAY_NAMES_UK[day]}</b>"]
+    keyboard = []
+    for week, label in schedule.WEEK_NAMES_UK.items():
+        lessons = schedule.get_base_schedule_for_day(data, day, week)
+        slots = schedule.format_lesson_slots(lessons, compact=True)
+        lines.append(f"<b>{label}</b>\n{slots}")
+        keyboard.append([
+            InlineKeyboardButton(text=f"{label[:3]}. {pair}", callback_data=f"base_pair:{day}:{week}:{pair}")
+            for pair in schedule.PAIR_TIMES
+        ])
+    keyboard.append([InlineKeyboardButton(text="🔙 До днів", callback_data="base_days")])
+    await callback.answer()
+    await callback.message.edit_text(
+        "\n\n".join(lines),
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard),
     )
 
 
-@router.message(_private_only, F.document)
-async def handle_document_upload(message: Message, conn):
-    import json
-    import os
-
-    doc = message.document
-    if not doc or not doc.file_name:
+@router.callback_query(F.message.chat.type == "private", F.data == "base_days")
+async def return_to_schedule_days(callback: CallbackQuery, state: FSMContext, conn):
+    if not admins.is_admin(conn, callback.from_user.id):
+        await callback.answer("У вас немає прав адміністратора.", show_alert=True)
         return
+
+    await state.clear()
+    await callback.answer()
+    await callback.message.edit_text("Оберіть день для редагування розкладу.", reply_markup=_schedule_day_keyboard())
+
+
+@router.callback_query(F.message.chat.type == "private", F.data.startswith("base_pair:"))
+async def select_schedule_pair(callback: CallbackQuery, state: FSMContext, conn):
+    if not admins.is_admin(conn, callback.from_user.id):
+        await callback.answer("У вас немає прав адміністратора.", show_alert=True)
+        return
+
+    parts = callback.data.split(":")
+    if len(parts) != 4:
+        await callback.answer("Оберіть пару ще раз.", show_alert=True)
+        return
+    _, day, week, pair_key = parts
+    pair = int(pair_key) if pair_key.isascii() and pair_key.isdecimal() else 0
+    if day not in schedule.DAY_KEYS or week not in schedule.WEEK_NAMES_UK or pair not in schedule.PAIR_TIMES:
+        await callback.answer("Оберіть пару ще раз.", show_alert=True)
+        return
+
+    await state.set_data({"day": day, "week": week, "pair": pair})
+    await state.set_state(EditScheduleState.waiting_for_lesson)
+    await callback.answer()
+    await callback.message.answer(
+        f"<b>{schedule.DAY_NAMES_UK[day]} · {schedule.WEEK_NAMES_UK[week]} · {pair} пара</b>\n\n"
+        "У першому рядку напишіть назву предмета. З наступного рядка можна вказати "
+        "викладачів у форматі <code>Ім’я | аудиторія</code>, по одному на рядок. За потреби додайте рядок <code>Примітка: текст</code>.\n\n"
+        "Надішліть <code>-</code>, щоб прибрати заняття, або /cancel, щоб скасувати редагування."
+    )
+
+
+@router.message(_private_only, EditScheduleState.waiting_for_lesson, F.text)
+async def save_schedule_pair(message: Message, state: FSMContext, conn):
     if not admins.is_admin(conn, message.from_user.id):
+        await state.clear()
         return
 
-    if doc.file_name.lower().endswith(".json"):
-        bot = message.bot
-        file = await bot.get_file(doc.file_id)
-        stream = io.BytesIO()
-        await bot.download_file(file.file_path, destination=stream)
-        raw_bytes = stream.getvalue()
+    value = message.text.strip()
+    if value == "/cancel":
+        await state.clear()
+        await message.answer("Редагування скасовано.", reply_markup=_schedule_day_keyboard())
+        return
 
-        try:
-            parsed = json.loads(raw_bytes.decode("utf-8"))
-            if not isinstance(parsed, dict):
-                raise ValueError("Корінь JSON має бути об'єктом із днями тижня (monday, tuesday, etc.).")
+    if not value:
+        await message.answer("Напишіть назву предмета або надішліть «-», щоб прибрати заняття.")
+        return
 
-            days_found = [d for d in schedule.DAY_KEYS if d in parsed]
-            if not days_found:
-                raise ValueError("У файлі не знайдено жодного дня тижня (monday, tuesday, etc.).")
-
-            with open(config.SCHEDULE_PATH, "w", encoding="utf-8") as f:
-                json.dump(parsed, f, ensure_ascii=False, indent=2)
-
-            admins.log_action(conn, message.from_user.id, "upload_schedule", f"file={doc.file_name}")
+    selection = await state.get_data()
+    day, week, pair = selection["day"], selection["week"], selection["pair"]
+    lesson = None
+    if value != "-":
+        subject, *teacher_lines = [line.strip() for line in value.splitlines() if line.strip()]
+        teachers = []
+        note = None
+        for line in teacher_lines:
+            if line.lower().startswith("примітка:"):
+                note = line.partition(":")[2].strip()
+                continue
+            name, _, room = line.partition("|")
+            if not name.strip() or "|" in room:
+                await message.answer("Вкажіть кожного викладача окремим рядком у форматі «Ім’я | аудиторія».")
+                return
+            teachers.append({"name": name.strip(), "room": room.strip() or None})
+        if len(subject) > 160 or len(value) > 500 or len(teachers) > 8:
             await message.answer(
-                f"✅ <b>Розклад успішно завантажено та оновлено!</b>\n\n"
-                f"• Знайдено днів: <b>{len(days_found)}</b> ({', '.join(days_found)})\n"
-                f"• Новий розклад одразу доступний у командах /today, /tomorrow, /week та кнопці «📅 Розклад»."
+                "Назва предмета має містити до 160 символів. "
+                "Увесь запис може містити до 500 символів і до 8 викладачів."
             )
-        except Exception as e:
-            log.exception(f"Error parsing uploaded schedule JSON: {e}")
-            await message.answer(
-                f"⚠️ <b>Помилка у файлі JSON:</b> {html.escape(str(e))}\n\n"
-                "Перевірте структуру файлу або скористайтеся /get_schedule як шаблоном."
-            )
+            return
+        lesson = {"subject": subject, "teachers_raw": teachers}
+        if note is not None:
+            lesson["note"] = note
+
+    schedule.set_schedule_pair(conn, day, week, pair, lesson)
+    await state.clear()
+    admins.log_action(conn, message.from_user.id, "edit_schedule", f"{day}:{week}:{pair}")
+    summary = html.escape(lesson["subject"]) if lesson else "немає заняття"
+    await message.answer(
+        f"✅ {schedule.DAY_NAMES_UK[day]} · {schedule.WEEK_NAMES_UK[week]}\n"
+        f"{pair} пара — {summary}",
+        reply_markup=_schedule_day_keyboard(),
+    )
 
 
 @router.callback_query(F.data.startswith('ch_yes:') | F.data.startswith('ch_no:'))
@@ -882,7 +937,7 @@ async def confirm_channel_import(callback: CallbackQuery, conn):
     await callback.message.edit_text('✅ Підтверджено.\n\n' + text,
                                      reply_markup=approval_keyboard(post_id, confirmed=True))
     from queue_bot.services.updates import broadcast_message_to_users, get_active_user_ids
-    full = schedule.format_schedule_for_date(conn, schedule.load_schedule_data(),
+    full = schedule.format_schedule_for_date(conn, schedule.read_schedule(conn),
                                              datetime.date.fromisoformat(draft['date']), config.STUDENT_GROUP)
     notes = dict.fromkeys(r['source_note'] for r in draft['replacements'] if r.get('source_note'))
     full = '🗓 <b>Повний розклад із замінами</b>\n\n' + full + ''.join(

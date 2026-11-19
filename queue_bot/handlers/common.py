@@ -164,7 +164,7 @@ def get_admin_schedule_menu() -> ReplyKeyboardMarkup:
     return make_reply_keyboard([
         ["🔄 Активні заміни"],
         ["🏢 Робоча субота"],
-        ["📥 Отримати schedule.json", "📤 Завантажити розклад"],
+        ["✏️ Редагувати розклад"],
         ["🔙 В адмін-панель"],
     ])
 
