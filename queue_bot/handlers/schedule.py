@@ -110,8 +110,10 @@ async def show_remaining_pairs(message: Message, conn, subjects):
     rows = [(catalog.get(key, plan["subject_name"]), plan) for key, plan in plans.items() if plan["remaining"]]
     lines = ["📚 <b>Пари до кінця семестру</b>", ""]
     for name, plan in sorted(rows, key=lambda row: row[0].casefold()):
-        end = datetime.date.fromisoformat(plan["end_date"]).strftime("%d.%m.%Y")
-        lines.append(f"{html.escape(name)} — <b>{plan['remaining']}</b> · до {end}")
+        last = plan["finish_date"]
+        detail = (f"остання пара {datetime.date.fromisoformat(last):%d.%m.%Y}"
+                  if last else "дати останньої пари ще немає в розкладі")
+        lines.append(f"{html.escape(name)} — <b>{plan['remaining']}</b> · {detail}")
     await message.answer("\n".join(lines))
 
 

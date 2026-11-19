@@ -615,7 +615,7 @@ async def test_schedule_editor_groups_only_matching_pairs(conn):
     assert all(len(row) == 1 for row in view.kwargs["reply_markup"].inline_keyboard)
 
 
-def test_remaining_pairs_use_manual_baselines_and_only_relevant_replacements(conn):
+def test_remaining_pairs_project_from_count_and_consume_completed_replacements(conn):
     from queue_bot.services import working_days
 
     schedule.replace_schedule_from_backup(conn, {
@@ -644,19 +644,53 @@ def test_remaining_pairs_use_manual_baselines_and_only_relevant_replacements(con
     working_days.set_working_saturday_pairs(conn, "2026-11-21", 1)
 
     saved_at = datetime.datetime(2026, 11, 19, 9, 50, tzinfo=schedule.UK_TZ)
-    end = datetime.date(2026, 11, 23)
-    for name, baseline in {"ЛМВ": 2, "КПЗ": 0, "МН": 2, "Філософія": 1, "Вручну": 3}.items():
-        schedule.save_subject_pair_plan(conn, name, baseline, end, now=saved_at)
+    for name, baseline in {"ЛМВ": 2, "КПЗ": 1, "МН": 2, "Філософія": 1, "Вручну": 3}.items():
+        schedule.save_subject_pair_plan(conn, name, baseline, now=saved_at)
 
-    def counts(at):
+    def progress(at):
         now = datetime.datetime.fromisoformat(at).replace(tzinfo=schedule.UK_TZ)
-        return {row["subject_name"]: row["remaining"] for row in schedule.get_remaining_pairs(conn, now=now).values()}
+        return {row["subject_name"]: (row["remaining"], row["finish_date"])
+                for row in schedule.get_remaining_pairs(conn, now=now).values()}
 
-    assert counts("2026-11-19T09:50") == {"ЛМВ": 2, "КПЗ": 1, "МН": 1, "Філософія": 0, "Вручну": 3}
-    assert counts("2026-11-19T11:20") == {"ЛМВ": 1, "КПЗ": 1, "МН": 1, "Філософія": 0, "Вручну": 3}
-    assert counts("2026-11-23T09:49") == {"ЛМВ": 1, "КПЗ": 0, "МН": 0, "Філософія": 0, "Вручну": 3}
-    assert counts("2026-11-23T09:50")["ЛМВ"] == 0
-    assert set(counts("2026-11-24T08:00").values()) == {0}
+    assert progress("2026-11-19T09:50") == {
+        "ЛМВ": (2, "2026-11-23"), "КПЗ": (1, "2026-11-20"), "МН": (2, "2026-11-26"),
+        "Філософія": (1, "2026-11-27"), "Вручну": (3, None),
+    }
+    assert progress("2026-11-19T11:20")["ЛМВ"] == (1, "2026-11-23")
+    assert progress("2026-11-20T11:20")["КПЗ"] == (0, "2026-11-20")
+    replacements.archive_previous_replacements(conn, "2026-11-21")
+    later = progress("2026-11-23T09:50")
+    assert later == {
+        "ЛМВ": (0, "2026-11-23"), "КПЗ": (0, "2026-11-20"), "МН": (1, "2026-11-26"),
+        "Філософія": (1, "2026-11-27"), "Вручну": (3, None),
+    }
+
+
+def test_remaining_pairs_recalculate_last_date_after_a_replacement(conn, monkeypatch):
+    from queue_bot import config
+
+    monkeypatch.setattr(config, "SEMESTER_END_DATE", datetime.date(2026, 11, 27))
+    schedule.replace_schedule_from_backup(conn, {"friday": [{"pair": 1, "subject": "МН"}]})
+    now = datetime.datetime(2026, 11, 19, 8, 0, tzinfo=schedule.UK_TZ)
+    schedule.save_subject_pair_plan(conn, "МН", 2, now=now)
+
+    def forecast():
+        plan, = schedule.get_remaining_pairs(conn, now=now).values()
+        return plan["remaining"], plan["finish_date"]
+
+    assert forecast() == (2, "2026-11-27")
+    replacements.save_replacement(conn, {
+        "date": "2026-11-20", "lesson_number": 1, "new_subject": "Пару скасовано",
+    })
+    assert forecast() == (2, None)
+    replacements.save_replacement(conn, {
+        "date": "2026-11-19", "lesson_number": 3, "new_subject": "Машинне навчання",
+    }, auto_archive_previous=False)
+    assert forecast() == (2, "2026-11-27")
+    replacements.save_replacement(conn, {
+        "date": "2026-11-19", "lesson_number": 4, "new_subject": "МН",
+    }, auto_archive_previous=False)
+    assert forecast() == (2, "2026-11-19")
 
 
 @pytest.mark.asyncio
@@ -667,13 +701,14 @@ async def test_remaining_pairs_list_uses_catalog_names(conn, monkeypatch):
 
     title = "Машинне навчання"
     monkeypatch.setattr(schedule, "get_remaining_pairs", lambda conn: {
-        subject_name(title): {"subject_name": "МН", "remaining": 3, "end_date": "2026-12-14"},
-        subject_name("Завершений предмет"): {"subject_name": "Завершений предмет", "remaining": 0, "end_date": "2026-11-19"},
+        subject_name(title): {"subject_name": "МН", "remaining": 3, "finish_date": "2026-12-14"},
+        subject_name("Завершений предмет"): {"subject_name": "Завершений предмет", "remaining": 0, "finish_date": "2026-11-19"},
     })
     message = AsyncMock()
     await show_remaining_pairs(message, conn, [{"name": title}, {"name": "Завершений предмет"}])
     text = message.answer.await_args.args[0]
     assert f"{title} — <b>3</b>" in text
+    assert "остання пара 14.12.2026" in text
     assert "Завершений предмет" not in text
 
 
@@ -687,7 +722,7 @@ async def test_remaining_pair_notices_send_once_at_each_threshold(conn, monkeypa
         "thursday": [{"pair": 1, "subject": "МН"}, {"pair": 2, "subject": "МН"}],
     })
     before = datetime.datetime(2026, 11, 19, 8, 0, tzinfo=schedule.UK_TZ)
-    schedule.save_subject_pair_plan(conn, "Машинне навчання", 2, before.date(), now=before)
+    schedule.save_subject_pair_plan(conn, "Машинне навчання", 2, now=before)
     broadcast = AsyncMock()
     monkeypatch.setattr(updates, "broadcast_message_to_users", broadcast)
     monkeypatch.setattr(updates, "get_active_user_ids", lambda conn: [100])
@@ -708,12 +743,11 @@ async def test_remaining_pair_notices_send_once_at_each_threshold(conn, monkeypa
 
 
 @pytest.mark.asyncio
-async def test_admin_can_save_plan_for_a_subject_from_timetable(conn, monkeypatch):
+async def test_admin_can_save_just_the_count_for_a_subject_from_timetable(conn):
     from unittest.mock import AsyncMock, MagicMock
     from queue_bot.handlers.admin import subjects as admin_subjects
 
     schedule.replace_schedule_from_backup(conn, {"monday": [{"pair": 1, "subject": "Філософія"}]})
-    monkeypatch.setattr(schedule, "get_current_date", lambda: datetime.date(2026, 11, 19))
     message = MagicMock(answer=AsyncMock())
     message.from_user.id = 100
     state = AsyncMock()
@@ -722,7 +756,7 @@ async def test_admin_can_save_plan_for_a_subject_from_timetable(conn, monkeypatc
     message.text = "📘 Філософія"
     await admin_subjects.admin_pair_plan_subject_selected(message, state, conn)
     state.get_data.return_value = state.set_data.await_args.args[0]
-    message.text = "3 14.12.2026"
+    message.text = "3"
     await admin_subjects.admin_save_pair_plan(message, state, conn, [])
     plan, = schedule.get_subject_pair_plans(conn).values()
-    assert (plan["subject_name"], plan["base_count"], plan["end_date"]) == ("Філософія", 3, "2026-12-14")
+    assert (plan["subject_name"], plan["base_count"], plan["end_date"]) == ("Філософія", 3, "")

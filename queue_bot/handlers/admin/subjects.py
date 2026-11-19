@@ -1,5 +1,5 @@
 """Admin subjects handlers."""
-from datetime import datetime
+from datetime import date
 
 from .common import (
     AdminSubjectsState,
@@ -20,6 +20,17 @@ from queue_bot.services import schedule
 from queue_bot.services.lesson_scheduler import subject_name
 
 
+def _pair_plan_status(plan):
+    last = plan["finish_date"]
+    if last:
+        detail = f"остання пара {date.fromisoformat(last):%d.%m.%Y}"
+    elif plan["remaining"]:
+        detail = "дати останньої пари ще немає в розкладі"
+    else:
+        detail = "предмет завершено"
+    return f"   📅 Залишилось пар: <b>{plan['remaining']}</b> · {detail}"
+
+
 async def admin_view_subjects_menu(message: Message, state: FSMContext, conn, subjects):
     await state.clear()
     await state.set_state(AdminSubjectsState.in_menu)
@@ -33,13 +44,11 @@ async def admin_view_subjects_menu(message: Message, state: FSMContext, conn, su
 
         plan = remaining.pop(subject_name(s["name"]), None)
         if plan:
-            end = datetime.fromisoformat(plan["end_date"]).strftime("%d.%m.%Y")
-            lines.append(f"   📅 Залишилось пар: <b>{plan['remaining']}</b> · до {end}")
+            lines.append(_pair_plan_status(plan))
 
     for plan in remaining.values():
-        end = datetime.fromisoformat(plan["end_date"]).strftime("%d.%m.%Y")
         lines.append(f"<b>{html.escape(plan['subject_name'])}</b>")
-        lines.append(f"   📅 Залишилось пар: <b>{plan['remaining']}</b> · до {end}")
+        lines.append(_pair_plan_status(plan))
 
     lines.append("")
     if is_owner:
@@ -75,34 +84,27 @@ async def admin_pair_plan_subject_selected(message: Message, state: FSMContext, 
         raise BotError("Оберіть предмет кнопкою зі списку.")
     await state.set_data({"pair_plan_subject": name})
     await state.set_state(AdminSubjectsState.entering_pair_plan)
-    plan = schedule.get_subject_pair_plans(conn).get(subject_name(name))
+    plan = schedule.get_remaining_pairs(conn).get(subject_name(name))
     text = f"<b>{html.escape(name)}</b>\n"
     if plan:
-        end = datetime.fromisoformat(plan["end_date"]).strftime("%d.%m.%Y")
-        text += f"Було внесено: {plan['base_count']} · остання пара {end}\n"
+        text += _pair_plan_status(plan) + "\n"
     text += (
-        "\nНапишіть фактичний залишок за базовим розкладом і дату останньої пари, "
-        "наприклад <code>3 14.12.2026</code>. Почніть із <code>0</code>, якщо базових пар більше немає."
+        "\nНадішліть лише кількість пар, що залишилися, наприклад <code>3</code>. "
+        "Якщо предмет завершено, введіть <code>0</code>. Дату останньої пари бот визначить за розкладом."
     )
     await message.answer(text, reply_markup=make_reply_keyboard([["🔙 До предметів"]]))
 
 
 async def admin_save_pair_plan(message: Message, state: FSMContext, conn, subjects):
-    try:
-        count, date_text = message.text.split()
-        if not count.isascii() or not count.isdecimal() or len(count) > 4:
-            raise ValueError
-        count = int(count)
-        end = datetime.strptime(date_text, "%d.%m.%Y").date()
-        if count and end < schedule.get_current_date():
-            raise ValueError
-    except ValueError:
-        raise BotError("Вкажіть залишок і дату останньої пари. Для додатного залишку дата має бути сьогодні або пізніше. Приклад: 3 14.12.2026.") from None
+    value = message.text.strip()
+    if not value.isascii() or not value.isdecimal() or len(value) > 4:
+        raise BotError("Вкажіть лише кількість пар. Наприклад: 3.")
+    count = int(value)
     selection = await state.get_data()
     name = selection["pair_plan_subject"]
-    schedule.save_subject_pair_plan(conn, name, count, end)
-    admins.log_action(conn, message.from_user.id, "edit_subject_pair_plan", f"{name}: {count}, {end}")
-    await message.answer(f"✅ {html.escape(name)} · внесено пар: {count} · до {end:%d.%m.%Y}")
+    schedule.save_subject_pair_plan(conn, name, count)
+    admins.log_action(conn, message.from_user.id, "edit_subject_pair_plan", f"{name}: {count}")
+    await message.answer(f"✅ {html.escape(name)} · внесено пар: {count}")
     await admin_view_subjects_menu(message, state, conn, subjects)
 
 

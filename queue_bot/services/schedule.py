@@ -355,16 +355,17 @@ def is_scheduled_subject(subject):
     }
 
 
-def save_subject_pair_plan(conn, subject: str, base_count: int, end_date: date, *, now=None) -> None:
+def save_subject_pair_plan(conn, subject: str, base_count: int, *, now=None) -> None:
     from queue_bot.services.lesson_scheduler import subject_name
 
     now = now or datetime.now(UK_TZ)
+    # Keep the legacy column for existing databases and rolling deployments.
     conn.execute(
         """INSERT INTO subject_pair_plans (subject_key, subject_name, base_count, end_date, saved_at)
            VALUES (?, ?, ?, ?, ?)
            ON CONFLICT (subject_key) DO UPDATE SET subject_name = excluded.subject_name,
              base_count = excluded.base_count, end_date = excluded.end_date, saved_at = excluded.saved_at""",
-        (subject_name(subject), subject, base_count, end_date.isoformat(), int(now.timestamp())),
+        (subject_name(subject), subject, base_count, "", int(now.timestamp())),
     )
 
 
@@ -388,52 +389,89 @@ def _subject_slots(lessons, day):
     return slots
 
 
-def get_remaining_pairs(conn, *, now: datetime | None = None) -> dict[str, dict]:
-    """Use the saved baseline, elapsed regular lessons and upcoming subject changes."""
+def get_remaining_pairs(conn, *, now: datetime | None = None, project_finish: bool = True) -> dict[str, dict]:
+    """Consume the saved count only for actual completed lessons and find the last upcoming slot."""
+    from queue_bot.services.lesson_scheduler import subject_name
     from queue_bot.services.working_days import list_working_saturdays
 
     now = (now or datetime.now(UK_TZ)).astimezone(UK_TZ)
     today = now.date()
     plans = get_subject_pair_plans(conn)
     for plan in plans.values():
-        plan["remaining"] = 0
-    active = {key: plan for key, plan in plans.items() if plan["end_date"] >= today.isoformat()}
+        plan["remaining"] = plan["base_count"]
+        plan["finish_date"] = None
+    active = {key: plan for key, plan in plans.items() if plan["remaining"]}
     if not active:
         return plans
 
     saved = {key: datetime.fromtimestamp(plan["saved_at"], UK_TZ) for key, plan in active.items()}
     start = min(instant.date() for instant in saved.values())
-    end_key = max(plan["end_date"] for plan in active.values())
+    end_by_subject = {
+        key: config.SEMESTER_END_DATE if moment.date() <= config.SEMESTER_END_DATE else date.max
+        for key, moment in saved.items()
+    }
     data = read_schedule(conn)
-    saturdays = {row["date"]: row for row in list_working_saturdays(conn, start.isoformat())}
+    saturdays = {}
+    for row in list_working_saturdays(conn, start.isoformat()):
+        with suppress(ValueError):
+            saturdays[date.fromisoformat(row["date"])] = row
+
     changes = defaultdict(list)
-    for item in get_replacements(conn, group_name=config.STUDENT_GROUP, from_date=today.isoformat()):
-        if item["date"] <= end_key:
-            with suppress(ValueError):
-                changes[date.fromisoformat(item["date"])].append(item)
+    for item in get_replacements(conn, group_name=config.STUDENT_GROUP, include_archived=True, from_date=start.isoformat()):
+        with suppress(ValueError):
+            changes[date.fromisoformat(item["date"])].append(item)
 
-    elapsed, added, removed = Counter(), Counter(), Counter()
-    elapsed_days = ((start + timedelta(days=offset)) for offset in range((today - start).days + 1))
-    affected_days = set(elapsed_days) | changes.keys()
-    for day in affected_days:
-        date_key = day.isoformat()
-        regular = _planned_lessons(data, day, saturdays.get(date_key))
-        base_slots = _subject_slots(regular, day)
-        if day <= today:
-            for (_, key), finishes in base_slots.items():
-                if key in active and saved[key] < finishes <= now:
-                    elapsed[key] += 1
-        if day not in changes:
-            continue
-        final_slots = _subject_slots(_apply_replacements(regular, changes[day]), day)
-        for before, after, counter in ((base_slots, final_slots, removed), (final_slots, base_slots, added)):
-            for slot in before.keys() - after.keys():
-                _, key = slot
-                if key in active and date_key <= active[key]["end_date"] and before[slot] > now:
-                    counter[key] += 1
+    def slots_on(day):
+        regular = _planned_lessons(data, day, saturdays.get(day))
+        # A later announcement can archive a confirmed replacement even if
+        # it has not happened yet. Active edits still take precedence.
+        replacements = sorted(changes.get(day, ()), key=lambda row: (not row["is_archived"], row["id"]))
+        return _subject_slots(_apply_replacements(regular, replacements), day)
 
-    for key, plan in active.items():
-        plan["remaining"] = max(0, plan["base_count"] - elapsed[key] - removed[key]) + added[key]
+    for offset in range((min(today, max(end_by_subject.values())) - start).days + 1):
+        day = start + timedelta(days=offset)
+        for (_, key), finishes in slots_on(day).items():
+            plan = active.get(key)
+            if plan and plan["remaining"] and day <= end_by_subject[key] and saved[key] < finishes <= now:
+                plan["remaining"] -= 1
+                if not plan["remaining"]:
+                    plan["finish_date"] = day.isoformat()
+
+    if not project_finish:
+        return plans
+
+    pending = {key: plan["remaining"] for key, plan in active.items() if plan["remaining"]}
+    recurring = {
+        subject_name(lesson["subject"])
+        for day_key in DAY_KEYS
+        for week_type in WEEK_NAMES_UK
+        for lesson in get_base_schedule_for_day(data, day_key, week_type)
+        if is_scheduled_subject(lesson["subject"])
+    }
+    special_days = sorted(saturdays.keys() | changes.keys(), reverse=True)
+    day = today
+    while pending:
+        pending = {key: count for key, count in pending.items() if day <= end_by_subject[key]}
+        if not pending:
+            break
+        if pending.keys().isdisjoint(recurring):
+            # Without a weekly slot, only a dated exception can provide a lesson.
+            while special_days and special_days[-1] < day:
+                special_days.pop()
+            if not special_days:
+                break
+            day = special_days.pop()
+
+        for (_, key), finishes in slots_on(day).items():
+            if key in pending and day <= end_by_subject[key] and finishes > max(now, saved[key]):
+                pending[key] -= 1
+                if not pending[key]:
+                    plans[key]["finish_date"] = day.isoformat()
+                    del pending[key]
+        if day == date.max:
+            break
+        day += timedelta(days=1)
+
     return plans
 
 

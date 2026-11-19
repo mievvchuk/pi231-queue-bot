@@ -36,13 +36,14 @@ def mark_sent_today(conn, today_key: str) -> None:
 
 
 async def notify_remaining_pairs(bot, conn, *, now=None) -> None:
-    plans = schedule.get_remaining_pairs(conn, now=now)
+    plans = schedule.get_remaining_pairs(conn, now=now, project_finish=False)
     due = []
     for key, plan in plans.items():
         count = plan["remaining"]
         if count in (1, 2):
-            marker = f"subject_pairs_notice:{key}:{plan['end_date']}:{count}"
-            if conn.execute("SELECT 1 FROM bot_state WHERE key = ?", (marker,)).fetchone() is None:
+            marker = f"subject_pairs_notice:{key}:{plan['saved_at']}:{count}"
+            legacy_marker = f"subject_pairs_notice:{key}:{plan['end_date']}:{count}"
+            if conn.execute("SELECT 1 FROM bot_state WHERE key IN (?, ?)", (marker, legacy_marker)).fetchone() is None:
                 due.append((marker, plan))
     if not due:
         return
