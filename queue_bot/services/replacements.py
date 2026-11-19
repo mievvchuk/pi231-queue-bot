@@ -9,8 +9,8 @@ def get_today_key() -> str:
     return datetime.now(UK_TZ).strftime("%Y-%m-%d")
 
 
-def get_replacements(conn, date: str | None = None, group_name: str = "ПІ-231", include_archived: bool = False) -> list[dict]:
-    """Отримує заміни з бази даних: на конкретну дату або всі активні від сьогодні."""
+def get_replacements(conn, date: str | None = None, group_name: str = "ПІ-231", include_archived: bool = False, *, from_date: str | None = None) -> list[dict]:
+    """Повертає заміни на конкретну дату або починаючи з from_date (типово сьогодні)."""
     arch_sql = "" if include_archived else "AND (is_archived = FALSE OR is_archived IS NULL)"
     if date:
         rows = conn.execute(
@@ -20,12 +20,12 @@ def get_replacements(conn, date: str | None = None, group_name: str = "ПІ-231"
             (date, group_name),
         ).fetchall()
     else:
-        today_str = get_today_key()
+        first_day = from_date or get_today_key()
         rows = conn.execute(
             f"""SELECT * FROM replacements 
                WHERE group_name = ? AND date >= ? {arch_sql}
                ORDER BY date, lesson_number""",
-            (group_name, today_str),
+            (group_name, first_day),
         ).fetchall()
 
     return [dict(r) for r in rows]

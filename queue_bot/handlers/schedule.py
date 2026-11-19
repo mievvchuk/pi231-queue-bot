@@ -93,6 +93,25 @@ async def show_week_schedule(message: Message, conn):
         await message.answer(day_text)
 
 
+@router.message(_private_only, F.text == "📚 Пари до кінця семестру", StateFilter("*"))
+@router.message(_private_only, Command("remaining"), StateFilter("*"))
+async def show_remaining_pairs(message: Message, conn, subjects):
+    from queue_bot.services.lesson_scheduler import subject_name
+
+    remaining = schedule.get_remaining_pairs(conn)
+    end = config.SEMESTER_END_DATE.strftime("%d.%m.%Y")
+    if not remaining:
+        await message.answer(f"До {end} включно в розкладі більше немає пар.")
+        return
+
+    catalog = {subject_name(subject["name"]): subject["name"] for subject in subjects}
+    rows = [(catalog.get(key, name), count) for key, (name, count) in remaining.items()]
+    lines = [f"📚 <b>Пари до кінця семестру</b> · до {end} включно", ""]
+    for name, count in sorted(rows, key=lambda row: row[0].casefold()):
+        lines.append(f"{html.escape(name)} — <b>{count}</b>")
+    await message.answer("\n".join(lines))
+
+
 @router.message(Command("schedule"), StateFilter("*"))
 async def show_base_schedule(message: Message, conn):
     sch_data = schedule.read_schedule(conn)

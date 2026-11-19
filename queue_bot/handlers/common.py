@@ -72,6 +72,7 @@ def get_schedule_reply_menu() -> ReplyKeyboardMarkup:
     return make_reply_keyboard([
         ["📅 Сьогодні", "➡️ Завтра"],
         ["🗓 Весь тиждень", "🔄 Заміни"],
+        ["📚 Пари до кінця семестру"],
         ["🏠 Головне меню"],
     ])
 

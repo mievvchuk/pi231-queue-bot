@@ -16,14 +16,22 @@ from .common import (
 
 
 async def admin_view_subjects_menu(message: Message, state: FSMContext, conn, subjects):
+    from queue_bot.services import schedule
+    from queue_bot.services.lesson_scheduler import subject_name
+
     await state.clear()
     await state.set_state(AdminSubjectsState.in_menu)
     is_owner = admins.is_owner(conn, message.from_user.id)
 
     lines = ["📚 <b>Список дисциплін та закріплених викладачів:</b>\n"]
+    remaining = schedule.get_remaining_pairs(conn)
     for idx, s in enumerate(subjects, 1):
         teachers_str = ", ".join(t["name"] for t in s.get("teachers", [])) or "— немає викладачів —"
         lines.append(f"{idx}. <b>{html.escape(s['name'])}</b>\n   👨‍🏫 {html.escape(teachers_str)}")
+
+        count = remaining.get(subject_name(s["name"]))
+        if count:
+            lines.append(f"   📅 Залишилось пар: <b>{count[1]}</b>")
 
     lines.append("")
     if is_owner:

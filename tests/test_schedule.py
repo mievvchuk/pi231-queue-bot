@@ -172,6 +172,7 @@ def test_admin_schedule_keyboards():
     assert "📅 Сьогодні" in student_sch_texts
     assert "➡️ Завтра" in student_sch_texts
     assert "🗓 Весь тиждень" in student_sch_texts
+    assert "📚 Пари до кінця семестру" in student_sch_texts
     assert "🔄 Заміни" in student_sch_texts
     assert "🏠 Головне меню" in student_sch_texts
 
@@ -612,3 +613,59 @@ async def test_schedule_editor_groups_only_matching_pairs(conn):
     view = callback.message.edit_text.await_args
     assert "Чисельник" not in view.args[0] and "Знаменник" not in view.args[0]
     assert all(len(row) == 1 for row in view.kwargs["reply_markup"].inline_keyboard)
+
+
+def test_remaining_pairs_count_effective_timetable_through_end_date(conn, monkeypatch):
+    from queue_bot import config
+    from queue_bot.services import working_days
+
+    monkeypatch.setattr(config, "SEMESTER_END_DATE", datetime.date(2026, 11, 23))
+    schedule.replace_schedule_from_backup(conn, {
+        "thursday": [
+            {"pair": 1, "subject": "МН"},
+            {"pair": 2, "subject": "ЛМВ"},
+            {"pair": 2, "subject": "Людино-машинна взаємодія"},
+        ],
+        "friday": [
+            {"pair": 1, "subject": "Філософія"},
+            {"pair": 2, "subject": "МН"},
+        ],
+        "monday": [
+            {"pair": 1, "subject": "ЛМВ", "week_type": "denominator"},
+            {"pair": 2, "subject": "Інший предмет", "week_type": "numerator"},
+        ],
+        "tuesday": [{"pair": 1, "subject": "Після семестру"}],
+    })
+    replacements.save_replacement(conn, {
+        "date": "2026-11-20", "lesson_number": 1, "new_subject": "Пару скасовано",
+    })
+    replacements.save_replacement(conn, {
+        "date": "2026-11-20", "lesson_number": 2, "new_subject": "КПЗ",
+    })
+    working_days.set_working_saturday(conn, "2026-11-21", "thursday", "denominator")
+    working_days.set_working_saturday_pairs(conn, "2026-11-21", 1)
+
+    def counts(at):
+        now = datetime.datetime.fromisoformat(at).replace(tzinfo=schedule.UK_TZ)
+        return dict(schedule.get_remaining_pairs(conn, now=now).values())
+
+    assert counts("2026-11-19T09:50") == {"ЛМВ": 2, "КПЗ": 1, "МН": 1}
+    assert counts("2026-11-19T11:20") == {"КПЗ": 1, "МН": 1, "ЛМВ": 1}
+    assert counts("2026-11-23T09:49") == {"ЛМВ": 1}
+    assert counts("2026-11-23T09:50") == {}
+    assert counts("2026-11-24T08:00") == {}
+
+
+@pytest.mark.asyncio
+async def test_remaining_pairs_list_uses_catalog_names(conn, monkeypatch):
+    from unittest.mock import AsyncMock
+    from queue_bot.handlers.schedule import show_remaining_pairs
+    from queue_bot.services.lesson_scheduler import subject_name
+
+    title = "Машинне навчання"
+    monkeypatch.setattr(schedule, "get_remaining_pairs", lambda conn: {subject_name(title): ("МН", 3)})
+    message = AsyncMock()
+    await show_remaining_pairs(message, conn, [{"name": title}, {"name": "Завершений предмет"}])
+    text = message.answer.await_args.args[0]
+    assert f"{title} — <b>3</b>" in text
+    assert "Завершений предмет" not in text

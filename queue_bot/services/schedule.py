@@ -2,9 +2,10 @@ import html
 import json
 import logging
 import os
-from collections import Counter
+from collections import Counter, defaultdict
+from contextlib import suppress
 from pathlib import Path
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
 from queue_bot import config
@@ -201,8 +202,7 @@ def get_upcoming_lesson(conn, schedule_data, *, now=None, group_name=None):
             if target == now.date() and end <= now.strftime('%H:%M'):
                 continue
             selected = [item for item in lessons if item['number'] == number and
-                        str(item.get('subject', '')).strip().casefold() not in
-                        ('', 'немає пари', 'нема пари', 'пари немає', 'скасовано', 'немає заняття')]
+                        _is_scheduled_subject(item.get('subject'))]
             if selected:
                 return dict(date=target.isoformat(), number=number, startTime=start, endTime=end,
                             ongoing=target == now.date() and start <= now.strftime('%H:%M') < end,
@@ -281,6 +281,10 @@ def get_planned_schedule(conn, schedule_data: dict, dt: date) -> list[dict]:
     from queue_bot.services.working_days import get_working_saturday
     ws = get_working_saturday(conn, date_str) if conn else None
 
+    return _planned_lessons(schedule_data, dt, ws)
+
+
+def _planned_lessons(schedule_data, dt, ws):
     if ws:
         effective_day_key = ws["replaces_day"]
         effective_w_type = ws.get("week_type") or get_week_type(dt)
@@ -298,6 +302,10 @@ def get_actual_schedule(conn, schedule_data: dict, dt: date, group_name: str = "
     replacements = get_replacements(conn, date=date_str, group_name=group_name)
 
     base = get_planned_schedule(conn, schedule_data, dt)
+    return _apply_replacements(base, replacements), replacements
+
+
+def _apply_replacements(base, replacements):
     rep_map = {int(r["lesson_number"]): r for r in replacements}
     actual_lessons = []
 
@@ -337,7 +345,59 @@ def get_actual_schedule(conn, schedule_data: dict, dt: date, group_name: str = "
             })
 
     actual_lessons.sort(key=lambda x: x.get("number", 0))
-    return actual_lessons, replacements
+    return actual_lessons
+
+
+def _is_scheduled_subject(subject):
+    return str(subject or "").strip().casefold() not in {
+        "", "—", "-", "немає пари", "нема пари", "пари немає", "скасовано", "пару скасовано",
+        "немає заняття", "заняття немає", "занять немає",
+    }
+
+
+def get_remaining_pairs(conn, *, now: datetime | None = None) -> dict[str, tuple[str, int]]:
+    """Return the display name and number of remaining slots for each subject."""
+    from queue_bot.services.lesson_scheduler import subject_name
+    from queue_bot.services.working_days import list_working_saturdays
+
+    now = (now or datetime.now(UK_TZ)).astimezone(UK_TZ)
+    today = now.date()
+    end = config.SEMESTER_END_DATE
+    if end < today:
+        return {}
+
+    data = read_schedule(conn)
+    saturdays = {row["date"]: row for row in list_working_saturdays(conn, today.isoformat())}
+    replacements_by_date = defaultdict(list)
+    for item in get_replacements(conn, group_name=config.STUDENT_GROUP, from_date=today.isoformat()):
+        replacements_by_date[item["date"]].append(item)
+
+    counts = Counter()
+    names = {}
+    for offset in range((end - today).days + 1):
+        day = today + timedelta(days=offset)
+        date_key = day.isoformat()
+        lessons = _apply_replacements(
+            _planned_lessons(data, day, saturdays.get(date_key)), replacements_by_date.get(date_key, ()),
+        )
+        seen = set()
+        for lesson in lessons:
+            subject = lesson["subject"]
+            if not _is_scheduled_subject(subject):
+                continue
+            if day == today and lesson["endTime"]:
+                with suppress(ValueError):
+                    if now.time() >= time.fromisoformat(lesson["endTime"]).replace(tzinfo=None):
+                        continue
+            key = subject_name(subject)
+            slot = (lesson["number"], key)
+            if slot in seen:
+                continue
+            seen.add(slot)
+            counts[key] += 1
+            names.setdefault(key, subject)
+
+    return {key: (names[key], count) for key, count in counts.items()}
 
 
 def format_schedule_for_date(conn, schedule_data: dict, dt: date, group_name: str = "ПІ-231") -> str:
