@@ -632,3 +632,16 @@ test('admin journal entry requests full group scope',()=>{
   link.listeners.click();
   assert.equal(calls[0][0],'journal');assert.match(calls[0][2],/scope=group/);
 });
+
+for (const design of [false, true]) test('remaining subject pairs appear in queue lists and details, design='+design, () => {
+  const {app} = setup(design);
+  const queue = {id:1,subject:'КПЗ',teacher:'Щуцький',type:'lesson',status:'open',count:0,my_position:null,labs:[],entries:[],
+    pair_plan:{remaining:2,finish_date:'2026-12-03'}};
+  app.S.data.queues = [queue];
+  app.S.queue = queue;
+  const detail = /Залишилось пар: 2 · остання пара 03\.12\.2026/;
+  assert.match(app.queuesPage().textContent, detail);
+  assert.match(app.queuePage().textContent, detail);
+  queue.pair_plan = null;
+  assert.doesNotMatch(app.queuePage().textContent, /Залишилось пар/);
+});

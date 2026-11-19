@@ -1,4 +1,6 @@
 """Admin presentation handlers."""
+from queue_bot.services import schedule
+
 from .common import (
     AdminUserState,
     BotError,
@@ -59,7 +61,10 @@ async def open_admin_queue_manager(message: Message, conn, subjects, session_id:
     session = get_open_session(conn, session_id)
     entries = queues.get_entries(conn, session_id)
     from queue_bot.services import attendance
-    text = '⚡ <b>Режим адміна</b>\n\n' + format_queue(subjects, session, entries, show_id=True, lesson=attendance.view(conn, session_id, message.from_user.id))
+    text = '⚡ <b>Режим адміна</b>\n\n' + format_queue(
+        subjects, session, entries, show_id=True, lesson=attendance.view(conn, session_id, message.from_user.id),
+        pair_plans=schedule.read_queue_pair_plans(conn),
+    )
     from queue_bot.handlers.attendance import lesson_summary
     text += lesson_summary(conn, session_id, message.from_user.id)
     if note:
@@ -87,7 +92,10 @@ async def open_admin_student_list(message: Message, conn, subjects, session_id: 
     page_entries, cur_page, total_pages = paginate(entries, page, per_page=8)
     rows = [[f"👤 {format_entry(e, show_id=True)}"] for e in page_entries]
     markup = get_paginated_reply_keyboard(rows, cur_page, total_pages, back_text="🔙 Назад до черги")
-    text = format_queue(subjects, session, entries, show_id=True, lesson=lesson) + "\n\nОберіть студента для дій на кнопках внизу 👇"
+    text = format_queue(
+        subjects, session, entries, show_id=True, lesson=lesson, pair_plans=schedule.read_queue_pair_plans(conn),
+    )
+    text += "\n\nОберіть студента для дій на кнопках внизу 👇"
     if note:
         text = f"{note}\n\n{text}"
     await message.answer(text, reply_markup=markup)

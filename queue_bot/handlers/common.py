@@ -3,6 +3,7 @@ import logging
 import re
 import time
 from contextlib import suppress
+from datetime import date
 
 from aiogram import BaseMiddleware
 from aiogram.exceptions import TelegramAPIError, TelegramBadRequest
@@ -16,7 +17,7 @@ from aiogram.types import (
     WebAppInfo,
 )
 
-from queue_bot.services import admins, queues
+from queue_bot.services import admins, queues, schedule
 from queue_bot.services import lab_catalog
 from queue_bot.services.errors import BotError
 from queue_bot.services.lab_estimates import format_lab_details
@@ -429,6 +430,8 @@ def format_category_queues_overview(
 
     lines = [f"{title}\n"]
 
+    plans = schedule.read_queue_pair_plans(conn)
+
     if category == "coursework":
         lines.append("Список черг за керівниками:")
         for s in sessions:
@@ -445,6 +448,8 @@ def format_category_queues_overview(
             count = len(entries)
             status_suffix = " · архів" if s["status"] == "archived" else ""
             lines.append(f"• <b>{html.escape(sub)}</b>\n  👨‍🏫 {html.escape(teacher)} — у черзі: <b>{count}</b>{status_suffix}")
+            if summary := format_queue_pair_plan(s, sub, plans):
+                lines.append(f"  {summary}")
         lines.append("\nОберіть чергу на кнопках внизу 👇")
 
     return "\n".join(lines)
@@ -466,6 +471,7 @@ def format_queues_overview(conn, sessions: list, subjects: list[dict], title: st
 
     lines = [f"📋 <b>{title} групи ПІ-231</b>\n"]
 
+    plans = schedule.read_queue_pair_plans(conn)
     if lessons:
         lines.append("📖 <b>Звичайні пари:</b>")
         for s in lessons:
@@ -474,6 +480,8 @@ def format_queues_overview(conn, sessions: list, subjects: list[dict], title: st
             count = len(entries)
             status_suffix = " · архів" if s["status"] == "archived" else ""
             lines.append(f"• <b>{html.escape(sub)}</b>\n  👨‍🏫 {html.escape(teacher)} — у черзі: <b>{count}</b>{status_suffix}")
+            if summary := format_queue_pair_plan(s, sub, plans):
+                lines.append(f"  {summary}")
         lines.append("")
 
     if consultations:
@@ -496,6 +504,7 @@ def format_my_queues_overview(conn, sessions: list, subjects: list[dict], telegr
         return "Ви ще не записані в жодну чергу."
 
     lines = ["👥 <b>Ваші черги</b>\n"]
+    plans = schedule.read_queue_pair_plans(conn)
     for s in sessions:
         sub, teacher = session_names(subjects, s)
         my_pos = queues.get_user_position(conn, telegram_id, s["id"])
@@ -508,6 +517,8 @@ def format_my_queues_overview(conn, sessions: list, subjects: list[dict], telegr
             f"• <b>{html.escape(sub)}</b>{type_badge}\n"
             f"  👨‍🏫 {html.escape(teacher)} — 📍 Ваше місце: <b>{my_pos}</b> з {total}{status_suffix}"
         )
+        if summary := format_queue_pair_plan(s, sub, plans):
+            lines.append(f"  {summary}")
     lines.append("\nОберіть чергу на кнопках внизу 👇")
     return "\n".join(lines)
 
@@ -602,7 +613,28 @@ def queue_label(subjects: list[dict], session) -> str:
     return f"{subject} — {teacher}{type_badge}{lock}"
 
 
-def format_queue(subjects: list[dict], session, entries, my_telegram_id: int | None = None, show_id: bool = False, *, lesson=None) -> str:
+def format_queue_pair_plan(session, subject: str, plans: dict) -> str:
+    plan = schedule.queue_pair_plan(session, subject, plans)
+    if not plan:
+        return ""
+    last = plan["finish_date"]
+    detail = f" · остання пара {date.fromisoformat(last):%d.%m.%Y}" if last else ""
+    return f"📅 Залишилось пар: <b>{plan['remaining']}</b>{detail}"
+
+
+def format_queue_list_pair_plans(conn, sessions, subjects) -> str:
+    if not sessions:
+        return ""
+    plans = schedule.read_queue_pair_plans(conn)
+    summaries = {}
+    for session in sessions:
+        subject, _ = session_names(subjects, session)
+        if summary := format_queue_pair_plan(session, subject, plans):
+            summaries[subject] = summary
+    return "".join(f"\n<b>{html.escape(name)}</b> · {summary}" for name, summary in summaries.items())
+
+
+def format_queue(subjects: list[dict], session, entries, my_telegram_id: int | None = None, show_id: bool = False, *, lesson=None, pair_plans=None) -> str:
     lines = []
 
     subject, teacher = session_names(subjects, session)
@@ -612,6 +644,8 @@ def format_queue(subjects: list[dict], session, entries, my_telegram_id: int | N
     else:
         lines.append(f"📋 <b>{html.escape(subject)}</b>")
     lines.append(f"👨‍🏫 Викладач: <b>{html.escape(teacher)}</b>")
+    if pair_plans and (summary := format_queue_pair_plan(session, subject, pair_plans)):
+        lines.append(summary)
     lesson_title = session["lesson_title"] if "lesson_title" in session.keys() else None
     if lesson_title:
         lines.append(f"Заняття: {html.escape(lesson_title)}")

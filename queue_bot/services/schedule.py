@@ -475,6 +475,25 @@ def get_remaining_pairs(conn, *, now: datetime | None = None, project_finish: bo
     return plans
 
 
+def read_queue_pair_plans(conn) -> dict[str, dict]:
+    try:
+        return get_remaining_pairs(conn)
+    except (ValueError, TypeError, KeyError, AttributeError):
+        log.warning("Queue pair plans unavailable: invalid schedule format", exc_info=True)
+        return {}
+
+
+def queue_pair_plan(session, subject: str, plans: dict) -> dict | None:
+    from queue_bot.services.lesson_scheduler import subject_name
+
+    if session["status"] == "archived" or ("queue_type" in session.keys() and session["queue_type"] != "lesson"):
+        return None
+    plan = plans.get(subject_name(subject))
+    if plan and plan["remaining"] > 0:
+        return {key: plan[key] for key in ("remaining", "finish_date")}
+    return None
+
+
 def format_schedule_for_date(conn, schedule_data: dict, dt: date, group_name: str = "ПІ-231") -> str:
     day_key = dt.strftime("%A").lower()
     day_uk = DAY_NAMES_UK.get(day_key, day_key.capitalize())

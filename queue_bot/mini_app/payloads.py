@@ -1,7 +1,7 @@
 """Public JSON views: Telegram IDs are included only for verified admin mode."""
 from datetime import datetime, timezone
 
-from queue_bot.services import lab_catalog, queues
+from queue_bot.services import lab_catalog, queues, schedule
 from queue_bot.services.subjects import find_subject, find_teacher
 
 
@@ -23,7 +23,7 @@ def entry_view(row, uid, admin=False):
     return item
 
 
-def queue_view(conn, subjects, session, uid, *, detail=False, admin=False):
+def queue_view(conn, subjects, session, uid, *, detail=False, admin=False, pair_plans=None):
     rows = queues.get_entries(conn, session['id'])
     subject, teacher = names(subjects, session)
     result = dict(id=session['id'], subject=subject, teacher=teacher, status='archived' if session['status'] == 'archived' else 'open',
@@ -37,6 +37,9 @@ def queue_view(conn, subjects, session, uid, *, detail=False, admin=False):
             own_state = lesson['own']
             lesson['own'] = {k: own_state[k] for k in ('state', 'token', 'deadline', 'turn_due')}
     result['lesson'] = lesson
+    if pair_plans is None:
+        pair_plans = schedule.read_queue_pair_plans(conn)
+    result['pair_plan'] = schedule.queue_pair_plan(session, subject, pair_plans)
     own = next((r for r in rows if r['telegram_id'] == uid), None)
     result['my_labs'] = lab_catalog.read_numbers(own['selected_labs']) if own else None
     result['my_planned_minutes'] = own['planned_minutes'] if own else None

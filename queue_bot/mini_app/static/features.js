@@ -532,7 +532,7 @@ window.createPI231Features = function (H) {
   }
   function historyPage(data) {
     const caption=el('p',{class:'history-timezone'},'Дата й час за Києвом');
-    const sessionMeta=session=>small([session?.teacher,historyTime(session?.date),session?.status==='archived'?'Архів':null].filter(Boolean).join(' · '));
+    const sessionMeta=session=>small([session?.teacher,historyTime(session?.date),session?.status==='archived'?'Архів':null,H.pairPlanText?.(session)].filter(Boolean).join(' · '));
     if (data.session_id != null) {
       const session=rows(data.sessions).find(item=>String(item.id)===String(data.session_id));
       const people=new Map();

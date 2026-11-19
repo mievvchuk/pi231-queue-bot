@@ -17,6 +17,7 @@ from queue_bot.handlers.common import (
     format_category_queues_overview,
     format_my_queues_overview,
     format_queue,
+    format_queue_list_pair_plans,
     format_queue_categories_overview,
     format_queues_overview,
     get_category_queues_reply_menu,
@@ -41,7 +42,7 @@ from queue_bot.handlers.common import (
 from queue_bot.services import admins, queues, users, swap_requests, queue_navigation
 from queue_bot.services.errors import BotError
 from queue_bot.handlers.completions import CompletionFlow, begin_completion, receive_passed_labs, passed_selection_callback
-from queue_bot.services import lab_catalog
+from queue_bot.services import lab_catalog, schedule
 from queue_bot.handlers.lab_counts import (
     LAB_COUNT_BUTTON, TIME_BUTTON, LabCountFlow, ask_lab_count, ask_planned_minutes,
     begin_lab_count, receive_lab_count, receive_planned_minutes, lab_selection_callback,
@@ -95,7 +96,10 @@ async def open_queue_screen(message: Message, conn, subjects, session_id: int, n
     uid = telegram_id if telegram_id is not None else message.from_user.id
     is_adm = admins.is_admin(conn, uid)
     from queue_bot.services import attendance
-    text = '👤 <b>Режим студента</b>\n\n' + format_queue(subjects, session, entries, uid, lesson=attendance.view(conn, session_id, uid))
+    text = '👤 <b>Режим студента</b>\n\n' + format_queue(
+        subjects, session, entries, uid, lesson=attendance.view(conn, session_id, uid),
+        pair_plans=schedule.read_queue_pair_plans(conn),
+    )
     from queue_bot.handlers.attendance import lesson_summary, screen_keyboard
     text += lesson_summary(conn, session_id, uid)
     if note:
@@ -185,8 +189,9 @@ async def show_queue_search(message, state, conn, subjects, query='', page=1):
     page = max(1, min(page, pages))
     await state.set_state(StudentFlow.browsing_queues)
     await state.update_data(queue_search=True, query=query, page=page)
+    page_sessions = sessions[(page-1)*5:page*5]
     rows = [[InlineKeyboardButton(text=queue_label(subjects, item), callback_data=f'findq:{item["id"]}')]
-            for item in sessions[(page-1)*5:page*5]]
+            for item in page_sessions]
     nav = []
     if page > 1:
         nav.append(InlineKeyboardButton(text='Попередні', callback_data=f'findpage:{page-1}'))
@@ -196,6 +201,8 @@ async def show_queue_search(message, state, conn, subjects, query='', page=1):
         rows.append(nav)
     title = ('Пошук: ' + html.escape(query)) if query else 'Усі черги'
     text = f'{title}\nЗнайдено: {len(sessions)}. Сторінка {page} із {pages}.\nОберіть чергу під цим повідомленням або напишіть інший запит.' if sessions else 'Нічого не знайдено. Спробуйте частину назви предмета або прізвище викладача.'
+    if summaries := format_queue_list_pair_plans(conn, page_sessions, subjects):
+        text += "\n" + summaries
     await message.answer(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=rows) if rows else None)
 
 

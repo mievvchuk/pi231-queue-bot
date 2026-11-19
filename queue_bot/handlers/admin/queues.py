@@ -1,4 +1,6 @@
 """Admin queues handlers."""
+from queue_bot.handlers.common import format_queue_list_pair_plans
+
 from .common import (
     AdminManageState,
     AdminOrderState,
@@ -36,7 +38,10 @@ async def admin_pick_active_queues(message: Message, state: FSMContext, conn, su
     page_sessions, cur_page, total_pages = paginate(sessions, 1, per_page=8)
     rows = [[f"📋 {queue_label(subjects, s)}"] for s in page_sessions]
     markup = get_paginated_reply_keyboard(rows, cur_page, total_pages, back_text="🔙 Назад")
-    await message.answer("👀 Оберіть чергу для перегляду та керування 👇", reply_markup=markup)
+    text = "👀 Оберіть чергу для перегляду та керування 👇"
+    if summaries := format_queue_list_pair_plans(conn, page_sessions, subjects):
+        text += "\n" + summaries
+    await message.answer(text, reply_markup=markup)
 
 
 
@@ -49,7 +54,10 @@ async def admin_paginate_active_queues(message: Message, state: FSMContext, conn
     page_sessions, cur_page, total_pages = paginate(sessions, page, per_page=8)
     rows = [[f"📋 {queue_label(subjects, s)}"] for s in page_sessions]
     markup = get_paginated_reply_keyboard(rows, cur_page, total_pages, back_text="🔙 Назад")
-    await message.answer("Оберіть чергу на кнопках внизу 👇", reply_markup=markup)
+    text = "Оберіть чергу на кнопках внизу 👇"
+    if summaries := format_queue_list_pair_plans(conn, page_sessions, subjects):
+        text += "\n" + summaries
+    await message.answer(text, reply_markup=markup)
 
 
 

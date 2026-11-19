@@ -375,3 +375,22 @@ async def test_schedule_exposes_confirmed_empty_result_only_on_its_date(client, 
     assert result['replacement_status'] == 'У групи ПІ-231 замін немає. 📅 09.11.2026'
     other = await (await client.get('/api/miniapp/schedule?date=2026-11-10', headers=headers())).json()
     assert other['replacement_status'] is None
+
+
+@pytest.mark.asyncio
+async def test_queue_list_and_detail_include_only_public_pair_plan_fields(client, conn, monkeypatch):
+    from queue_bot.services import schedule
+    from queue_bot.services.lesson_scheduler import subject_name
+
+    lesson = queues.create_session(conn, 100, 1, 1)
+    consultation = queues.create_session(conn, 100, 1, 1, queue_type='consultation')
+    expected = {'remaining': 2, 'finish_date': '2026-12-03'}
+    monkeypatch.setattr(schedule, 'get_remaining_pairs', lambda conn: {
+        subject_name('Програмування'): {**expected, 'base_count': 3, 'saved_at': 123},
+    })
+
+    bootstrap = await (await client.get('/api/miniapp/bootstrap', headers=headers())).json()
+    by_id = {item['id']: item['pair_plan'] for item in bootstrap['queues']}
+    assert by_id == {lesson: expected, consultation: None}
+    detail = await (await client.get(f'/api/miniapp/queues/{lesson}', headers=headers())).json()
+    assert detail['pair_plan'] == expected

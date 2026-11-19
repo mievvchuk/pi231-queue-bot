@@ -176,8 +176,9 @@ async def bootstrap(request):
         # A malformed imported timetable must not make personal queues unusable.
         log.warning('Upcoming lesson unavailable: invalid schedule format')
         next_lesson = None
+    pair_plans = schedule.read_queue_pair_plans(ctx['conn']) if sessions else {}
     return web.json_response({'me': {'name': request[REQ_USER]['full_name'], 'is_registered': True, 'is_admin': admins.is_admin(ctx['conn'], uid), 'is_owner': admins.is_owner(ctx['conn'], uid)},
-        'queues': [queue_view(ctx['conn'], ctx['subjects'], row, uid) for row in sessions],
+        'queues': [queue_view(ctx['conn'], ctx['subjects'], row, uid, pair_plans=pair_plans) for row in sessions],
         'swaps': swap_views(ctx['conn'], uid), 'outgoing_swaps': swap_views(ctx['conn'], uid, outgoing=True), 'today': schedule.get_current_date().isoformat(),
         'next_lesson': next_lesson})
 

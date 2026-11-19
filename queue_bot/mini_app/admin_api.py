@@ -125,10 +125,12 @@ async def manage(request):
         if section == 'history':
             sessions = []
             from .payloads import names
+            pair_plans = schedule.read_queue_pair_plans(conn)
             for row in queues.list_sessions(conn, ('open',)):
                 subject, teacher = names(catalog, row)
                 sessions.append({'id': row['id'], 'subject_id': row['subject_id'], 'teacher_id': row['teacher_id'], 'subject': subject, 'teacher': teacher, 'status': row['status'],
-                                 'date': str(row['created_at']), 'type': row['queue_type']})
+                                 'date': str(row['created_at']), 'type': row['queue_type'],
+                                 'pair_plan': schedule.queue_pair_plan(row, subject, pair_plans)})
             entries = []
             sid = None
             if 'sid' in request.query:

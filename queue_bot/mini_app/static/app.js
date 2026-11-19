@@ -733,6 +733,13 @@
       small(meta),
     );
   }
+  function pairPlanText(queue) {
+    const plan = queue?.pair_plan;
+    if (!plan?.remaining) return "";
+    const [year, month, day] = (plan.finish_date || "").split("-");
+    const finish = day ? " · остання пара " + day + "." + month + "." + year : "";
+    return "Залишилось пар: " + plan.remaining + finish;
+  }
   function queueCard(q) {
     return btn(
       [
@@ -759,6 +766,7 @@
                 }) || q.teacher,
           ),
           small(q.count + " у черзі"),
+          q.pair_plan ? small(pairPlanText(q)) : null,
         ),
         icon("arrow"),
       ],
@@ -787,6 +795,7 @@
           small(
             (consultation(q) ? "Консультація · " : "") + q.count + " у черзі",
           ),
+          q.pair_plan ? small(pairPlanText(q)) : null,
         ),
         el(
           "span",
@@ -1136,6 +1145,7 @@
         q.status==='archived'?el('span',{class:'status archived'},'Архівна черга'):null,
         el("h1", {}, q.subject),
         el("p", { class: "muted" }, q.teacher),
+        q.pair_plan ? small(pairPlanText(q)) : null,
       ),
       own
         ? el(
@@ -2187,9 +2197,10 @@
     openImage,
     updateBusy,
     enrichStudents,
+    pairPlanText,
   });
   design = window.createPI231Design?.({S, el, btn, small, api, sheet, closeSheet, navigate, openFeature, openQueue,
-    labForm, avatarFace, consultation, labText, isAdmin, render, toast, appearanceSettings, setAppearance,
+    labForm, avatarFace, consultation, labText, pairPlanText, isAdmin, render, toast, appearanceSettings, setAppearance,
     mutate, load, logout, completionForm, adminEntryForm, confirmSheet, reference, download, installCard, browserSession, loginFailureMessage, initData, filteredQueues, queueTypes});
   window.matchMedia?.('(prefers-color-scheme: dark)')?.addEventListener?.('change',()=>{if(presentation.theme==='system')theme();});
   async function openInitialFeature() {

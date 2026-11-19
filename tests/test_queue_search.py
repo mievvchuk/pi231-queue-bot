@@ -77,3 +77,24 @@ def test_schedule_shows_all_empty_weekday_slots(conn, numbers):
         assert f'{number} пара — немає заняття' in empty
     weekend = schedule.format_schedule_for_date(conn, {}, date(2026, 11, 8))
     assert 'Занять немає' in weekend and '1 пара' not in weekend
+
+
+@pytest.mark.asyncio
+async def test_remaining_pairs_appear_in_telegram_queue_search_and_details(conn, app, monkeypatch):
+    from queue_bot.handlers import common
+    from queue_bot.services.lesson_scheduler import subject_name
+
+    sid = app[2]
+    session = queues.get_session(conn, sid)
+    subjects = app[0]["subjects"]
+    subject, _ = common.session_names(subjects, session)
+    monkeypatch.setattr(schedule, "get_remaining_pairs", lambda conn: {
+        subject_name(subject): {"remaining": 2, "finish_date": "2026-12-03"},
+    })
+    expected = "Залишилось пар: <b>2</b> · остання пара 03.12.2026"
+
+    await send(app, "📋 Усі черги")
+    await send(app, "Показати всі черги")
+    assert expected in app[1].call_args.args[0].text
+    await _click_search(app, f"findq:{sid}")
+    assert expected in app[1].call_args.args[0].text
