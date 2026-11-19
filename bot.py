@@ -10,6 +10,7 @@ from db import connect
 from handlers import admin, start, student
 from handlers.common import Guard
 from services.admins import init_admins
+from services.schedule import import_legacy_schedule
 from subjects import load_subjects
 
 
@@ -52,6 +53,7 @@ async def main() -> None:
     if not config.DATABASE_URL:
         raise RuntimeError("DATABASE_URL is not set. Please specify Neon PostgreSQL URL in .env")
     conn = connect(config.DATABASE_URL)
+    import_legacy_schedule(conn, config.SCHEDULE_PATH)
     init_admins(conn, config.get_initial_admin_ids())
 
     from handlers import polls as polls_handler

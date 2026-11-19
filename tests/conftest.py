@@ -1,7 +1,9 @@
+from pathlib import Path
+
 import pytest
 
 import db
-from services import admins, users
+from services import admins, schedule, users
 
 
 @pytest.fixture
@@ -13,6 +15,7 @@ def db_path(tmp_path):
 def conn(db_path):
     connection = db.connect(db_path)
     admins.init_admins(connection, [100])
+    schedule.import_legacy_schedule(connection, str(Path(__file__).resolve().parents[1] / "schedule.json"))
     yield connection
     connection.close()
 

@@ -674,23 +674,6 @@ async def admin_add_replacement_photo_hint(message: Message):
     )
 
 
-@router.message(F.text == "📥 Отримати schedule.json", StateFilter("*"))
-async def admin_export_schedule_action(message: Message, conn):
-    from handlers.schedule import export_schedule_file
-    await export_schedule_file(message, conn)
-
-
-@router.message(F.text == "📤 Завантажити розклад", StateFilter("*"))
-async def admin_upload_schedule_action(message: Message):
-    await message.answer(
-        "📤 <b>Як оновити розклад занять:</b>\n\n"
-        "1. Натисніть кнопку <b>«📥 Отримати schedule.json»</b> та збережіть файл.\n"
-        "2. Відкрийте файл на телефоні або комп'ютері та внесіть актуальні пари (предмети, аудиторії, викладачів).\n"
-        "3. <b>Надішліть збережений файл <code>schedule.json</code> прямо сюди в чат як документ 📄.</b>\n\n"
-        "Бот автоматично валідує формат JSON і миттєво оновить розклад для всієї групи!"
-    )
-
-
 @router.message(F.text == "🗑 Очистити всі заміни", StateFilter("*"))
 async def admin_clear_replacements_action(message: Message, conn):
     from handlers.schedule import request_clear_replacements
@@ -723,7 +706,7 @@ async def render_working_saturday_panel(event: Message | CallbackQuery, conn, sa
     date_str = sat_date.isoformat()
     date_formatted = sat_date.strftime("%d.%m.%Y")
     ws = get_working_saturday(conn, date_str)
-    sch_data = schedule.load_schedule_data(config.SCHEDULE_PATH)
+    sch_data = schedule.load_schedule_data(conn)
 
     if ws:
         rep_day_key = ws["replaces_day"]
@@ -890,7 +873,7 @@ async def admin_view_working_saturday_schedule(callback: CallbackQuery, conn):
     from services import schedule
     import config
     sat_date = date.fromisoformat(date_str)
-    sch_data = schedule.load_schedule_data(config.SCHEDULE_PATH)
+    sch_data = schedule.load_schedule_data(conn)
     text = schedule.format_schedule_for_date(conn, sch_data, sat_date, config.STUDENT_GROUP)
     kb = [
         [InlineKeyboardButton(text="🔙 Назад до налаштувань", callback_data=f"ws_back:{date_str}")],
@@ -956,7 +939,7 @@ async def admin_broadcast_working_saturday_prompt(callback: CallbackQuery, conn)
     w_type = ws.get("week_type") or schedule.get_week_type(sat_date)
     w_type_uk = "Знаменник" if w_type == "denominator" else "Чисельник"
 
-    sch_data = schedule.load_schedule_data(config.SCHEDULE_PATH)
+    sch_data = schedule.load_schedule_data(conn)
     actual_lessons, reps = schedule.get_actual_schedule(conn, sch_data, sat_date, config.STUDENT_GROUP)
 
     reps_note = f"\n⚠️ <i>Враховано замін: {len(reps)}</i>" if reps else ""
@@ -1005,7 +988,7 @@ async def admin_broadcast_working_saturday_send(callback: CallbackQuery, conn):
     w_type = ws.get("week_type") or schedule.get_week_type(sat_date)
     w_type_uk = "Знаменник" if w_type == "denominator" else "Чисельник"
 
-    sch_data = schedule.load_schedule_data(config.SCHEDULE_PATH)
+    sch_data = schedule.load_schedule_data(conn)
     actual_lessons, reps = schedule.get_actual_schedule(conn, sch_data, sat_date, config.STUDENT_GROUP)
     reps_note = f"\n⚠️ <i>Враховано замін: {len(reps)}</i>" if reps else ""
 

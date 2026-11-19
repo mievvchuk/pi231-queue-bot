@@ -17,7 +17,7 @@ def fill_old_subject(conn, item: dict, schedule_data: dict | None = None, *, for
     from datetime import date
     from services import schedule
 
-    data = schedule_data if schedule_data is not None else schedule.load_schedule_data(config.SCHEDULE_PATH)
+    data = schedule_data if schedule_data is not None else schedule.load_schedule_data(conn)
     planned = schedule.get_planned_schedule(conn, data, date.fromisoformat(item["date"]))
     subjects = list(dict.fromkeys(
         lesson["subject"] for lesson in planned
@@ -49,7 +49,7 @@ def get_replacements(conn, date: str | None = None, group_name: str = "ПІ-231"
     missing = [item for item in items if not item.get("old_subject") and not item.get("is_archived")]
     if missing:
         from services import schedule
-        data = schedule.load_schedule_data(config.SCHEDULE_PATH)
+        data = schedule.load_schedule_data(conn)
         for item in missing:
             fill_old_subject(conn, item, data)
     return items

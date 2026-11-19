@@ -211,8 +211,9 @@ def test_admin_schedule_keyboards():
     assert "🏢 Робоча субота" in sch_button_texts
     assert "🔙 В адмін-панель" in sch_button_texts
     tools_texts = [btn.text for row in get_admin_schedule_tools_menu().keyboard for btn in row]
-    assert "📥 Отримати schedule.json" in tools_texts
-    assert "📤 Завантажити розклад" in tools_texts
+    assert "✏️ Редагувати розклад" in tools_texts
+    assert "📥 Отримати schedule.json" not in tools_texts
+    assert "📤 Завантажити розклад" not in tools_texts
     assert "📦 Архів замін" in tools_texts
     assert "🗑 Очистити всі заміни" in tools_texts
     assert "🟢 Статус системи" in tools_texts
@@ -494,3 +495,82 @@ async def test_open_schedule_menu_time_of_day_switch(conn):
 
 
 
+
+
+def test_schedule_import_preserves_legacy_edits_and_runs_once(tmp_path):
+    import json
+
+    import db
+
+    source = tmp_path / "edited_schedule.json"
+    source.write_text(json.dumps({
+        "wednesday": {
+            "numerator": [{"pair": 3, "subject": "Чисельник", "teachers": [
+                {"name": "Перший", "room": "101"}, {"name": "Другий", "room": None},
+            ]}],
+            "denominator": [{"number": 2, "subject": "Знаменник", "teacher": "Третій", "room": "102"}],
+        },
+    }), encoding="utf-8")
+    database = str(tmp_path / "schedule.db")
+    conn = db.connect(database)
+    schedule.import_legacy_schedule(conn, str(source))
+    data = schedule.load_schedule_data(conn)
+    numerator = schedule.get_base_schedule_for_day(data, "wednesday", "numerator")
+    assert numerator[0]["teachers_raw"] == [{"name": "Перший", "room": "101"}, {"name": "Другий", "room": None}]
+    schedule.set_schedule_pair(conn, "wednesday", "numerator", 3, None)
+    conn.close()
+
+    source.unlink()
+    conn = db.connect(database)
+    try:
+        schedule.import_legacy_schedule(conn, str(source))
+        data = schedule.load_schedule_data(conn)
+        assert schedule.get_base_schedule_for_day(data, "wednesday", "numerator") == []
+        denominator = schedule.get_base_schedule_for_day(data, "wednesday", "denominator")
+        assert [(lesson["number"], lesson["subject"], lesson["room"]) for lesson in denominator] == [
+            (2, "Знаменник", "102"),
+        ]
+        assert conn.execute("SELECT COUNT(*) FROM schedule_teachers").fetchone()[0] == 0
+    finally:
+        conn.close()
+
+
+@pytest.mark.asyncio
+async def test_edit_schedule_pair_from_telegram(conn):
+    from unittest.mock import AsyncMock, MagicMock
+
+    from handlers import schedule as handler
+
+    state = AsyncMock()
+    callback = MagicMock()
+    callback.data = "base_pair:wednesday:numerator:2"
+    callback.from_user.id = 100
+    callback.answer = AsyncMock()
+    callback.message.answer = AsyncMock()
+    await handler.select_schedule_pair(callback, state, conn)
+    state.set_state.assert_awaited_once_with(handler.EditScheduleState.waiting_for_lesson)
+    state.get_data.return_value = state.set_data.await_args.args[0]
+    message = MagicMock()
+    message.from_user.id = 100
+    message.text = "Новий предмет\nКогут В.С. | 235\nБарабаш Д.С."
+    message.answer = AsyncMock()
+    await handler.save_schedule_pair(message, state, conn)
+
+    wednesday = datetime.date(2026, 11, 18)
+    data = schedule.load_schedule_data(conn)
+    text = schedule.format_schedule_for_date(conn, data, wednesday)
+    assert "1 пара — немає заняття" in text
+    assert "2 пара</b> (10:00–11:20)" in text
+    assert "Новий предмет" in text
+    assert "Когут В.С. (ауд. 235)" in text
+    assert "Барабаш Д.С." in text
+    assert "4 пара — немає заняття" in text
+    assert "5 пара — немає заняття" in text
+
+    message.text = "-"
+    await handler.save_schedule_pair(message, state, conn)
+    data = schedule.load_schedule_data(conn)
+    text = schedule.format_schedule_for_date(conn, data, wednesday)
+    assert "2 пара — немає заняття" in text
+    assert 2 not in {lesson["number"] for lesson in schedule.get_base_schedule(data, wednesday)}
+    assert 2 in {lesson["number"] for lesson in schedule.get_base_schedule(data, wednesday + datetime.timedelta(days=7))}

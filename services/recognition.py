@@ -227,7 +227,7 @@ async def recognize_replacements_from_image(image_bytes: bytes, group_name: str 
 
     raw_replacements = result.get("replacements", [])
     from services import replacements, schedule
-    schedule_data = schedule.load_schedule_data(config.SCHEDULE_PATH)
+    schedule_data = schedule.load_schedule_data(conn)
     current_group = group_name
     filtered = []
     for r in raw_replacements:
