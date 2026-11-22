@@ -155,6 +155,8 @@ def submit(conn, uid, subjects, data, *, admin_mode=False):
     part = data.get('part', 1)
     if type(part) is not int or not 1 <= part <= 5:
         raise BotError('Оберіть коректну клітинку оцінки.')
+    if subject.get("coursework_for") and (kind, number, part) != ("lab", 1, 1):
+        raise BotError("Для курсової роботи є одна оцінка.")
     grade = data.get('grade')
     if type(grade) not in (int, float) or not math.isfinite(grade) or not 0 <= grade <= 5:
         raise BotError('Оцінка має бути від 0 до 5.')
@@ -201,8 +203,11 @@ def set_date(conn, uid, subjects, data):
     admins.require_owner(conn, uid)
     period = period_value(data.get('period', current_period()))
     key = data.get('subject_key')
-    if not any(s['key'] == key for s in catalog(subjects, conn=conn)):
+    subject = next((s for s in catalog(subjects, conn=conn) if s['key'] == key), None)
+    if not subject:
         raise BotError('Оберіть предмет зі списку журналу.')
+    if subject.get("coursework_for"):
+        raise BotError("Для курсової роботи немає атестацій.")
     number = _number(data.get('number'))
     raw = data.get('due_date')
     if raw is not None and not isinstance(raw, str):
@@ -249,13 +254,17 @@ def view(conn, uid, subjects, *, group=False, period=None):
     by_student_subject = defaultdict(list)
     for record in records:
         by_student_subject[record['user_id'], record['subject_key']].append(record)
-    averages = {
-        str(student['id']): {
-            subject['key']: summary(subject, by_student_subject.get((student['id'], subject['key']), ()))
-            for subject in subject_rows
-        }
-        for student in students
-    }
+    coursework_by_subject = {row["coursework_for"]: row["key"] for row in subject_rows if row.get("coursework_for")}
+    averages = {}
+    for student in students:
+        student_id = student["id"]
+        subject_averages = {}
+        for subject in subject_rows:
+            key = subject["key"]
+            linked = coursework_by_subject.get(key)
+            coursework = by_student_subject.get((student_id, linked), ()) if linked else None
+            subject_averages[key] = summary(subject, by_student_subject.get((student_id, key), ()), coursework_cells=coursework)
+        averages[str(student_id)] = subject_averages
     return {'period': period, 'periods': sorted(periods, reverse=True), 'subjects': subject_rows, 'averages': averages,
             'records': records, 'group': group, 'viewer_id': actor['id'],
             'can_set_dates': group and admins.is_owner(conn, uid),

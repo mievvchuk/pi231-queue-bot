@@ -503,7 +503,7 @@ test('arrow keys move focus between journal grade cells like a spreadsheet',asyn
 
 test('coursework remains editable inside its parent subject using its original key',async()=>{
   const data=journalData();data.subjects[0].name='Конструювання програмного забезпечення';
-  data.subjects.push({key:'course',name:'Курсова робота з КПЗ',labs:[{number:1,parts:1}]});
+  data.subjects.push({key:'course',name:'Курсова робота з КПЗ',coursework_for:'кпз',labs:[{number:1,parts:1,title:'Курсова робота',attestation:null}]});
   const calls=[];
   const {features}=setup(async(path,body)=>{calls.push([path,body]);return body?{}:data;});
   await features.open('journal');
@@ -593,4 +593,22 @@ test('mobile personal journal limits the visible works to the selected attestati
   descendants(page).find(n=>n.tag==='button'&&n.textContent==='Атестація 2').events.click();
   assert.equal(descendants(page).filter(n=>n.attrs.class==='personal-work').length,1);
   assert.match(page.textContent,/Лабораторна 3/);
+});
+
+for(const mobile of [false,true]) test('group coursework has only one grade and no attestation controls, mobile='+mobile,async()=>{
+  const data=journalData(true);
+  data.subjects.push({key:'course',name:'Курсова робота з КПЗ',coursework_for:'кпз',
+    labs:[{number:1,parts:1,title:'Курсова робота',attestation:null}]});
+  data.records.push({id:8,user_id:1,subject_key:'course',kind:'attestation',number:1,part:1,grade:5,can_edit:true});
+  const {features,S,context}=setup(async()=>data);
+  S.mode='admin';
+  context.window.matchMedia=()=>({matches:mobile});
+  await features.open('journal',false,'?scope=group&subject=course');
+  const page=features.page('journal');
+  const nodes=descendants(page);
+  assert.equal(nodes.filter(node=>node.attrs.class==='mobile-grade-row').length,mobile?1:0);
+  assert.equal(nodes.filter(node=>String(node.attrs.class||'').includes('journal-input')).length,mobile?0:2);
+  assert.ok(!nodes.some(node=>node.tag==='button'&&/Атестація [12]/.test(node.textContent)));
+  assert.ok(!nodes.some(node=>node.tag==='th'&&/Атестація [12]|Семестр/.test(node.textContent)));
+  assert.ok(nodes.find(node=>node.hidden&&/Дати атестацій/.test(node.textContent)));
 });

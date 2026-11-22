@@ -107,16 +107,23 @@ async def _render(event, state, data, context, screen="subjects", *args, note=No
         if data["group"]:
             lines.append(html.escape(student["name"]))
         if screen == "subject":
-            for n in (1, 2):
-                due = next((d["due_date"] for d in data["dates"] if d["subject_key"] == subject["key"] and d["number"] == n), None)
-                when = f" · {date.fromisoformat(due):%d.%m.%Y}" if due else ""
-                lines.append(f"Атестація {n}: <b>{_avg(data, target, subject['key'], n)}</b>{when}")
-                rows.append([button(f"Роботи · атестація {n}", "works", n)])
-                if data["can_set_dates"]:
-                    rows[-1].append(button(f"Дата {n}", "due", n))
-            configured = {("lab", work["number"], p) for work in subject["labs"] for p in range(1, work["parts"] + 1)}
-            if records.keys() - configured:
-                rows.append([button("Попередні записи", "works", 0)])
+            if subject.get("coursework_for"):
+                record = records.get(("lab", 1, 1))
+                lines.append(f"Оцінка: <b>{_grade_text(record)}</b>")
+                lines.append("Оцінка входить до середнього балу другої атестації та семестру з КПЗ.")
+                rows.append([button("Змінити оцінку" if record else "Додати оцінку", "cell", "lab", 1, 1, 0)])
+            else:
+                for n in (1, 2):
+                    due = next((d["due_date"] for d in data["dates"] if d["subject_key"] == subject["key"] and d["number"] == n), None)
+                    when = f" · {date.fromisoformat(due):%d.%m.%Y}" if due else ""
+                    lines.append(f"Атестація {n}: <b>{_avg(data, target, subject['key'], n)}</b>{when}")
+                    rows.append([button(f"Додати оцінку · атестація {n}", "works", n)])
+                    if data["can_set_dates"]:
+                        rows[-1].append(button(f"Дата {n}", "due", n))
+                lines.append(f"Семестр: <b>{_avg(data, target, subject['key'], 'all')}</b>")
+                configured = {("lab", work["number"], p) for work in subject["labs"] for p in range(1, work["parts"] + 1)}
+                if records.keys() - configured:
+                    rows.append([button("Попередні записи", "works", 0)])
             rows.append([button("🖼 Зображення оцінок", "image")])
             rows.append([button("‹ До предметів", "subjects")])
 
@@ -154,7 +161,8 @@ async def _render(event, state, data, context, screen="subjects", *args, note=No
             if not record and (not work or part > work["parts"]):
                 raise BotError("Такої клітинки в журналі немає.")
             title = work["title"] if work else f"{'ЛР' if kind == 'lab' else 'Атестація'} {number}"
-            lines.append(f"\n<b>{html.escape(title)} · оцінка {part}</b>\nПоточна оцінка: {_grade_text(record)}")
+            part_label = "" if subject.get("coursework_for") else f" · оцінка {part}"
+            lines.append(f"\n<b>{html.escape(title)}{part_label}</b>\nПоточна оцінка: {_grade_text(record)}")
             if record and record.get("note"):
                 lines.append(f"Примітка: {html.escape(record['note'])}")
             lines.append("Оберіть бал або надішліть число від 0 до 5. Дробову оцінку можна ввести через кому.")
@@ -162,7 +170,10 @@ async def _render(event, state, data, context, screen="subjects", *args, note=No
                                     number=number, part=part, note=record.get("note", "") if record else "")
             if record:
                 context["draft"].update(record_id=record["id"], revision=record["revision"])
-            context["return_to"] = ["parts", number, attestation] if work and work["parts"] > 1 else ["works", attestation]
+            if subject.get("coursework_for"):
+                context["return_to"] = ["subject"]
+            else:
+                context["return_to"] = ["parts", number, attestation] if work and work["parts"] > 1 else ["works", attestation]
             rows.extend([[button(str(n), "grade", n) for n in range(first, first + 3)] for first in (0, 3)])
             rows.append([button("Скасувати", *context["return_to"])])
             flow = JournalFlow.grade
@@ -242,19 +253,22 @@ async def journal_action(callback, state, conn, subjects):
     if action == "grade":
         await _save_grade(callback, state, conn, subjects, context, args[0])
         return
+    selecting_subject = action == "subject" and bool(args)
     if action == "student":
         context["student"] = args[0]
     elif action == "personal":
         context.pop("student", None)
     elif action == "period":
         context["period"] = args[0]
-    elif action == "subject" and args:
+    elif selecting_subject:
         context["subject"] = args[0]
         args = []
     data = _view(conn, uid, subjects, context, group=action == "students")
     context["period"] = data["period"]
-    if action == "image":
+    if action == "image" or selecting_subject:
         await _send_image(callback, conn, data, context)
+        if selecting_subject:
+            await _render(callback.message, state, data, context, "subject")
         return
     if action in ("student", "personal", "period"):
         await _render(callback, state, data, context)
@@ -273,8 +287,12 @@ async def _send_image(callback, conn, data, context):
 
     records = [r for r in data["records"] if r["user_id"] == target and r["subject_key"] == subject["key"]]
     averages = data["averages"].get(str(target), {}).get(subject["key"], {})
-    artwork = await journal_image.get_artwork()
-    images = await asyncio.to_thread(journal_image.render_journal, subject, student, data["period"], records, averages, artwork)
+    linked = next((row["key"] for row in data["subjects"] if row.get("coursework_for") == subject["key"]), None)
+    coursework = ([row for row in data["records"] if row["user_id"] == target and row["subject_key"] == linked]
+                  if linked else None)
+    images = await asyncio.to_thread(
+        journal_image.render_journal, subject, student, data["period"], records, averages, coursework,
+    )
     if data["group"]:
         admins.require_admin(conn, callback.from_user.id)
     for index, content in enumerate(images, 1):

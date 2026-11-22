@@ -41,7 +41,7 @@ async def test_journal_edit_works_without_mini_app_url_and_uses_shared_records(a
     await choose(app, 'Навчальний період')
     await choose(app, journal.current_period().replace(':', ' · семестр '))
     await choose(app, 'Предмет')
-    await choose(app, 'Роботи · атестація 1')
+    await choose(app, 'Додати оцінку · атестація 1')
     await choose(app, 'Оцінка · —')
     await send(app, '4,5', uid=1)
     data = journal.view(conn, 1, app[0]['subjects'])
@@ -64,7 +64,7 @@ async def test_admin_edits_group_grade_with_revision_and_preserves_existing_note
     await choose(app, 'Журнал групи', uid=100)
     await choose(app, 'Петренко Іван', uid=100)
     await choose(app, 'Предмет', uid=100)
-    await choose(app, 'Роботи · атестація 1', uid=100)
+    await choose(app, 'Додати оцінку · атестація 1', uid=100)
     await choose(app, 'Оцінка · 2', uid=100)
     await choose(app, '5', uid=100)
     record, = journal.view(conn, 1, app[0]['subjects'])['records']
@@ -85,13 +85,12 @@ async def test_journal_image_is_sent_with_only_the_selected_students_grades(app,
         journal.submit(conn, student, app[0]["subjects"], {
             "subject_key": subject_name("Предмет"), "kind": "lab", "number": 1, "part": 1, "grade": grade,
         })
-    monkeypatch.setattr(config, "JOURNAL_IMAGE_API_KEY", "")
     original = journal_image.render_journal
     exported = []
 
-    def render(subject, student, period, records, averages, artwork):
+    def render(subject, student, period, records, averages, coursework):
         exported.append((student["name"], [r["grade"] for r in records]))
-        return original(subject, student, period, records, averages, artwork)
+        return original(subject, student, period, records, averages, coursework)
 
     monkeypatch.setattr(journal_image, "render_journal", render)
     await send(app, "Електронний журнал", uid=uid)
@@ -99,11 +98,14 @@ async def test_journal_image_is_sent_with_only_the_selected_students_grades(app,
         await choose(app, "Журнал групи", uid=uid)
         await choose(app, "Петренко Іван", uid=uid)
     await choose(app, "Предмет", uid=uid)
-    await choose(app, "🖼 Зображення оцінок", uid=uid)
     assert exported == [("Петренко Іван", [4.25])]
-    photo = app[1].call_args.args[0].photo
-    with Image.open(BytesIO(photo.data)) as png:
+    photo, menu = [call.args[0] for call in app[1].call_args_list[-2:]]
+    assert "Додати оцінку" in str(menu.reply_markup)
+    with Image.open(BytesIO(photo.photo.data)) as png:
         assert png.format == "PNG"
+        assert png.getpixel((0, 0)) == (255, 255, 255)
+    await choose(app, "🖼 Зображення оцінок", uid=uid)
+    assert exported == [("Петренко Іван", [4.25])] * 2
 
 
 @pytest.mark.asyncio
@@ -145,3 +147,22 @@ async def test_physical_education_shortcut_and_invalid_grade_series(app, conn):
     grades = conn.execute("SELECT user_id, grade FROM journal_cells ORDER BY number").fetchall()
     assert [row["grade"] for row in grades] == [4, 5, 0, 5]
     assert {row["user_id"] for row in grades} == {users.get_user(conn, 100)["id"]}
+
+
+@pytest.mark.asyncio
+async def test_coursework_shows_one_grade_menu_after_its_photo(app, conn):
+    title = "Курсова робота з КПЗ"
+    app[0]["subjects"].append({"id": 7, "name": title, "teachers": []})
+    await send(app, "Електронний журнал", uid=1)
+    await choose(app, title)
+    photo, menu = [call.args[0] for call in app[1].call_args_list[-2:]]
+    assert photo.photo.data.startswith(b"\x89PNG")
+    buttons = [button.text for row in menu.reply_markup.inline_keyboard for button in row]
+    assert "Додати оцінку" in buttons
+    assert not any("атестація" in label.lower() for label in buttons)
+    await choose(app, "Додати оцінку")
+    await choose(app, "5")
+    record, = journal.view(conn, 1, app[0]["subjects"])["records"]
+    assert (record["subject_key"], record["grade"], record["number"], record["part"]) == (
+        subject_name(title), 5, 1, 1,
+    )

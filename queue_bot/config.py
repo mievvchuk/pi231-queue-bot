@@ -79,7 +79,6 @@ RECOGNITION_API_KEY = os.getenv('RECOGNITION_API_KEY', '').strip() or os.getenv(
 RECOGNITION_PROVIDER = os.getenv('RECOGNITION_PROVIDER', 'auto' if RECOGNITION_API_KEY else 'ocr').lower()
 GROQ_API_URL = os.getenv('GROQ_API_URL', 'https://api.groq.com/openai/v1/chat/completions')
 GROQ_MODEL = os.getenv('GROQ_MODEL', 'qwen/qwen3.8-27b')
-JOURNAL_IMAGE_API_KEY = os.getenv('JOURNAL_IMAGE_API_KEY', '').strip()
 OPENAI_API_URL = os.getenv('OPENAI_API_URL', 'https://api.openai.com/v1/chat/completions')
 OPENAI_MODEL = os.getenv('OPENAI_MODEL', 'gpt-4o-mini')
 NVIDIA_API_URL = os.getenv('NVIDIA_API_URL', 'https://integrate.api.nvidia.com/v1/chat/completions')

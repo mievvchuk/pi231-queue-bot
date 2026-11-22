@@ -160,3 +160,26 @@ async def test_physical_education_grades_can_be_saved_without_timetable_entry(cl
     updated = await (await client.get(url + '?period=2026-2027:1', headers=headers(1))).json()
     assert updated['records'][0]['grade'] == 5
     assert updated['averages'][str(updated['viewer_id'])][subject['key']]['2']['average'] == 5
+
+
+def test_kpz_coursework_is_one_grade_counted_only_in_second_attestation_and_semester(conn, make_user):
+    from queue_bot.services.lesson_scheduler import subject_name
+
+    make_user(1, 'Петренко Іван')
+    kpz, coursework = 'Конструювання програмного забезпечення', 'Курсова робота з КПЗ'
+    subjects = [{'id': 5, 'name': kpz}, {'id': 7, 'name': coursework}]
+    first = payload(subject_key=subject_name(kpz), number=1, grade=5)
+    second = payload(subject_key=subject_name(kpz), number=8, grade=3)
+    course = payload(subject_key=subject_name(coursework), grade=4)
+    for row in (first, second, course):
+        journal.submit(conn, 1, subjects, row)
+    view = journal.view(conn, 1, subjects, period=course['period'])
+    averages = view['averages'][str(view['viewer_id'])]
+    assert {key: value['average'] for key, value in averages[subject_name(kpz)].items()} == {
+        '1': 5, '2': 3.5, 'all': 4,
+    }
+    assert averages[subject_name(coursework)] == {'all': {'average': 4, 'filled': 1, 'total': 1}}
+    with pytest.raises(BotError, match='одна оцінка'):
+        journal.submit(conn, 1, subjects, {**course, 'kind': 'attestation'})
+    with pytest.raises(BotError, match='немає атестацій'):
+        journal.set_date(conn, 100, subjects, {**course, 'due_date': '2026-12-01'})
