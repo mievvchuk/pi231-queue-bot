@@ -88,8 +88,9 @@ def submit_grade_series(conn, uid, subject, digits, *, period=None):
                    VALUES (?, ?, ?, ?, ?, 'lab', ?, ?, ?)
                    ON CONFLICT (user_id, period, subject_key, kind, number, part) DO UPDATE
                    SET grade = excluded.grade, subject_name = excluded.subject_name,
-                       revision = journal_cells.revision + 1, updated_at = CURRENT_TIMESTAMP
-                   WHERE journal_cells.grade <> excluded.grade
+                       note = CASE WHEN journal_cells.deleted_at IS NULL THEN journal_cells.note ELSE '' END,
+                       deleted_at = NULL, revision = journal_cells.revision + 1, updated_at = CURRENT_TIMESTAMP
+                   WHERE journal_cells.deleted_at IS NOT NULL OR journal_cells.grade <> excluded.grade
                    RETURNING id""",
                 (uuid.uuid4().hex, actor["id"], period, subject["key"], subject["name"], number, part, int(digit)),
             ).fetchone()
@@ -116,7 +117,7 @@ def _record(conn, record_id):
     if not isinstance(record_id, str) or not re.fullmatch(r'(?:[a-f0-9]{32}|legacy:[1-9][0-9]*)', record_id):
         raise BotError('Оберіть запис журналу.')
     lock = ' FOR UPDATE' if isinstance(conn, PGConnectionWrapper) else ''
-    row = conn.execute('SELECT * FROM journal_cells WHERE id = ?' + lock, (record_id,)).fetchone()
+    row = conn.execute('SELECT * FROM journal_cells WHERE id = ? AND deleted_at IS NULL' + lock, (record_id,)).fetchone()
     if not row:
         raise BotError('Запис журналу не знайдено.')
     return row
@@ -133,7 +134,7 @@ def _audit(conn, record_id, uid, action):
                  (uuid.uuid4().hex, record_id, uid, action, json.dumps(dict(row), ensure_ascii=False, default=str)))
 
 
-def submit(conn, uid, subjects, data, *, admin_mode=False):
+def _editable_student(conn, uid, data, admin_mode):
     actor = users.get_user(conn, uid)
     if not actor:
         raise PermissionDenied('Спочатку зареєструйтесь у боті.')
@@ -144,6 +145,11 @@ def submit(conn, uid, subjects, data, *, admin_mode=False):
         if not admin_mode:
             raise PermissionDenied('Можна змінювати лише власні оцінки.')
         admins.require_admin(conn, uid)
+    return target_id
+
+
+def submit(conn, uid, subjects, data, *, admin_mode=False):
+    target_id = _editable_student(conn, uid, data, admin_mode)
     period = period_value(data.get('period', current_period()))
     subject = next((s for s in catalog(subjects, conn=conn) if s['key'] == data.get('subject_key')), None)
     if not subject:
@@ -186,17 +192,35 @@ def submit(conn, uid, subjects, data, *, admin_mode=False):
                 updated_at = CURRENT_TIMESTAMP WHERE id = ?""",
                 (period, subject['key'], subject['name'], kind, number, part, grade, note, record_id))
         else:
-            exists = conn.execute('''SELECT 1 FROM journal_cells WHERE user_id = ? AND period = ?
-                AND subject_key = ? AND kind = ? AND number = ? AND part = ?''', (target_id, period, subject['key'], kind, number, part)).fetchone()
-            if exists:
-                raise BotError('Такий запис уже є. Відкрийте його й натисніть «Редагувати».')
-            record_id = uuid.uuid4().hex
-            conn.execute('''INSERT INTO journal_cells
+            row = conn.execute('''INSERT INTO journal_cells
                 (id, user_id, period, subject_key, subject_name, kind, number, part, grade, note)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-                (record_id, target_id, period, subject['key'], subject['name'], kind, number, part, grade, note))
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT (user_id, period, subject_key, kind, number, part) DO UPDATE
+                SET grade = excluded.grade, note = excluded.note, subject_name = excluded.subject_name,
+                    deleted_at = NULL, revision = journal_cells.revision + 1, updated_at = CURRENT_TIMESTAMP
+                WHERE journal_cells.deleted_at IS NOT NULL
+                RETURNING id''',
+                (uuid.uuid4().hex, target_id, period, subject['key'], subject['name'], kind, number, part, grade, note)).fetchone()
+            if not row:
+                raise BotError('Такий запис уже є. Відкрийте його й натисніть «Редагувати».')
+            record_id = row['id']
         _audit(conn, record_id, uid, 'submit')
     return record_id
+
+
+def delete_grade(conn, uid, data, *, admin_mode=False):
+    from queue_bot.services.queues import _require_roster_user
+
+    target_id = _editable_student(conn, uid, data, admin_mode)
+    with transaction(conn):
+        _require_roster_user(conn, target_id)
+        row = _record(conn, data.get('record_id'))
+        if row['user_id'] != target_id:
+            raise PermissionDenied('Цей запис належить іншому студенту.')
+        _revision(row, data.get('revision'))
+        conn.execute("""UPDATE journal_cells SET deleted_at = CURRENT_TIMESTAMP,
+            revision = revision + 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?""", (row['id'],))
+        _audit(conn, row['id'], uid, 'delete')
 
 
 def set_date(conn, uid, subjects, data):
@@ -233,11 +257,11 @@ def view(conn, uid, subjects, *, group=False, period=None):
     period = period_value(period or current_period())
     records = [dict(row) for row in conn.execute('''SELECT r.*, u.full_name AS student_name
         FROM journal_cells r JOIN users u ON u.id = r.user_id
-        WHERE r.period = ? AND u.deleted_at IS NULL
+        WHERE r.period = ? AND r.deleted_at IS NULL AND u.deleted_at IS NULL
         ORDER BY r.subject_name, r.kind, r.number, r.part, r.id''', (period,)).fetchall()]
     records.sort(key=lambda r: (users.ukrainian_name_key(r['student_name']), r['subject_key'], r['kind'], r['number'], r['part']))
     for record in records:
-        for field in ('reviewed_by', 'status', 'review_note'):
+        for field in ('reviewed_by', 'status', 'review_note', 'deleted_at'):
             record.pop(field, None)
         record['can_edit'] = group or record['user_id'] == actor['id']
         if not record['can_edit']:

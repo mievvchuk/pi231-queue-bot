@@ -18,6 +18,9 @@ async def handle(request):
     if action == 'submit':
         journal.submit(ctx['conn'], uid, ctx['subjects'], data, admin_mode=request[api.REQ_ADMIN])
         message = 'Оцінку збережено.'
+    elif action == 'delete':
+        journal.delete_grade(ctx['conn'], uid, data, admin_mode=request[api.REQ_ADMIN])
+        message = 'Оцінку видалено.'
     elif action == 'date':
         api.require_admin(request)
         journal.set_date(ctx['conn'], uid, ctx['subjects'], data)

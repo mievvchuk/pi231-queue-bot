@@ -170,16 +170,55 @@ def test_kpz_coursework_is_one_grade_counted_only_in_second_attestation_and_seme
     subjects = [{'id': 5, 'name': kpz}, {'id': 7, 'name': coursework}]
     first = payload(subject_key=subject_name(kpz), number=1, grade=5)
     second = payload(subject_key=subject_name(kpz), number=8, grade=3)
-    course = payload(subject_key=subject_name(coursework), grade=4)
+    course = payload(subject_key=subject_name(coursework), grade=2)
     for row in (first, second, course):
         journal.submit(conn, 1, subjects, row)
     view = journal.view(conn, 1, subjects, period=course['period'])
     averages = view['averages'][str(view['viewer_id'])]
     assert {key: value['average'] for key, value in averages[subject_name(kpz)].items()} == {
-        '1': 5, '2': 3.5, 'all': 4,
+        '1': 5, '2': 2.5, 'all': 3.33,
     }
-    assert averages[subject_name(coursework)] == {'all': {'average': 4, 'filled': 1, 'total': 1}}
+    assert averages[subject_name(coursework)] == {'all': {'average': 2, 'filled': 1, 'total': 1}}
     with pytest.raises(BotError, match='одна оцінка'):
         journal.submit(conn, 1, subjects, {**course, 'kind': 'attestation'})
     with pytest.raises(BotError, match='немає атестацій'):
         journal.set_date(conn, 100, subjects, {**course, 'due_date': '2026-12-01'})
+    record = next(r for r in view['records'] if r['subject_key'] == course['subject_key'])
+    journal.delete_grade(conn, 1, {'record_id': record['id'], 'revision': record['revision']})
+    updated = journal.view(conn, 1, subjects, period=course['period'])['averages'][str(view['viewer_id'])]
+    assert {key: value['average'] for key, value in updated[subject_name(kpz)].items()} == {
+        '1': 5, '2': 3, 'all': 4,
+    }
+    assert updated[subject_name(coursework)]['all']['average'] is None
+
+
+@pytest.mark.asyncio
+async def test_journal_delete_permissions_revision_and_reentry(client, conn):
+    url = '/api/miniapp/journal'
+    period = payload()['period']
+    record_id = journal.submit(conn, 1, SUBJECTS, payload())
+    student = users.get_user(conn, 1)['id']
+    deletion = {'action': 'delete', 'record_id': record_id, 'revision': 0}
+    assert (await client.post(url, headers=headers(2), json=deletion)).status == 403
+    assert (await client.post(url, headers=headers(100), json={**deletion, 'user_id': student})).status == 403
+    assert (await client.post(url, headers=headers(1), json={**deletion, 'revision': 9})).status == 400
+    assert (await client.post(url, headers=headers(1), json=deletion)).status == 200
+    view = journal.view(conn, 1, SUBJECTS, period=period)
+    assert not view['records']
+    assert view['averages'][str(student)]['програмування']['all']['average'] is None
+    assert (await client.post(url, headers=headers(1), json=deletion)).status == 400
+
+    subject = next(s for s in view['subjects'] if s['key'] == 'програмування')
+    journal.submit_grade_series(conn, 1, subject, '5', period=period)
+    row, = journal.view(conn, 1, SUBJECTS, period=period)['records']
+    assert (row['id'], row['revision'], row['grade'], row['note']) == (record_id, 2, 5, '')
+    assert (await client.post(url, headers=headers(1), json=deletion)).status == 400
+    admin_deletion = {**deletion, 'user_id': student, 'revision': 2}
+    assert (await client.post(url+'?mode=admin', headers=headers(100), json=admin_deletion)).status == 200
+    assert not journal.view(conn, 1, SUBJECTS, period=period)['records']
+    journal.submit(conn, 1, SUBJECTS, payload(grade=0))
+    row, = journal.view(conn, 1, SUBJECTS, period=period)['records']
+    assert (row['id'], row['revision'], row['grade']) == (record_id, 4, 0)
+    events = conn.execute("SELECT actor_id, snapshot FROM journal_cell_events WHERE action = 'delete' ORDER BY actor_id").fetchall()
+    assert [event['actor_id'] for event in events] == [1, 100]
+    assert all(json.loads(event['snapshot'])['deleted_at'] for event in events)

@@ -229,3 +229,26 @@ async def test_journal_keeps_original_subject_buttons_when_menu_delivery_fails(a
     await choose(app, "Предмет")
     assert len(failures) == 2
     assert (await data(app, uid=1))["journal"] == before
+
+
+@pytest.mark.asyncio
+async def test_journal_grade_deletion_requires_telegram_confirmation(app, conn):
+    subjects = app[0]['subjects']
+    journal.submit(conn, 1, subjects, {
+        'subject_key': subject_name('Предмет'), 'kind': 'lab', 'number': 1, 'grade': 4,
+    })
+    await send(app, 'Електронний журнал', uid=1)
+    await choose(app, 'Предмет')
+    await choose(app, 'Додати оцінку · атестація 1')
+    await choose(app, 'Оцінка · 4')
+    await choose(app, 'Видалити оцінку')
+    assert journal.view(conn, 1, subjects)['records'][0]['grade'] == 4
+    await choose(app, 'Скасувати')
+    assert journal.view(conn, 1, subjects)['records'][0]['grade'] == 4
+    await choose(app, 'Видалити оцінку')
+    await choose(app, 'Так, видалити')
+    assert not journal.view(conn, 1, subjects)['records']
+    assert 'Оцінку видалено' in app[1].call_args.args[0].text
+    await choose(app, 'Оцінка · —')
+    await choose(app, '0')
+    assert journal.view(conn, 1, subjects)['records'][0]['grade'] == 0

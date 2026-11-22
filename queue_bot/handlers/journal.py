@@ -191,8 +191,16 @@ async def _render(event, state, data, context, screen="subjects", *args, note=No
             else:
                 context["return_to"] = ["parts", number, attestation] if work and work["parts"] > 1 else ["works", attestation]
             rows.extend([[button(str(n), "grade", n) for n in range(first, first + 3)] for first in (0, 3)])
+            if record:
+                rows.append([button("Видалити оцінку", "confirm_delete_grade", _grade_text(record), *args)])
             rows.append([button("Скасувати", *context["return_to"])])
             flow = JournalFlow.grade
+
+        elif screen == "confirm_delete_grade":
+            grade, *cell = args
+            lines.append(f"Видалити оцінку <b>{grade}</b>?")
+            rows.append([button("Так, видалити", "delete_grade")])
+            rows.append([button("Скасувати", "cell", *cell)])
 
         elif screen == "due":
             if not data["can_set_dates"]:
@@ -278,6 +286,14 @@ async def journal_action(callback, state, conn, subjects):
     uid = callback.from_user.id
     if action == "grade":
         await _save_grade(callback, state, conn, subjects, context, args[0])
+        return
+    if action == "delete_grade":
+        journal.delete_grade(conn, uid, context["draft"], admin_mode=context.get("student") is not None)
+        data = _view(conn, uid, subjects, context)
+        destination = context["return_to"]
+        if not any(subject["key"] == context["subject"] for subject in data["subjects"]):
+            destination = ["subjects"]
+        await _render(callback, state, data, context, *destination, note="✅ Оцінку видалено.")
         return
     selecting_subject = action == "subject" and bool(args)
     if action == "student":

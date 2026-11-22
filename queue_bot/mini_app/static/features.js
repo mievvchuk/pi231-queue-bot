@@ -1152,14 +1152,26 @@ window.createPI231Features = function (H) {
   const compactJournal = () => Boolean(window.matchMedia?.('(max-width: 700px)').matches);
   const gradeValue = value => value == null ? 'Не внесено' : String(value);
   const journalDueDate = value => value ? value.split('-').reverse().join('.') : '';
-  function gradeEditor(record, save) {
+  function gradeEditor(record, save, remove) {
     const grade=input({type:'number',inputmode:'decimal',min:0,max:5,step:'any',value:record?.grade??'', 'aria-label':'Оцінка від 0 до 5'});
     const note=input({required:false,maxlength:500,value:record?.note||'',placeholder:'За бажанням'});
-    return form([field('Оцінка від 0 до 5',grade),field('Примітка',note)],'Зберегти',ctx=>{
+    const editor=form([field('Оцінка від 0 до 5',grade),field('Примітка',note)],'Зберегти',ctx=>{
       const raw=String(grade.value).trim().replace(',','.'), value=Number(raw);
       if(!raw||!Number.isFinite(value)||value<0||value>5)throw new Error('Введи оцінку від 0 до 5.');
       return save(value,note.value.trim(),ctx);
     });
+    if(record)editor.append(btn('Видалити оцінку',remove,'text-button danger'));
+    return editor;
+  }
+  function confirmGradeDeletion(record, reload) {
+    if(S.busy)return;
+    const panel=sheet('Видалити оцінку?',record.subject_name+' · '+gradeValue(record.grade));
+    const confirmation=form([], 'Так, видалити', async ctx=>{
+      await api('/journal',{action:'delete',user_id:record.user_id,record_id:record.id,revision:record.revision});
+      await reload(ctx,'Оцінку видалено');
+    });
+    confirmation.append(btn('Скасувати',()=>{if(!S.busy)closeSheet();},'button secondary'));
+    panel.append(confirmation);
   }
   function journalTabs(choices, active, selectTab, label) {
     return el('div',{class:'journal-tabs',role:'group','aria-label':label},...choices.map(([value,text])=>
@@ -1203,6 +1215,11 @@ window.createPI231Features = function (H) {
       return result;
     };
     const itemFor=(subject,work)=>recordsFor(subject.key).find(r=>r.subject_key===work.subject_key&&r.kind===work.kind&&r.number===work.number&&(r.part||1)===work.part);
+    async function reload(ctx,message) {
+      const fresh=await api('/journal'+query(selected));
+      if(!current(ctx.token,ctx.epoch,ctx.key))return;
+      Object.assign(data,fresh);editing=null;closeSheet();draw();toast(message);
+    }
     function workCard(subject,work,index) {
       const record=itemFor(subject,work), editor=editing===index;
       const cardView=el('article',{class:'personal-work'},
@@ -1212,10 +1229,8 @@ window.createPI231Features = function (H) {
       if(editor) {
         const editorForm=gradeEditor(record,async (grade,note,ctx)=>{
           await api('/journal',{action:'submit',period:data.period,user_id:viewer,subject_key:work.subject_key,kind:work.kind,number:work.number,part:work.part,grade,note,...(record?{record_id:record.id,revision:record.revision}:{})});
-          const fresh=await api('/journal'+query(selected));
-          if(!current(ctx.token,ctx.epoch,ctx.key))return;
-          Object.assign(data,fresh);editing=null;draw();toast('Оцінку збережено');
-        });
+          await reload(ctx,'Оцінку збережено');
+        },()=>confirmGradeDeletion(record,reload));
         editorForm.append(btn('Скасувати',()=>{if(!S.busy){editing=null;draw();}},'button secondary'));
         cardView.append(editorForm);
       } else if(record?.can_edit!==false&&(!work.legacy||record))cardView.append(btn(record?'Редагувати':'Внести оцінку',()=>{editing=index;draw();},'button secondary'));
@@ -1291,11 +1306,21 @@ window.createPI231Features = function (H) {
       kind:column.kind,number:column.number,part:column.part,grade,note,
       ...(record?{record_id:record.id,revision:record.revision}:{}),
     });
+    async function reload(ctx,message) {
+      const fresh=await api('/journal'+query());
+      if(!current(ctx.token,ctx.epoch,ctx.key))return;
+      Object.assign(data,fresh);closeSheet();draw();toast(message);
+    }
     // Desktop grades are saved on change so the arrow-key workflow stays intact.
     const saveInline=async(student,subject,column,record,box)=>{
       const raw=box.value.trim().replace(',','.');
       const restore=()=>{box.value=record?.grade??'';};
-      if(raw===''||(record&&Number(raw)===Number(record.grade)))return restore();
+      if(raw===''){
+        restore();
+        if(record)confirmGradeDeletion(record,reload);
+        return;
+      }
+      if(record&&Number(raw)===Number(record.grade))return restore();
       const value=Number(raw);
       if(!Number.isFinite(value)||value<0||value>5){restore();return toast('Оцінка має бути від 0 до 5.',true);}
       box.disabled=true;
@@ -1369,10 +1394,8 @@ window.createPI231Features = function (H) {
           const panel=sheet(title,student.name);
           panel.append(gradeEditor(record,async (grade,note,ctx)=>{
             await api('/journal',gradePayload(student,subject,column,record,grade,note));
-            const fresh=await api('/journal'+query());
-            if(!current(ctx.token,ctx.epoch,ctx.key))return;
-            Object.assign(data,fresh);closeSheet();draw();toast('Оцінку збережено');
-          }));
+            await reload(ctx,'Оцінку збережено');
+          },()=>confirmGradeDeletion(record,reload)));
         };
         return el('article',{class:'mobile-grade-row'},
           el('div',{},el('strong',{},title),column.optional_last&&column.part===column.parts?small('За потреби'):null),
@@ -1419,6 +1442,7 @@ window.createPI231Features = function (H) {
           return el('td',{},el('span',{class:cls},record?grade(record.grade):el('span',{'aria-label':'Оцінки ще немає'},'—')));
         }))));
         return el('section',{class:'journal-subject'},el('h2',{},subject.name),
+          small('Щоб видалити оцінку, очисти клітинку й підтвердь дію.'),
           el('div',{class:'journal-table-scroll',role:'region',tabindex:0,'aria-label':'Таблиця оцінок: '+subject.name},el('table',{class:'journal-table'},el('caption',{class:'screen-reader-only'},subject.name+' — журнал групи'),head,body)),
           groups.some(g=>g.optional_last)?small('* Третя оцінка за лабораторну — за потреби.'):null,
           !students.length?small('У списку немає студентів за цим пошуком.'):null);

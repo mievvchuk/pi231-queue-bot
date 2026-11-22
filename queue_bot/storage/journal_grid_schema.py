@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS journal_cells (
     reviewed_by BIGINT,
     revision INTEGER NOT NULL DEFAULT 0,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted_at TEXT,
     UNIQUE(user_id, period, subject_key, kind, number, part)
 );
 CREATE INDEX IF NOT EXISTS ix_journal_cells_period ON journal_cells(period, user_id, status);

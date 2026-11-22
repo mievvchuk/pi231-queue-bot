@@ -612,3 +612,41 @@ for(const mobile of [false,true]) test('group coursework has only one grade and 
   assert.ok(!nodes.some(node=>node.tag==='th'&&/Атестація [12]|Семестр/.test(node.textContent)));
   assert.ok(nodes.find(node=>node.hidden&&/Дати атестацій/.test(node.textContent)));
 });
+
+for (const presentation of ['personal', 'table', 'cards']) {
+  test('grade deletion confirms and refreshes the '+presentation+' journal', async () => {
+    const group = presentation !== 'personal';
+    const data = journalData(group);
+    const writes = [];
+    const { features, S, panels, context } = setup(async (path, body) => {
+      if (!body) return data;
+      writes.push(body);
+      data.records = data.records.filter(r => r.id !== body.record_id);
+      return {};
+    });
+    if (group) S.mode = 'admin';
+    context.window.matchMedia = () => ({ matches: presentation === 'cards' });
+    await features.open('journal', false, group ? '?scope=group' : '?subject=кпз');
+    const page = features.page('journal');
+    const button = (node, label) => descendants(node).find(n => n.tag === 'button' && n.textContent === label);
+    if (presentation === 'table') {
+      const box = descendants(page).find(n => n.attrs.class?.includes('journal-input') && n.value === 5);
+      box.value = '';
+      await box.events.change({ target: box });
+      assert.equal(box.value, 5);
+    } else {
+      button(page, group ? '5' : 'Редагувати').events.click();
+      button(group ? panels[0] : page, 'Видалити оцінку').events.click();
+    }
+    assert.equal(writes.length, 0);
+    const confirmation = panels.at(-1);
+    assert.ok(button(confirmation, 'Так, видалити'));
+    await descendants(confirmation).find(n => n.tag === 'form').events.submit({ preventDefault() {} });
+    assert.deepEqual(writes.map(b => [b.action, b.user_id, b.record_id, b.revision]), [['delete', 1, 1, 0]]);
+    if (presentation === 'table') {
+      assert.equal(descendants(page).find(n => n.attrs.class?.includes('journal-input')).value, '');
+    } else {
+      assert.ok(button(page, group ? 'Не внесено' : 'Внести оцінку'));
+    }
+  });
+}

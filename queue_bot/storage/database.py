@@ -409,7 +409,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS ux_pending_swap_pair ON swap_requests(session_
 
 PG_SCHEMA += LESSON_SCHEMA.replace('INTEGER PRIMARY KEY AUTOINCREMENT', 'SERIAL PRIMARY KEY')
 PG_SCHEMA += JOURNAL_SCHEMA.replace('INTEGER PRIMARY KEY AUTOINCREMENT', 'SERIAL PRIMARY KEY')
-PG_SCHEMA += GRID_SCHEMA + GRID_COPY
+PG_SCHEMA += GRID_SCHEMA + "ALTER TABLE journal_cells ADD COLUMN IF NOT EXISTS deleted_at TEXT;\n" + GRID_COPY
 
 
 class PGRow(dict):
@@ -596,6 +596,9 @@ def connect(db_target: str):
         conn.execute('ALTER TABLE working_saturdays ADD COLUMN pairs_count INTEGER')
     if 'source_note' not in {row[1] for row in conn.execute('PRAGMA table_info(replacements)')}:
         conn.execute('ALTER TABLE replacements ADD COLUMN source_note TEXT')
+    journal_columns = {row[1] for row in conn.execute('PRAGMA table_info(journal_cells)')}
+    if journal_columns and 'deleted_at' not in journal_columns:
+        conn.execute('ALTER TABLE journal_cells ADD COLUMN deleted_at TEXT')
     conn.executescript(SCHEDULE_SCHEMA)
     return conn
 
