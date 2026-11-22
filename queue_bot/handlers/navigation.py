@@ -1,9 +1,10 @@
 """Explicit role views; permissions remain enforced by admin services."""
 from aiogram import F, Router
-from aiogram.filters import StateFilter
+from aiogram.filters import Command, StateFilter
 from aiogram.fsm.state import State, StatesGroup
 
-from queue_bot.handlers.common import get_reply_menu, get_student_queues_menu, get_student_more_menu
+from queue_bot.handlers import journal as journal_handlers
+from queue_bot.handlers.common import JOURNAL_TEXT, get_reply_menu, get_student_queues_menu, get_student_more_menu
 from queue_bot.services import admins, queues, users
 from queue_bot.services.errors import BotError
 
@@ -164,14 +165,8 @@ async def open_mini_app(message, conn):
     await message.answer('Мініапка відкривається кнопкою біля поля введення повідомлення.')
 
 
-@router.message(F.text == 'Електронний журнал', StateFilter('*'))
-async def open_journal(message, conn):
-    from queue_bot.handlers.common import JOURNAL_TEXT, journal_web_app
-    from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
-    if not users.get_user(conn, message.from_user.id):
-        raise BotError('Спочатку зареєструйтесь у боті: /start')
-    target = journal_web_app()
-    if not target:
-        raise BotError('Електронний журнал ще не підключений. Власнику потрібно налаштувати адресу Mini App.')
-    await message.answer('Ваш електронний журнал', reply_markup=InlineKeyboardMarkup(
-        inline_keyboard=[[InlineKeyboardButton(text=JOURNAL_TEXT, web_app=target)]]))
+router.message(F.text == JOURNAL_TEXT, StateFilter('*'))(journal_handlers.open_journal)
+router.message(Command('journal'), StateFilter('*'))(journal_handlers.open_journal)
+router.message(journal_handlers.JournalFlow.grade, F.text.regexp(r'^\s*[+-]?\d[\d.,]*\s*$'))(journal_handlers.journal_grade)
+router.message(journal_handlers.JournalFlow.due_date, F.text.regexp(r'^\s*(?:-|[\d.]+)\s*$'))(journal_handlers.journal_due_date)
+router.callback_query(F.message.chat.type == 'private', F.data.startswith('jr:'))(journal_handlers.journal_action)

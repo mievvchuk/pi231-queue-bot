@@ -28,7 +28,13 @@
       "refresh_admin_queue",
       "back_to_queue",
       "open_mini_app",
-      "open_journal"
+      "open_journal",
+      "open_journal",
+      "journal_grade",
+      "journal_due_date"
+    ],
+    "callback_query": [
+      "journal_action"
     ]
   },
   {

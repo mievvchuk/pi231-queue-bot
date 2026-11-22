@@ -555,3 +555,42 @@ test('admin subject selector keeps every student in the full grade table',async(
   assert.match(page.textContent,/Машинне навчання/);
   assert.equal(descendants(page).filter(n=>n.tag==='input'&&String(n.attrs.class||'').includes('journal-input')).length,6);
 });
+
+test('mobile group journal edits one selected student and attestation with an explicit save',async()=>{
+  const data=journalData(true),calls=[];
+  data.subjects[0].labs[1].attestation=2;
+  data.records[1].user_id=2;
+  const {features,S,panels,context}=setup(async(path,body)=>{calls.push([path,body]);return body?{}:data;});
+  context.window.matchMedia=()=>({matches:true});
+  S.mode='admin';
+  await features.open('journal',false,'?scope=group');
+  const page=features.page('journal');
+  const nodes=()=>descendants(page);
+  assert.equal(nodes().filter(node=>node.tag==='table').length,0);
+  const student=nodes().find(node=>node.attrs['aria-label']==='Студент журналу групи');
+  student.value='2';student.events.change();
+  nodes().find(node=>node.tag==='button'&&node.textContent==='Атестація 2').events.click();
+  const work=nodes().find(node=>node.attrs.class==='mobile-grade-row');
+  assert.match(work.textContent,/ЛР 2/);
+  descendants(work).find(node=>node.tag==='button').events.click();
+  const panel=panels[0];
+  descendants(panel).find(node=>node.tag==='input'&&node.attrs.type==='number').value='4.5';
+  await descendants(panel).find(node=>node.tag==='form').events.submit({preventDefault(){}});
+  const body=calls.find(([,value])=>value)?.[1];
+  assert.deepEqual([body.user_id,body.record_id,body.revision,body.number,body.grade],[2,2,0,2,4.5]);
+  nodes().find(node=>node.tag==='button'&&node.textContent==='Таблиця').events.click();
+  assert.equal(nodes().filter(node=>node.tag==='table').length,1);
+});
+
+test('mobile personal journal limits the visible works to the selected attestation',async()=>{
+  const data=journalData();
+  data.subjects[0].labs[2].attestation=2;
+  const {features,context}=setup(async()=>data);
+  context.window.matchMedia=()=>({matches:true});
+  await features.open('journal',false,'?subject='+encodeURIComponent('кпз'));
+  const page=features.page('journal');
+  assert.equal(descendants(page).filter(n=>n.attrs.class==='personal-work').length,2);
+  descendants(page).find(n=>n.tag==='button'&&n.textContent==='Атестація 2').events.click();
+  assert.equal(descendants(page).filter(n=>n.attrs.class==='personal-work').length,1);
+  assert.match(page.textContent,/Лабораторна 3/);
+});

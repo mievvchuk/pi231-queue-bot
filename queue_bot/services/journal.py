@@ -3,6 +3,7 @@ import json
 import math
 import re
 import uuid
+from collections import defaultdict
 from datetime import date
 
 from queue_bot.services import admins, users, schedule
@@ -192,8 +193,16 @@ def view(conn, uid, subjects, *, group=False, period=None):
             subject_rows.append({'key': record['subject_key'], 'name': record['subject_name'], **layout(record['subject_name'])})
             known.add(record['subject_key'])
     students = users.list_users(conn)
-    averages = {str(student['id']): {subject['key']: summary(subject, [r for r in records if r['user_id'] == student['id'] and r['subject_key'] == subject['key']])
-                                     for subject in subject_rows} for student in students}
+    by_student_subject = defaultdict(list)
+    for record in records:
+        by_student_subject[record['user_id'], record['subject_key']].append(record)
+    averages = {
+        str(student['id']): {
+            subject['key']: summary(subject, by_student_subject.get((student['id'], subject['key']), ()))
+            for subject in subject_rows
+        }
+        for student in students
+    }
     return {'period': period, 'periods': sorted(periods, reverse=True), 'subjects': subject_rows, 'averages': averages,
             'records': records, 'group': group, 'viewer_id': actor['id'],
             'can_set_dates': group and admins.is_owner(conn, uid),

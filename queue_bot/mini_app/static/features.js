@@ -1149,6 +1149,22 @@ window.createPI231Features = function (H) {
       btn("Повідомити про помилку", () => open("bugs"), "button secondary"),
     ];
   }
+  const compactJournal = () => Boolean(window.matchMedia?.('(max-width: 700px)').matches);
+  const gradeValue = value => value == null ? 'Не внесено' : String(value);
+  const journalDueDate = value => value ? value.split('-').reverse().join('.') : '';
+  function gradeEditor(record, save) {
+    const grade=input({type:'number',inputmode:'decimal',min:0,max:5,step:'any',value:record?.grade??'', 'aria-label':'Оцінка від 0 до 5'});
+    const note=input({required:false,maxlength:500,value:record?.note||'',placeholder:'За бажанням'});
+    return form([field('Оцінка від 0 до 5',grade),field('Примітка',note)],'Зберегти',ctx=>{
+      const raw=String(grade.value).trim().replace(',','.'), value=Number(raw);
+      if(!raw||!Number.isFinite(value)||value<0||value>5)throw new Error('Введи оцінку від 0 до 5.');
+      return save(value,note.value.trim(),ctx);
+    });
+  }
+  function journalTabs(choices, active, selectTab, label) {
+    return el('div',{class:'journal-tabs',role:'group','aria-label':label},...choices.map(([value,text])=>
+      el('button',{type:'button','aria-pressed':value===active,onclick:()=>{if(!S.busy)selectTab(value);}},text)));
+  }
   function personalJournalPage(data) {
     const allSubjects=rows(data.subjects), viewer=data.viewer_id;
     const coursework=allSubjects.filter(s=>/курсова|курсовий/i.test(s.name));
@@ -1156,14 +1172,14 @@ window.createPI231Features = function (H) {
     const subjects=allSubjects.filter(s=>!kpz||!coursework.includes(s));
     const params=new URLSearchParams(state.query||'');
     let selected=subjects.some(s=>s.key===params.get('subject'))?params.get('subject'):'';
-    let editing=null;
+    let editing=null, attestation=compactJournal()?1:null;
     const content=el('section',{class:'personal-journal','aria-label':'Мої оцінки'});
     const own=()=>rows(data.records).filter(r=>r.user_id===viewer);
     const recordsFor=key=>own().filter(r=>r.subject_key===key||(key===kpz?.key&&coursework.some(s=>s.key===r.subject_key)));
     const period=select(rows(data.periods).map(p=>[p,p.replace(':',' · семестр ')]),data.period);
     const query=key=>'?period='+encodeURIComponent(data.period)+(key?'&subject='+encodeURIComponent(key):'');
     const route=key=>{
-      selected=key;editing=null;state.query=query(key);
+      selected=key;editing=null;attestation=compactJournal()?1:null;state.query=query(key);
       if(typeof location!=='undefined'&&typeof history!=='undefined') {
         const url=new URL(location.href);url.searchParams.set('page','journal');url.searchParams.set('period',data.period);
         key?url.searchParams.set('subject',key):url.searchParams.delete('subject');
@@ -1179,13 +1195,12 @@ window.createPI231Features = function (H) {
       }
       open('journal',true,'?period='+encodeURIComponent(period.value)+(selected?'&subject='+encodeURIComponent(selected):''));
     });
-    const mark=value=>value==null?'Не внесено':String(value);
     const works=subject=>{
       const result=[];
       const sources=[subject,...(subject.key===kpz?.key?coursework:[])];
-      for(const source of sources)for(const lab of rows(source.labs))for(let part=1;part<=lab.parts;part++)result.push({subject_key:source.key,kind:'lab',number:lab.number,part,title:(source===subject?(lab.title||'Лабораторна '+lab.number):source.name)+(lab.parts>1?' · оцінка '+part:''),optional:lab.optional_last&&part===lab.parts});
+      for(const source of sources)for(const lab of rows(source.labs))for(let part=1;part<=lab.parts;part++)result.push({subject_key:source.key,kind:'lab',number:lab.number,part,title:(source===subject?(lab.title||'Лабораторна '+lab.number):source.name)+(lab.parts>1?' · оцінка '+part:''),optional:lab.optional_last&&part===lab.parts,attestation:lab.attestation||1});
       for(const r of recordsFor(subject.key))if(!result.some(w=>w.subject_key===r.subject_key&&w.kind===r.kind&&w.number===r.number&&w.part===(r.part||1)))
-        result.push({subject_key:r.subject_key,kind:r.kind,number:r.number,part:r.part||1,title:(r.kind==='lab'?'Лабораторна ':'Робота ')+r.number+' · попередній запис',legacy:true});
+        result.push({subject_key:r.subject_key,kind:r.kind,number:r.number,part:r.part||1,title:(r.kind==='lab'?'Лабораторна ':'Робота ')+r.number+' · попередній запис',legacy:true,attestation:0});
       return result;
     };
     const itemFor=(subject,work)=>recordsFor(subject.key).find(r=>r.subject_key===work.subject_key&&r.kind===work.kind&&r.number===work.number&&(r.part||1)===work.part);
@@ -1193,15 +1208,11 @@ window.createPI231Features = function (H) {
       const record=itemFor(subject,work), editor=editing===index;
       const cardView=el('article',{class:'personal-work'},
         el('div',{class:'personal-work-heading'},el('div',{},el('h3',{},work.title),work.optional?small('За потреби'):null),
-          el('span',{class:record?'personal-grade':'personal-missing'},mark(record?.grade))));
+          el('span',{class:record?'personal-grade':'personal-missing'},gradeValue(record?.grade))));
       if(record?.note)cardView.append(el('p',{class:'muted'},record.note));
       if(editor) {
-        const grade=input({type:'number',inputmode:'decimal',min:0,max:5,step:'0.1',value:record?.grade??'', 'aria-label':'Оцінка від 0 до 5'});
-        const note=input({required:false,maxlength:500,value:record?.note||'',placeholder:'За бажанням'});
-        const editorForm=form([field('Оцінка від 0 до 5',grade),field('Примітка',note)],'Зберегти',async ctx=>{
-          const value=Number(String(grade.value).replace(',','.'));
-          if(String(grade.value).trim()===''||!Number.isFinite(value)||value<0||value>5)throw new Error('Введи оцінку від 0 до 5.');
-          await api('/journal',{action:'submit',period:data.period,user_id:viewer,subject_key:work.subject_key,kind:work.kind,number:work.number,part:work.part,grade:value,note:note.value.trim(),...(record?{record_id:record.id,revision:record.revision}:{})});
+        const editorForm=gradeEditor(record,async (grade,note,ctx)=>{
+          await api('/journal',{action:'submit',period:data.period,user_id:viewer,subject_key:work.subject_key,kind:work.kind,number:work.number,part:work.part,grade,note,...(record?{record_id:record.id,revision:record.revision}:{})});
           const fresh=await api('/journal'+query(selected));
           if(!current(ctx.token,ctx.epoch,ctx.key))return;
           Object.assign(data,fresh);editing=null;draw();toast('Оцінку збережено');
@@ -1229,18 +1240,23 @@ window.createPI231Features = function (H) {
       const averages=el('div',{class:'personal-averages'},...[1,2].map(n=>{
         const average=summary?.[String(n)];
         const due=rows(data.dates).find(d=>d.subject_key===subject.key&&d.number===n)?.due_date;
-        return el('div',{},small('Атестація '+n),el('strong',{},average?.average!=null?Number(average.average).toFixed(2):'Не внесено'),due?small('Дата: '+due):null);
+        return el('div',{},small('Атестація '+n),el('strong',{},average?.average!=null?Number(average.average).toFixed(2):'Не внесено'),due?small('Дата: '+journalDueDate(due)):null);
       }));
       const subjectNav=el('nav',{class:'personal-subject-nav','aria-label':'Мої предмети'},...subjects.map(s=>el('button',{type:'button','aria-current':s.key===selected?'page':null,onclick:()=>route(s.key)},s.name)));
       const workList=works(subject);
+      const tabs=[[1,'Атестація 1'],[2,'Атестація 2']];
+      if(workList.some(w=>w.legacy))tabs.push([0,'Попередні']);
+      if(!compactJournal())tabs.unshift([null,'Усі роботи']);
+      const visible=attestation===null?workList:workList.filter(w=>w.attestation===attestation);
       content.replaceChildren(toolbar,el('div',{class:'personal-journal-layout'},subjectNav,el('div',{class:'personal-journal-detail'},
-        el('h2',{},subject.name),averages,el('div',{class:'personal-work-list'},...workList.map((w,index)=>workCard(subject,w,index))),
-        !workList.length?el('p',{class:'notice'},'Роботи для цього предмета ще не налаштовані.'):null)));
+        el('h2',{},subject.name),averages,journalTabs(tabs,attestation,value=>{attestation=value;editing=null;draw();},'Роботи за атестацією'),
+        el('div',{class:'personal-work-list'},...visible.map((w,index)=>workCard(subject,w,index))),
+        !visible.length?el('p',{class:'notice'},'У цьому розділі немає робіт.'):null)));
     }
     draw();return [content];
   }
 
-  let journalSubject='';
+  let journalSubject='', journalStudent=null, journalPresentation=null, journalAttestation=1;
   function journalPage(data) {
     if(!data.group)return personalJournalPage(data);
     const query = (review=data.group,period=data.period) => '?period='+encodeURIComponent(period)+(review?'&scope=group':'');
@@ -1266,10 +1282,17 @@ window.createPI231Features = function (H) {
     subjectSelect.setAttribute('aria-label','Предмет журналу групи');
     subjectSelect.addEventListener('change',()=>pick(subjectSelect.value));
     const search=input({type:'search',required:false,placeholder:'Прізвище або ім’я','aria-label':'Пошук студента'});
+    let presentation=journalPresentation||(compactJournal()?'cards':'table');
+    const viewSwitch=el('div',{class:'journal-view-switch'});
     const tables=el('div',{class:'journal-tables'});
     const tone = value => value===undefined||value===''?'':Number(value)===5?' grade-five':Number(value)<3?' grade-low':'';
     const grade = value => el('span',{class:'journal-grade'+tone(value),'aria-label':'Оцінка '+value+' із 5'},String(value));
-    // Grades are typed straight into the cell and saved on change, no dialog or approval.
+    const gradePayload=(student,subject,column,record,grade,note)=>({
+      action:'submit',period:data.period,user_id:student.id,subject_key:subject.key,
+      kind:column.kind,number:column.number,part:column.part,grade,note,
+      ...(record?{record_id:record.id,revision:record.revision}:{}),
+    });
+    // Desktop grades are saved on change so the arrow-key workflow stays intact.
     const saveInline=async(student,subject,column,record,box)=>{
       const raw=box.value.trim().replace(',','.');
       const restore=()=>{box.value=record?.grade??'';};
@@ -1278,7 +1301,7 @@ window.createPI231Features = function (H) {
       if(!Number.isFinite(value)||value<0||value>5){restore();return toast('Оцінка має бути від 0 до 5.',true);}
       box.disabled=true;
       try{
-        await api('/journal',{action:'submit',period:data.period,user_id:student.id,subject_key:subject.key,kind:column.kind,number:column.number,part:column.part,grade:value,note:record?.note||'',...(record?{record_id:record.id,revision:record.revision}:{})});
+        await api('/journal',gradePayload(student,subject,column,record,value,record?.note||''));
         const fresh=await api('/journal'+query());
         if(!tables.isConnected)return;
         const focused=document.activeElement?.dataset?.cell;
@@ -1320,11 +1343,59 @@ window.createPI231Features = function (H) {
       const first=groups.filter(g=>g.attestation===1);
       return [...first,average(1),...groups.filter(g=>g.attestation!==1),average(2)];
     };
+    const cardJournal=(subject,students)=>{
+      if(!students.length)return el('p',{class:'notice'},'Студентів за цим пошуком немає.');
+      const student=students.find(s=>String(s.id)===String(journalStudent))||students[0];
+      const chooser=select(students.map(s=>[s.id,s.name]),student.id);
+      chooser.setAttribute('aria-label','Студент журналу групи');
+      chooser.addEventListener('change',()=>{journalStudent=chooser.value;draw();});
+      const records=rows(data.records).filter(r=>r.user_id===student.id&&r.subject_key===subject.key);
+      const labs=rows(subject.labs);
+      const configured=labs.flatMap(lab=>Array.from({length:lab.parts},(_,i)=>({...lab,kind:'lab',part:i+1})));
+      const older=records.filter(r=>!configured.some(w=>w.kind===r.kind&&w.number===r.number&&w.part===(r.part||1)));
+      const tabs=[[1,'Атестація 1'],[2,'Атестація 2']];
+      if(older.length)tabs.push([0,'Попередні']);
+      if(!tabs.some(([value])=>value===journalAttestation))journalAttestation=1;
+      const columns=journalAttestation
+        ? configured.filter(l=>(l.attestation||1)===journalAttestation)
+        : older.map(r=>({kind:r.kind,number:r.number,part:r.part||1,title:(r.kind==='lab'?'ЛР ':'Атестація ')+r.number,parts:r.part||1}));
+      const summary=data.averages?.[student.id]?.[subject.key]?.[journalAttestation];
+      const due=rows(data.dates).find(d=>d.subject_key===subject.key&&d.number===journalAttestation)?.due_date;
+      const cards=columns.map(column=>{
+        const record=records.find(r=>r.kind===column.kind&&r.number===column.number&&(r.part||1)===column.part);
+        const title=(column.title||'ЛР '+column.number)+(column.parts>1?' · оцінка '+column.part:'');
+        const openEdit=()=>{
+          const panel=sheet(title,student.name);
+          panel.append(gradeEditor(record,async (grade,note,ctx)=>{
+            await api('/journal',gradePayload(student,subject,column,record,grade,note));
+            const fresh=await api('/journal'+query());
+            if(!current(ctx.token,ctx.epoch,ctx.key))return;
+            Object.assign(data,fresh);closeSheet();draw();toast('Оцінку збережено');
+          }));
+        };
+        return el('article',{class:'mobile-grade-row'},
+          el('div',{},el('strong',{},title),column.optional_last&&column.part===column.parts?small('За потреби'):null),
+          btn(gradeValue(record?.grade),openEdit,'button secondary mobile-grade-button'));
+      });
+      return el('section',{class:'mobile-group-journal','aria-label':'Оцінки студента'},
+        field('Студент',chooser),
+        journalTabs(tabs,journalAttestation,value=>{journalAttestation=value;draw();},'Атестації'),
+        journalAttestation?el('div',{class:'mobile-journal-summary'},small('Середній бал'),el('strong',{},summary?.average!=null?Number(summary.average).toFixed(2):'—'),due?small('Дата: '+journalDueDate(due)):null):null,
+        el('div',{class:'mobile-grade-list'},...cards),
+        cards.length?null:el('p',{class:'notice'},'У цьому розділі немає робіт.'));
+    };
     const draw=()=>{
       const needle=search.value.trim().toLocaleLowerCase('uk-UA');
       const students=rows(data.students).filter(s=>!needle||s.name.toLocaleLowerCase('uk-UA').includes(needle));
-      // Own row first, so on a phone it is visible without scrolling the table.
-      if(!data.group)students.sort((a,b)=>(b.id===data.viewer_id)-(a.id===data.viewer_id));
+      viewSwitch.replaceChildren(journalTabs([['cards','Картки'],['table','Таблиця']],presentation,value=>{
+        presentation=journalPresentation=value;draw();
+      },'Вигляд журналу'));
+      if(presentation==='cards'){
+        const subject=subjects.find(s=>s.key===subjectFilter.value);
+        tables.replaceChildren(subject?cardJournal(subject,students):el('p',{class:'notice'},'Предметів поки немає.'));
+        subjectSelect.value=subjectFilter.value;
+        return;
+      }
       const sections=subjects.filter(s=>s.key===subjectFilter.value).map(subject=>{
         const groups=groupsFor(subject), columns=groups.flatMap(g=>Array.from({length:g.parts},(_,i)=>({...g,part:i+1})));
         const head=el('thead',{},el('tr',{},el('th',{rowspan:2,scope:'col',class:'journal-name'},'Прізвище та ім’я'),groups.map(g=>{
@@ -1332,9 +1403,10 @@ window.createPI231Features = function (H) {
           return el('th',{colspan:g.parts,scope:'colgroup',class:g.kind==='average'?'journal-average':null},g.title,due?el('small',{},due):null);
         })),
           el('tr',{},columns.map(c=>el('th',{scope:'col',class:c.kind==='average'?'journal-average':null},c.optional_last&&c.part===3?'3*':c.kind==='average'?'Сер. бал':String(c.part)))));
+        const recordIndex=new Map(rows(data.records).filter(r=>r.subject_key===subject.key).map(r=>[[r.user_id,r.kind,r.number,r.part||1].join(':'),r]));
         const body=el('tbody',{},students.map(student=>el('tr',{class:student.id===data.viewer_id?'journal-own-row':''},el('th',{scope:'row',class:'journal-name'},student.name),columns.map(column=>{
           if(column.kind==='average'){const a=data.averages?.[student.id]?.[subject.key]?.[column.number];return el('td',{class:'journal-average'},a&&a.average!==null?a.average.toFixed(2):'—');}
-          const record=rows(data.records).find(r=>r.user_id===student.id&&r.subject_key===subject.key&&r.kind===column.kind&&r.number===column.number&&(r.part||1)===column.part);
+          const record=recordIndex.get([student.id,column.kind,column.number,column.part].join(':'));
           const configured=subject.labs?.find(l=>l.number===column.number)?.parts||1;
           const editable=record?record.can_edit:((student.id===data.viewer_id||data.group)&&!column.legacy&&column.part<=configured);
           const cls='journal-cell'+(record?'':' cell-empty');
@@ -1352,7 +1424,7 @@ window.createPI231Features = function (H) {
       subjectSelect.value=subjectFilter.value;
     };
     search.addEventListener('input',draw);draw();
-    const dates=card(el('h2',{},'Дати атестацій'),!rows(data.dates).some(d=>d.due_date)?small('Дати ще не вказані. Власник додасть їх пізніше.'):small('Дати показані в заголовках атестацій у таблицях.'));
+    const dates=card(el('h2',{},'Дати атестацій'),!rows(data.dates).some(d=>d.due_date)?small('Дати ще не вказані. Власник додасть їх пізніше.'):small('Дати також видно біля середніх балів.'));
     if(data.can_set_dates)dates.append(btn('Вказати дату',()=>{
       const subject=select(subjects.map(s=>[s.key,s.name]),subjectFilter.value||undefined),number=input({type:'number',min:1,max:100,step:1,value:1}),due=input({type:'date',required:false});
       sheet('Дата атестації','Порожня дата прибирає попередню дату.').append(form([field('Предмет',subject),field('Номер атестації',number),field('Дата',due)],'Зберегти дату',ctx=>save({action:'date',period:data.period,subject_key:subject.value,number:Number(number.value),due_date:due.value},ctx)));
@@ -1360,7 +1432,7 @@ window.createPI231Features = function (H) {
     return [el('section',{class:'card group-journal-controls'},
       field('Предмет',subjectSelect),field('Пошук студента',search),
       rows(data.periods).length>1?field('Навчальний період',period):small(data.period.replace(':',' · семестр ')),
-      small('Зміни оцінок зберігаються автоматично.')),tables,dates];
+      viewSwitch),tables,dates];
   }
 
 

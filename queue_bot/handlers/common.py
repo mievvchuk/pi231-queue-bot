@@ -52,7 +52,7 @@ def journal_web_app() -> WebAppInfo | None:
 
 
 def get_reply_menu(conn, telegram_id: int) -> ReplyKeyboardMarkup:
-    """Main navigation; the journal text button answers with an inline Mini App launch."""
+    """Main navigation for the Telegram bot."""
     rows = [['Черги', '📅 Розклад'], [JOURNAL_TEXT], ['❓ Допомога', '🐞 Повідомити про баг']]
     if admins.is_admin(conn, telegram_id):
         rows.append(['⚡ Режим адміна'])
