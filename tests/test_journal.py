@@ -144,3 +144,19 @@ def test_removed_user_disappears_but_retains_queue_and_journal_history(conn, mak
     restored = users.register_user(conn,1,'Петренко Іван')
     assert restored['id'] == uid
     assert journal.view(conn,1,SUBJECTS,period='2026-2027:1')['records'][0]['id'] == rid
+
+
+@pytest.mark.asyncio
+async def test_physical_education_grades_can_be_saved_without_timetable_entry(client, conn):
+    from queue_bot.services import schedule
+
+    schedule.replace_schedule_from_backup(conn, {})
+    url = '/api/miniapp/journal'
+    data = await (await client.get(url + '?period=2026-2027:1', headers=headers(1))).json()
+    subject = next(s for s in data['subjects'] if s['name'] == 'Фізичне виховання')
+    assert [work['title'] for work in subject['labs']] == ['Норматив 1', 'Норматив 2', 'Норматив 3', 'Норматив 4']
+    response = await client.post(url, headers=headers(1), json=payload(subject_key=subject['key'], number=4, grade=5))
+    assert response.status == 200
+    updated = await (await client.get(url + '?period=2026-2027:1', headers=headers(1))).json()
+    assert updated['records'][0]['grade'] == 5
+    assert updated['averages'][str(updated['viewer_id'])][subject['key']]['2']['average'] == 5

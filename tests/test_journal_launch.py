@@ -104,3 +104,44 @@ async def test_journal_image_is_sent_with_only_the_selected_students_grades(app,
     photo = app[1].call_args.args[0].photo
     with Image.open(BytesIO(photo.data)) as png:
         assert png.format == "PNG"
+
+
+@pytest.mark.asyncio
+async def test_private_message_assigns_architecture_digits_to_own_grade_cells(app, conn):
+    key = subject_name("Архітектура та проєкт ПЗ")
+    period = journal.current_period()
+    own = users.get_user(conn, 1)["id"]
+    other = users.get_user(conn, 100)["id"]
+    for uid, number, part, grade, note in ((1, 1, 1, 1, "Зберегти примітку"), (1, 2, 3, 3, ""), (100, 1, 1, 2, "")):
+        journal.submit(conn, uid, app[0]["subjects"], {
+            "period": period, "subject_key": key, "kind": "lab", "number": number, "part": part,
+            "grade": grade, "note": note,
+        })
+
+    await send(app, "Архітектура 4545540", uid=1)
+    assert "Перші 7 клітинок" in app[1].call_args.args[0].text
+    rows = journal.view(conn, 100, app[0]["subjects"], group=True, period=period)["records"]
+    own_rows = sorted((row for row in rows if row["user_id"] == own), key=lambda row: (row["number"], row["part"]))
+    assert [(row["number"], row["part"], row["grade"]) for row in own_rows] == [
+        (1, 1, 4), (1, 2, 5), (1, 3, 4), (1, 4, 5), (1, 5, 5), (2, 1, 4), (2, 2, 0), (2, 3, 3),
+    ]
+    assert own_rows[0]["note"] == "Зберегти примітку" and own_rows[0]["revision"] == 1
+    assert next(row["grade"] for row in rows if row["user_id"] == other) == 2
+    audit = conn.execute("SELECT COUNT(*) FROM journal_cell_events").fetchone()[0]
+    await send(app, "Архітектура 4545540", uid=1)
+    assert conn.execute("SELECT COUNT(*) FROM journal_cell_events").fetchone()[0] == audit
+
+
+@pytest.mark.asyncio
+async def test_physical_education_shortcut_and_invalid_grade_series(app, conn):
+    await send(app, "Фізкультура 5674", uid=1)
+    assert "цифр від 0 до 5" in app[1].send_message.await_args.args[1]
+    assert conn.execute("SELECT COUNT(*) FROM journal_cells").fetchone()[0] == 0
+    await send(app, "Фізра 54545", uid=1)
+    assert "4 клітинок" in app[1].send_message.await_args.args[1]
+    assert conn.execute("SELECT COUNT(*) FROM journal_cells").fetchone()[0] == 0
+    await send(app, "ФВ 4505", uid=100)
+    assert "Фізичне виховання" in app[1].call_args.args[0].text
+    grades = conn.execute("SELECT user_id, grade FROM journal_cells ORDER BY number").fetchall()
+    assert [row["grade"] for row in grades] == [4, 5, 0, 5]
+    assert {row["user_id"] for row in grades} == {users.get_user(conn, 100)["id"]}

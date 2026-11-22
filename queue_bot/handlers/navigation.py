@@ -167,6 +167,7 @@ async def open_mini_app(message, conn):
 
 router.message(F.text == JOURNAL_TEXT, StateFilter('*'))(journal_handlers.open_journal)
 router.message(Command('journal'), StateFilter('*'))(journal_handlers.open_journal)
+router.message(journal_handlers.grade_series_input)(journal_handlers.journal_grade_series)
 router.message(journal_handlers.JournalFlow.grade, F.text.regexp(r'^\s*[+-]?\d[\d.,]*\s*$'))(journal_handlers.journal_grade)
 router.message(journal_handlers.JournalFlow.due_date, F.text.regexp(r'^\s*(?:-|[\d.]+)\s*$'))(journal_handlers.journal_due_date)
 router.callback_query(F.message.chat.type == 'private', F.data.startswith('jr:'))(journal_handlers.journal_action)

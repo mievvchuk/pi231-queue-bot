@@ -13,6 +13,13 @@ from queue_bot.services.journal_layout import layout, summary
 from queue_bot.storage.database import transaction, PGConnectionWrapper
 
 
+_PHYSICAL_EDUCATION = "Фізичне виховання"
+_SUBJECT_SHORTCUTS = {
+    **dict.fromkeys(("фв", "фіз", "фізра", "фізкультура", "фізвиховання"), _PHYSICAL_EDUCATION),
+    "пві": "Програмування в Інтернет",
+}
+
+
 def current_period():
     today = schedule.get_current_date()
     start = today.year if today.month >= 9 else today.year - 1
@@ -29,6 +36,7 @@ def period_value(value):
 
 def catalog(subjects, schedule_data=None, *, conn=None):
     names = {subject_name(s['name']): s['name'] for s in subjects}
+    names.setdefault(subject_name(_PHYSICAL_EDUCATION), _PHYSICAL_EDUCATION)
     data = schedule.read_schedule(conn) if schedule_data is None else schedule_data
     def walk(value):
         if isinstance(value, dict):
@@ -43,6 +51,51 @@ def catalog(subjects, schedule_data=None, *, conn=None):
                 walk(child)
     walk(data)
     return [{'key': key, 'name': name, **layout(name)} for key, name in sorted(names.items(), key=lambda item: users.ukrainian_name_key(item[1]))]
+
+
+def match_subjects(subjects, label):
+    key = subject_name(label)
+    if not key:
+        return []
+    key = subject_name(_SUBJECT_SHORTCUTS.get(key, key))
+    exact = [subject for subject in subjects if subject["key"] == key]
+    return exact or [subject for subject in subjects if subject["key"].startswith(key)]
+
+
+def submit_grade_series(conn, uid, subject, digits, *, period=None):
+    """Write one grade per configured journal cell in table order."""
+    actor = users.get_user(conn, uid)
+    if not actor:
+        raise PermissionDenied("Спочатку зареєструйтесь у боті.")
+    if not re.fullmatch(r"[0-5]+", digits):
+        raise BotError("Запишіть оцінки одним рядком цифр від 0 до 5.")
+    period = period_value(period or current_period())
+    cells = [
+        (work["number"], part)
+        for work in sorted(subject["labs"], key=lambda row: (row["attestation"], row["number"]))
+        for part in range(1, work["parts"] + 1)
+    ]
+    if len(digits) > len(cells):
+        raise BotError(f"У цьому предметі {len(cells)} клітинок. Надішліть не більше {len(cells)} оцінок.")
+
+    with transaction(conn):
+        from queue_bot.services.queues import _require_roster_user
+        _require_roster_user(conn, actor["id"])
+        for (number, part), digit in zip(cells, digits):
+            row = conn.execute(
+                """INSERT INTO journal_cells
+                   (id, user_id, period, subject_key, subject_name, kind, number, part, grade)
+                   VALUES (?, ?, ?, ?, ?, 'lab', ?, ?, ?)
+                   ON CONFLICT (user_id, period, subject_key, kind, number, part) DO UPDATE
+                   SET grade = excluded.grade, subject_name = excluded.subject_name,
+                       revision = journal_cells.revision + 1, updated_at = CURRENT_TIMESTAMP
+                   WHERE journal_cells.grade <> excluded.grade
+                   RETURNING id""",
+                (uuid.uuid4().hex, actor["id"], period, subject["key"], subject["name"], number, part, int(digit)),
+            ).fetchone()
+            if row:
+                _audit(conn, row["id"], uid, "submit")
+    return period
 
 
 def _number(value):

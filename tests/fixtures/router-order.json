@@ -30,6 +30,7 @@
       "open_mini_app",
       "open_journal",
       "open_journal",
+      "journal_grade_series",
       "journal_grade",
       "journal_due_date"
     ],

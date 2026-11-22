@@ -2,6 +2,7 @@
 
 import asyncio
 import html
+import re
 from datetime import date, datetime
 from uuid import uuid4
 
@@ -78,6 +79,8 @@ async def _render(event, state, data, context, screen="subjects", *args, note=No
 
     if screen == "subjects":
         lines.append(f"\n<b>{html.escape(student['name']) if student and data['group'] else 'Мої оцінки'}</b>\nОберіть предмет.")
+        if not data["group"]:
+            lines.append("Швидке введення: <code>Архітектура 4545544</code>. Кожна цифра — окрема оцінка.")
         paged([button(s["name"], "subject", s["key"]) for s in data["subjects"]], args[0] if args else 0, "subjects")
         rows.append([button("Навчальний період", "periods")])
         if context["admin"]:
@@ -196,6 +199,34 @@ async def open_journal(message, state, conn, subjects):
     data = _view(conn, message.from_user.id, subjects, context)
     await state.clear()
     await _render(message, state, data, context)
+
+
+async def grade_series_input(message, conn, subjects, raw_state=None):
+    text = message.text or ""
+    match = re.fullmatch(r"\s*([^\W\d_][^\r\n]*?)\s+([0-9]+)\s*", text)
+    if not match:
+        return False
+    label, digits = match.groups()
+    matches = journal.match_subjects(journal.catalog(subjects, conn=conn), label)
+    if not matches and raw_state != JournalFlow.browsing.state:
+        return False
+    return {"journal_subjects": matches, "journal_digits": digits}
+
+
+async def journal_grade_series(message, state, conn, journal_subjects, journal_digits):
+    if not journal_subjects:
+        raise BotError("Предмет не знайдено. Вкажіть повну назву або відоме скорочення.")
+    if len(journal_subjects) > 1:
+        options = ", ".join(subject["name"] for subject in journal_subjects[:5])
+        raise BotError(f"Вкажіть точнішу назву. Підходять: {options}.")
+    subject, = journal_subjects
+    mode = await state.get_state()
+    context = (await state.get_data()).get("journal", {}) if mode and mode.startswith("JournalFlow:") else {}
+    period = journal.submit_grade_series(conn, message.from_user.id, subject, journal_digits, period=context.get("period"))
+    await message.answer(
+        f"✅ <b>Ваші оцінки збережено</b>\n{html.escape(subject['name'])} · {_period_label(period)}\n"
+        f"Перші {len(journal_digits)} клітинок: {' · '.join(journal_digits)}."
+    )
 
 
 async def journal_action(callback, state, conn, subjects):
