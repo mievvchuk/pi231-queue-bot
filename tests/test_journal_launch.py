@@ -69,3 +69,38 @@ async def test_admin_edits_group_grade_with_revision_and_preserves_existing_note
     await choose(app, '5', uid=100)
     record, = journal.view(conn, 1, app[0]['subjects'])['records']
     assert (record['user_id'], record['grade'], record['note'], record['revision']) == (student['id'], 5, 'Нотатка', 1)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("admin_mode", [False, True])
+async def test_journal_image_is_sent_with_only_the_selected_students_grades(app, conn, monkeypatch, admin_mode):
+    from io import BytesIO
+
+    from PIL import Image
+
+    from queue_bot.services import journal_image
+
+    uid = 100 if admin_mode else 1
+    for student, grade in ((1, 4.25), (100, 5)):
+        journal.submit(conn, student, app[0]["subjects"], {
+            "subject_key": subject_name("Предмет"), "kind": "lab", "number": 1, "part": 1, "grade": grade,
+        })
+    monkeypatch.setattr(config, "JOURNAL_IMAGE_API_KEY", "")
+    original = journal_image.render_journal
+    exported = []
+
+    def render(subject, student, period, records, averages, artwork):
+        exported.append((student["name"], [r["grade"] for r in records]))
+        return original(subject, student, period, records, averages, artwork)
+
+    monkeypatch.setattr(journal_image, "render_journal", render)
+    await send(app, "Електронний журнал", uid=uid)
+    if admin_mode:
+        await choose(app, "Журнал групи", uid=uid)
+        await choose(app, "Петренко Іван", uid=uid)
+    await choose(app, "Предмет", uid=uid)
+    await choose(app, "🖼 Зображення оцінок", uid=uid)
+    assert exported == [("Петренко Іван", [4.25])]
+    photo = app[1].call_args.args[0].photo
+    with Image.open(BytesIO(photo.data)) as png:
+        assert png.format == "PNG"

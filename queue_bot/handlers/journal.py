@@ -1,11 +1,12 @@
 """Private Telegram screens backed by the same grade records as the Mini App."""
 
+import asyncio
 import html
 from datetime import date, datetime
 from uuid import uuid4
 
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram.types import BufferedInputFile, InlineKeyboardButton, InlineKeyboardMarkup
 
 from queue_bot.handlers.common import journal_web_app, show
 from queue_bot.services import admins, journal
@@ -113,6 +114,7 @@ async def _render(event, state, data, context, screen="subjects", *args, note=No
             configured = {("lab", work["number"], p) for work in subject["labs"] for p in range(1, work["parts"] + 1)}
             if records.keys() - configured:
                 rows.append([button("Попередні записи", "works", 0)])
+            rows.append([button("🖼 Зображення оцінок", "image")])
             rows.append([button("‹ До предметів", "subjects")])
 
         elif screen == "works":
@@ -220,10 +222,35 @@ async def journal_action(callback, state, conn, subjects):
         args = []
     data = _view(conn, uid, subjects, context, group=action == "students")
     context["period"] = data["period"]
+    if action == "image":
+        await _send_image(callback, conn, data, context)
+        return
     if action in ("student", "personal", "period"):
         await _render(callback, state, data, context)
     else:
         await _render(callback, state, data, context, action, *args)
+
+
+async def _send_image(callback, conn, data, context):
+    from queue_bot.services import journal_image
+
+    target = context.get("student") or data["viewer_id"]
+    student = next((row for row in data["students"] if row["id"] == target), None)
+    subject = next((row for row in data["subjects"] if row["key"] == context.get("subject")), None)
+    if not student or not subject:
+        raise BotError("Оберіть предмет і студента ще раз.")
+
+    records = [r for r in data["records"] if r["user_id"] == target and r["subject_key"] == subject["key"]]
+    averages = data["averages"].get(str(target), {}).get(subject["key"], {})
+    artwork = await journal_image.get_artwork()
+    images = await asyncio.to_thread(journal_image.render_journal, subject, student, data["period"], records, averages, artwork)
+    if data["group"]:
+        admins.require_admin(conn, callback.from_user.id)
+    for index, content in enumerate(images, 1):
+        await callback.message.answer_photo(
+            BufferedInputFile(content, filename=f"journal-{index}.png"),
+            caption=f"📘 {html.escape(subject['name'])} · {index}/{len(images)}" if len(images) > 1 else None,
+        )
 
 
 async def _save_grade(event, state, conn, subjects, context, value):
