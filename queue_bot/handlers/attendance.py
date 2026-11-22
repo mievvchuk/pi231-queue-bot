@@ -68,7 +68,9 @@ def screen_keyboard(conn, sid, uid):
         if data and data['own']:
             rows.extend(keyboard(data['own'], session_id=sid).inline_keyboard)
         elif entry:
-            rows.append([InlineKeyboardButton(text='Позначити здані роботи', callback_data=f'queue:{sid}:complete')])
+            label = ('Завершити консультацію' if session['queue_type'] == 'consultation' and not entry['selected_labs']
+                     else 'Позначити здані роботи')
+            rows.append([InlineKeyboardButton(text=label, callback_data=f'queue:{sid}:complete')])
         elif session['status'] != 'archived':
             rows.append([InlineKeyboardButton(text='Стати в чергу', callback_data=f'queue:{sid}:join')])
     rows.append([InlineKeyboardButton(text='Інші дії', callback_data=f'queue:{sid}:more'),

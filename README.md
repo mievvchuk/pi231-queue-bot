@@ -38,7 +38,7 @@ The Mini App uses the **same application service and database** as the Telegram 
 
 A queue session belongs to a subject, teacher, and queue type. Its lifecycle is **open → closed → archived**. Only one unfinished session is allowed for a given subject/teacher/type combination. Active queue positions are maintained consistently; completed, withdrawn, removed, and transferred records remain available in history.
 
-For subjects with a lab catalog, students choose lab numbers and an individual time estimate before their place is confirmed. Consultation queues and subjects without a lab catalog do not require these fields. A single selected lab can be completed immediately; with multiple labs, students can report partial completion and retain their place for the remainder. Old or stale action buttons must not modify a newer entry.
+For subjects with a lab catalog, students choose lab numbers and an individual time estimate before their place is confirmed. The same lab and time selection is available in consultation queues for those subjects. Subjects without a lab catalog skip these fields. A single selected lab can be completed immediately; with multiple labs, students can report partial completion and retain their place for the remainder. Old or stale action buttons must not modify a newer entry.
 
 Admin actions are logged. Queue updates, swaps, transfers, and archival are handled in database transactions. Swap requests expire after **10 minutes** if unanswered.
 

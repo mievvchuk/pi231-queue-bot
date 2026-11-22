@@ -38,7 +38,7 @@ def load_catalog(path):
 
 
 def labs_for_session(session):
-    if not session or ('queue_type' in session.keys() and session['queue_type'] == 'consultation'):
+    if not session:
         return ()
     subject = load_catalog(config.LAB_CATALOG_PATH).get(str(session['subject_id']))
     return tuple(subject['labs']) if subject else ()

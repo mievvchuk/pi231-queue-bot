@@ -13,7 +13,8 @@ def test_exact_catalogue_and_summed_limits():
         assert len(labs_for_session(session)) == count
         assert selection_limit(session, list(range(1, count + 1))) == expected
     assert selection_limit({'subject_id': 5}, [1, 2]) == 35
-    for session in [{'subject_id': 6}, {'subject_id': 7}, {'subject_id': 1, 'queue_type': 'consultation'}]:
+    assert selection_limit({'subject_id': 1, 'queue_type': 'consultation'}, [1, 2]) == 80
+    for session in [{'subject_id': 6}, {'subject_id': 7}, {'subject_id': 6, 'queue_type': 'consultation'}]:
         assert labs_for_session(session) == ()
 
 

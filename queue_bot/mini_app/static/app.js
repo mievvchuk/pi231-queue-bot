@@ -758,12 +758,8 @@
           el(
             "p",
             { class: "teacher" },
-            consultation(q)
-              ? "Консультація"
-              : labText({
-                  labs: q.my_labs,
-                  planned_minutes: q.my_planned_minutes,
-                }) || q.teacher,
+            labText({labs: q.my_labs, planned_minutes: q.my_planned_minutes}) ||
+              (consultation(q) ? "Консультація" : q.teacher),
           ),
           small(q.count + " у черзі"),
           q.pair_plan ? small(pairPlanText(q)) : null,
@@ -833,13 +829,13 @@
       primary ? btn([
         el('div',{class:'hero-top'},el('span',{class:'eyebrow hero-eyebrow'},icon('queues'),'ТВІЙ ЗАПИС'),primary.status==='archived'?el('span',{class:'status archived'},'Архівна черга'):null),
         el('h2',{},primary.subject),
-        el('div',{class:'hero-position'},el('strong',{},primary.my_position),el('div',{},small('місце в черзі'),el('p',{},consultation(primary)?'Консультація':labText({labs:primary.my_labs,planned_minutes:primary.my_planned_minutes}) || primary.teacher))),
+        el('div',{class:'hero-position'},el('strong',{},primary.my_position),el('div',{},small('місце в черзі'),el('p',{},labText({labs:primary.my_labs,planned_minutes:primary.my_planned_minutes}) || (consultation(primary)?'Консультація':primary.teacher)))),
         el('span',{class:'hero-open'},icon('arrow'),'Відкрити чергу'),
       ],()=>openQueue(primary.id),'card home-queue-hero') : el('section',{class:'card home-empty'},el('h2',{},'Займи своє місце'),small('Обери предмет і запишись, коли готовий до здачі.'),btn('Знайти чергу',()=>navigate('queues'),'button primary')),
       own.length>1 ? sectionTitle('Інші записи',String(own.length-1)) : null,
       own.length>1 ? el('div',{class:'compact-records'},own.slice(1).map(q=>btn([
         el('span',{class:'subject-icon'},window.PI231SubjectIcon?window.PI231SubjectIcon(q.subject):icon('queues')),
-        el('div',{class:'subject-copy'},el('strong',{},q.subject),small(consultation(q)?'Консультація':labText({labs:q.my_labs,planned_minutes:q.my_planned_minutes}) || q.teacher)),
+        el('div',{class:'subject-copy'},el('strong',{},q.subject),small(labText({labs:q.my_labs,planned_minutes:q.my_planned_minutes}) || (consultation(q)?'Консультація':q.teacher))),
         el('strong',{class:'compact-position'},'#'+q.my_position),icon('arrow'),
       ],()=>openQueue(q.id),'compact-record'))) : null,
     );
@@ -944,11 +940,12 @@
       controls = el("div", { class: "queue-tools" }),
       otherActions = el('div',{class:'action-stack'}),
       dock = el('div',{class:'queue-dock'});
+    const canMarkLabs = q.labs.length && (!consultation(q) || own?.labs?.length);
     if (own) {
       const resultActions = !q.lesson || q.lesson.own?.state === 'serving' ? dock : otherActions;
       resultActions.append(
         btn(
-          [icon('check'), q.labs.length
+          [icon('check'), canMarkLabs
             ? "Здав" + (own.labs?.length > 1 ? " лабораторні" : "")
             : "Завершити запис"],
           () => {
@@ -1061,7 +1058,7 @@
       }
       controls.append(summary);
     }
-    if (own && q.labs.length)
+    if (own && canMarkLabs)
       (!q.lesson || q.lesson.own?.state === 'serving' ? dock : otherActions).append(btn('Завершити підхід з рештою робіт',()=>confirmSheet(
         'Завершити підхід?', 'Решта робіт збережеться, а ви перейдете в кінець черги.',
         ()=>mutate('/queues/'+q.id+'/finish-turn',reference(own))),'button secondary'));
@@ -1166,7 +1163,7 @@
               el(
                 "p",
                 {},
-                consultation(q) ? 'Консультація' : labText(own) || 'Лабораторні не вказані',
+                labText(own) || (consultation(q) ? 'Консультація' : 'Лабораторні не вказані'),
               ),
             ),
           )

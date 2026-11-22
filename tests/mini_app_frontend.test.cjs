@@ -645,3 +645,14 @@ for (const design of [false, true]) test('remaining subject pairs appear in queu
   queue.pair_plan = null;
   assert.doesNotMatch(app.queuePage().textContent, /Залишилось пар/);
 });
+
+for (const design of [false, true]) test('consultation queues display selected labs and planned time, design='+design, () => {
+  const {app} = setup(design);
+  app.S.queue = {id:1,subject:'КПЗ',teacher:'Щуцький',type:'consultation',status:'open',count:1,my_position:1,
+    labs:[{number:1,max_minutes:40}],entries:[{id:1,name:'Студент',is_me:true,position:1,labs:[1],planned_minutes:30}]};
+  const text = app.queuePage().textContent;
+  assert.match(text, /№1/);
+  assert.match(text, /30 хв/);
+  assert.match(text, /Здав/);
+  assert.match(text, /Лабораторні та час/);
+});

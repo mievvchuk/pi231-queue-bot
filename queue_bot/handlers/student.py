@@ -692,7 +692,10 @@ async def mark_passed(message: Message, state: FSMContext, conn, subjects):
     session_id = await ensure_session_id(message, state)
     if not session_id:
         return
-    await begin_completion(message, state, conn, session_id, subjects=subjects)
+    await begin_completion(
+        message, state, conn, session_id, subjects=subjects,
+        end_consultation=message.text == '✅ Завершити консультацію',
+    )
 
 
 @router.message(F.text.in_({"❌ Не здав", "не здав", "не здала"}), not_admin_state_filter)

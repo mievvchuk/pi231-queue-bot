@@ -223,9 +223,14 @@ async def student_action(request):
         return web.json_response({'message': f'Ви записалися. Ваше місце: {place}.', 'position': place, 'queue_id': sid})
     session, entry = current_entry(request, data)
     if action == 'finish-turn':
-        queues.finish_own_entry(conn, uid, sid, passed=not bool(lab_catalog.labs_for_session(session)))
+        has_work = bool(lab_catalog.labs_for_session(session))
+        if session['queue_type'] == 'consultation':
+            has_work = has_work and bool(lab_catalog.read_numbers(entry['selected_labs']))
+        queues.finish_own_entry(conn, uid, sid, passed=not has_work)
         await notify_next(request, sid, entry['position'])
-        return web.json_response({'message': 'Підхід завершено. Решта робіт збережена, ви в кінці черги.'})
+        if has_work:
+            return web.json_response({'message': 'Підхід завершено. Решта робіт збережена, ви в кінці черги.'})
+        return web.json_response({'message': 'Запис завершено.'})
     if action == 'not-passed':
         if session['queue_type'] == 'consultation' or 'Курсова' in names(ctx['subjects'], session)[0]:
             raise BotError('Для консультації скористайтеся завершенням запису.')

@@ -81,7 +81,7 @@ function detail(id){const q=queues.find(q=>q.id===id);const own=id===2;
  await page.getByRole('button',{name:'Готово',exact:true}).click();
  await page.locator('.bottom-nav button[data-page="queues"]').click();await page.locator('.make-queues').waitFor();await settle();
  await page.getByRole('textbox',{name:'Знайти предмет або викладача'}).fill('Курсова');await page.locator('.make-queues .queue-row').click();await page.locator('.make-detail').waitFor();await settle();
- await page.getByRole('button',{name:'Переглянути місця',exact:true}).click();assert.equal(await page.locator('.wizard-progress > div').count(),2,'consultation must skip labs/time');
+ await page.getByRole('button',{name:'Переглянути місця',exact:true}).click();assert.equal(await page.locator('.wizard-progress > div').count(),2,'coursework without a lab catalog must skip labs/time');
  assert.match(await page.locator('.wizard-panel').textContent(),/Обери вільне місце/);await page.getByRole('button',{name:'Скасувати',exact:true}).click();
  await page.locator('.bottom-nav button[data-page="schedule"]').click();await page.locator('.timeline .lesson-row').first().waitFor();await settle();assert.equal(await page.locator('.timeline .lesson-row').count(),5);await noOverflow('schedule');
  assert.equal(await page.locator('.timeline .lesson-empty').first().evaluate(node=>getComputedStyle(node).borderTopStyle),'none','empty schedule row still has an outer border');

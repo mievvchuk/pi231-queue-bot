@@ -1,4 +1,4 @@
-"""Confirm actual laboratory identities; consultations finish without lab questions."""
+"""Confirm actual laboratory identities when a queue entry has selected works."""
 from aiogram.fsm.state import State, StatesGroup
 
 from queue_bot.handlers.common import notify_next_students, show
@@ -12,7 +12,7 @@ class CompletionFlow(StatesGroup):
     count = State()
 
 
-async def begin_completion(message, state, conn, session_id, *, telegram_id=None, subjects=None):
+async def begin_completion(message, state, conn, session_id, *, telegram_id=None, subjects=None, end_consultation=False):
     from queue_bot.handlers.student import open_queue_screen
     uid = telegram_id if telegram_id is not None else message.from_user.id
     require_available(conn, uid)
@@ -24,13 +24,16 @@ async def begin_completion(message, state, conn, session_id, *, telegram_id=None
         raise BotError('Ви не записані в цю чергу.')
     labs_available = bool(lab_catalog.labs_for_session(session))
     pending = lab_catalog.read_numbers(entry['selected_labs']) if labs_available else None
-    if not pending:
+    consultation = session['queue_type'] == 'consultation' or session['subject_id'] == 7
+    if end_consultation and not consultation:
+        raise BotError('Ця дія доступна лише для консультації.')
+    if not pending or end_consultation:
         old_position = entry['position']
         queues.finish_own_entry(conn, uid, session_id, passed=True)
         await state.clear()
         await state.update_data(session_id=session_id)
         await notify_next_students(message.bot, conn, subjects, session_id, removed_position=old_position)
-        note = '✅ Здачу позначено. Вас знято з черги.' if labs_available else '✅ Консультацію / запис завершено.'
+        note = '✅ Здачу позначено. Вас знято з черги.' if labs_available and not consultation else '✅ Консультацію / запис завершено.'
         await open_queue_screen(message, conn, subjects, session_id, note=note, telegram_id=uid)
         return
     await state.update_data(session_id=session_id, passed_entry_id=entry['id'], passed_revision=entry['entry_revision'])

@@ -163,14 +163,14 @@ async def test_full_first_ten_also_offer_later_free_positions(client, conn, make
 
 
 @pytest.mark.asyncio
-async def test_consultation_and_legacy_completion_do_not_ask_labs(client, conn):
-    sid = queues.create_session(conn, 100, 7, 1)
+async def test_consultation_without_catalog_and_legacy_completion_do_not_ask_labs(client, conn):
+    sid = queues.create_session(conn, 100, 7, 1, queue_type='consultation')
     assert (await client.post(f'/api/miniapp/queues/{sid}/join', headers=headers(), json={})).status == 200
     row = queues._own_active_entry(conn, 1, sid)
     assert row['selected_labs'] is None
     assert (await client.post(f'/api/miniapp/queues/{sid}/complete', headers=headers(),
                              json={'entry_id': row['id'], 'revision': row['entry_revision']})).status == 200
-    sid = queues.create_session(conn, 100, 1, 1)
+    sid = queues.create_session(conn, 100, 1, 1, queue_type='consultation')
     queues.join_queue(conn, 1, sid)
     row = queues._own_active_entry(conn, 1, sid)
     assert (await client.post(f'/api/miniapp/queues/{sid}/complete', headers=headers(),
@@ -394,3 +394,25 @@ async def test_queue_list_and_detail_include_only_public_pair_plan_fields(client
     assert by_id == {lesson: expected, consultation: None}
     detail = await (await client.get(f'/api/miniapp/queues/{lesson}', headers=headers())).json()
     assert detail['pair_plan'] == expected
+
+
+@pytest.mark.asyncio
+async def test_consultation_can_select_edit_and_mark_labs(client, conn):
+    sid = queues.create_session(conn, 100, 1, 1, queue_type='consultation')
+    path = f'/api/miniapp/queues/{sid}'
+    view = await (await client.get(path, headers=headers())).json()
+    assert [lab['number'] for lab in view['labs']][:3] == [1, 2, 3]
+    assert (await client.post(path + '/join', headers=headers(), json={'labs': [1, 2], 'minutes': 81})).status == 400
+    assert (await client.post(path + '/join', headers=headers(), json={'labs': [1, 2], 'minutes': 30})).status == 200
+
+    entry = (await (await client.get(path, headers=headers())).json())['entries'][0]
+    assert (entry['labs'], entry['planned_minutes']) == ([1, 2], 30)
+    reference = {'entry_id': entry['id'], 'revision': entry['entry_revision']}
+    assert (await client.post(path + '/edit', headers=headers(),
+                              json={**reference, 'labs': [2, 3], 'minutes': 35})).status == 200
+
+    entry = (await (await client.get(path, headers=headers())).json())['entries'][0]
+    reference = {'entry_id': entry['id'], 'revision': entry['entry_revision']}
+    assert (await client.post(path + '/complete', headers=headers(), json={**reference, 'labs': [2]})).status == 200
+    entry = (await (await client.get(path, headers=headers())).json())['entries'][0]
+    assert entry['labs'] == [3] and entry['passed_labs'] == [2] and entry['position'] == 1

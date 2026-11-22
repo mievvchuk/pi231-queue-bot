@@ -52,7 +52,9 @@ async def click(app, prefix, action, *, nonce=None):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('initial,position', [(['📝 Стати в кінець'], 1), (['🔢 Обрати місце', '3'], 3)])
-async def test_numbered_signup_asks_time_bounded_by_selected_labs(conn, app, initial, position):
+@pytest.mark.parametrize('queue_type', ['lesson', 'consultation'])
+async def test_numbered_signup_asks_time_bounded_by_selected_labs(conn, app, initial, position, queue_type):
+    conn.execute('UPDATE queue_sessions SET queue_type = ? WHERE id = ?', (queue_type, app[2]))
     await send(app, *initial, '1, 2')
     assert queues.get_user_position(conn, 1, app[2]) is None
     await send(app, '81', '4')
@@ -84,8 +86,9 @@ async def test_inline_multiselect_and_stale_buttons_do_not_mutate_new_draft(conn
 
 
 @pytest.mark.asyncio
-async def test_partial_numbered_completion_keeps_place_and_updates_limit(conn, app):
-    conn.execute('UPDATE queue_sessions SET subject_id = 5 WHERE id = ?', (app[2],))
+@pytest.mark.parametrize('queue_type', ['lesson', 'consultation'])
+async def test_partial_numbered_completion_keeps_place_and_updates_limit(conn, app, queue_type):
+    conn.execute('UPDATE queue_sessions SET subject_id = 5, queue_type = ? WHERE id = ?', (queue_type, app[2]))
     await send(app, '📝 Стати в кінець', '1,2', '35', '✅ Здав')
     assert queues.get_user_position(conn, 1, app[2]) == 1
     await click(app, 'labdone', 't:1')
@@ -99,8 +102,8 @@ async def test_partial_numbered_completion_keeps_place_and_updates_limit(conn, a
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('subject,qtype', [(7, 'lesson'), (7, 'consultation'), (6, 'lesson'), (1, 'consultation'), (9, 'lesson')])
-async def test_consultation_and_excluded_subjects_skip_labs_and_time(conn, app, subject, qtype):
+@pytest.mark.parametrize('subject,qtype', [(7, 'lesson'), (7, 'consultation'), (6, 'lesson'), (6, 'consultation'), (9, 'lesson')])
+async def test_subjects_without_catalog_skip_labs_and_time(conn, app, subject, qtype):
     conn.execute('UPDATE queue_sessions SET subject_id = ?, queue_type = ? WHERE id = ?', (subject, qtype, app[2]))
     await send(app, '📝 Стати в кінець')
     row = queues.get_entries(conn, app[2])[0]
@@ -109,7 +112,7 @@ async def test_consultation_and_excluded_subjects_skip_labs_and_time(conn, app, 
     method = app[1].call_args[0][0]
     assert 'ліміт' not in method.text and 'лаб.' not in method.text
     assert all('лаборатор' not in b.text and 'Час здачі' not in b.text for r in method.reply_markup.inline_keyboard for b in r)
-    await send(app, '✅ Здав')
+    await send(app, '✅ Завершити консультацію' if qtype == 'consultation' or subject == 7 else '✅ Здав')
     assert queues.get_user_position(conn, 1, app[2]) is None
 
 

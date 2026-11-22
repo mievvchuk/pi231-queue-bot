@@ -12,7 +12,7 @@ The appearance dialog offers light, dark and system themes, six independent acce
 
 ## Selecting a queue position
 
-Detailed queue responses include `join_slots` (`number`, `state`: `free` / `busy` / `yours`) and `append_position`. These express the existing domain rules, not a newly imposed queue capacity: existing vacancies can be taken at any position; new selectable positions are in the first ten; users can also append to the tail. Consultation sessions skip laboratory and time steps.
+Detailed queue responses include `join_slots` (`number`, `state`: `free` / `busy` / `yours`) and `append_position`. These express the existing domain rules, not a newly imposed queue capacity: existing vacancies can be taken at any position; new selectable positions are in the first ten; users can also append to the tail. Consultation sessions for subjects with a lab catalog include the laboratory and time steps.
 
 The wizard keeps selected labs and minutes when a conflicting join is rejected. It reloads availability, clears an unavailable selection and lets the user choose again. The existing `join_queue` transaction remains authoritative. A success dialog appears only after the server confirms the position. Lab edits, partial completion, bans, queue notifications, Telegram buttons and schedule data retain their existing services.
 
