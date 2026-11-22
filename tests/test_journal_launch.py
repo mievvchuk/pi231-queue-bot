@@ -166,3 +166,66 @@ async def test_coursework_shows_one_grade_menu_after_its_photo(app, conn):
     assert (record["subject_key"], record["grade"], record["number"], record["part"]) == (
         subject_name(title), 5, 1, 1,
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failed_photos", [1, 2])
+async def test_journal_retries_photo_and_keeps_grade_menu_available(app, conn, monkeypatch, failed_photos):
+    from aiogram.exceptions import TelegramNetworkError
+    from aiogram.methods import SendMessage, SendPhoto
+
+    from queue_bot.handlers import journal as handler
+
+    monkeypatch.setattr(handler, "_SEND_RETRY_DELAY", 0)
+    await send(app, "Електронний журнал", uid=1)
+    attempts = []
+    delivered = []
+
+    async def transport(method, **kwargs):
+        if isinstance(method, SendPhoto):
+            attempts.append(method.photo.data)
+            if len(attempts) <= failed_photos:
+                raise TelegramNetworkError(method=method, message="Server disconnected")
+        if isinstance(method, (SendMessage, SendPhoto)):
+            delivered.append(method)
+        return True
+
+    app[1].side_effect = transport
+    await choose(app, "Предмет")
+    assert len(attempts) == 2 and attempts[0] == attempts[1]
+    if failed_photos == 1:
+        assert isinstance(delivered[0], SendPhoto)
+    menu = delivered[-1]
+    assert isinstance(menu, SendMessage)
+    assert ("Telegram тимчасово" in menu.text) == (failed_photos == 2)
+    assert "Зображення оцінок" in str(menu.reply_markup)
+    await choose(app, "Додати оцінку · атестація 1")
+    await choose(app, "Оцінка · —")
+    await choose(app, "4")
+    row, = journal.view(conn, 1, app[0]["subjects"])["records"]
+    assert row["grade"] == 4
+
+
+@pytest.mark.asyncio
+async def test_journal_keeps_original_subject_buttons_when_menu_delivery_fails(app, monkeypatch):
+    from aiogram.exceptions import TelegramNetworkError
+    from aiogram.methods import SendMessage
+
+    from queue_bot.handlers import journal as handler
+    from tests.test_navigation_bans import data
+
+    monkeypatch.setattr(handler, "_SEND_RETRY_DELAY", 0)
+    await send(app, "Електронний журнал", uid=1)
+    before = (await data(app, uid=1))["journal"]
+    failures = []
+
+    async def transport(method, **kwargs):
+        if isinstance(method, SendMessage) and method.reply_markup:
+            failures.append(method)
+            raise TelegramNetworkError(method=method, message="Server disconnected")
+        return True
+
+    app[1].side_effect = transport
+    await choose(app, "Предмет")
+    assert len(failures) == 2
+    assert (await data(app, uid=1))["journal"] == before

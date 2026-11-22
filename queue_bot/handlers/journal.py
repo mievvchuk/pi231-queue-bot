@@ -2,16 +2,31 @@
 
 import asyncio
 import html
+import logging
 import re
 from datetime import date, datetime
 from uuid import uuid4
 
+from aiogram.exceptions import TelegramNetworkError, TelegramServerError
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import BufferedInputFile, InlineKeyboardButton, InlineKeyboardMarkup
 
 from queue_bot.handlers.common import journal_web_app, show
 from queue_bot.services import admins, journal
 from queue_bot.services.errors import BotError
+
+
+log = logging.getLogger(__name__)
+_TEMPORARY_SEND_ERRORS = (TelegramNetworkError, TelegramServerError)
+_SEND_RETRY_DELAY = 0.75
+
+
+async def _retry_send(send, *args, **kwargs):
+    try:
+        return await send(*args, **kwargs)
+    except _TEMPORARY_SEND_ERRORS:
+        await asyncio.sleep(_SEND_RETRY_DELAY)
+        return await send(*args, **kwargs)
 
 
 class JournalFlow(StatesGroup):
@@ -49,6 +64,7 @@ def _work_button(work, records, button, attestation):
 
 
 async def _render(event, state, data, context, screen="subjects", *args, note=None):
+    context = context.copy()
     token = uuid4().hex[:10]
     actions = []
     rows = []
@@ -190,13 +206,22 @@ async def _render(event, state, data, context, screen="subjects", *args, note=No
     if note:
         lines.append(f"\n{note}")
     context.update(token=token, actions=actions)
+    previous_flow = await state.get_state()
+    previous_context = (await state.get_data()).get("journal")
     await state.set_state(flow)
     await state.update_data(journal=context)
     markup = InlineKeyboardMarkup(inline_keyboard=rows)
-    if hasattr(event, "message"):
-        await show(event, "\n".join(lines), markup)
-    else:
-        await event.answer("\n".join(lines), reply_markup=markup)
+    try:
+        if hasattr(event, "message"):
+            await _retry_send(show, event, "\n".join(lines), markup)
+        else:
+            await _retry_send(event.answer, "\n".join(lines), reply_markup=markup)
+    except _TEMPORARY_SEND_ERRORS:
+        current_context = (await state.get_data()).get("journal")
+        if current_context and current_context["token"] == token:
+            await state.set_state(previous_flow)
+            await state.update_data(journal=previous_context)
+        raise
 
 
 def _view(conn, uid, subjects, context, *, group=False):
@@ -249,6 +274,7 @@ async def journal_action(callback, state, conn, subjects):
     if not 0 <= index < len(context["actions"]):
         raise BotError("Ця кнопка застаріла.")
     action, *args = context["actions"][index]
+    context = context.copy()
     uid = callback.from_user.id
     if action == "grade":
         await _save_grade(callback, state, conn, subjects, context, args[0])
@@ -266,9 +292,16 @@ async def journal_action(callback, state, conn, subjects):
     data = _view(conn, uid, subjects, context, group=action == "students")
     context["period"] = data["period"]
     if action == "image" or selecting_subject:
-        await _send_image(callback, conn, data, context)
+        note = None
+        try:
+            await _send_image(callback, conn, data, context)
+        except _TEMPORARY_SEND_ERRORS as error:
+            log.warning("Could not deliver a journal image after retry: %s", type(error).__name__)
+            note = "⚠️ Telegram тимчасово не зміг надіслати таблицю. Натисніть «Зображення оцінок», щоб спробувати ще раз."
         if selecting_subject:
-            await _render(callback.message, state, data, context, "subject")
+            await _render(callback.message, state, data, context, "subject", note=note)
+        elif note:
+            await _retry_send(callback.message.answer, note)
         return
     if action in ("student", "personal", "period"):
         await _render(callback, state, data, context)
@@ -296,8 +329,8 @@ async def _send_image(callback, conn, data, context):
     if data["group"]:
         admins.require_admin(conn, callback.from_user.id)
     for index, content in enumerate(images, 1):
-        await callback.message.answer_photo(
-            BufferedInputFile(content, filename=f"journal-{index}.png"),
+        await _retry_send(
+            callback.message.answer_photo, BufferedInputFile(content, filename=f"journal-{index}.png"),
             caption=f"📘 {html.escape(subject['name'])} · {index}/{len(images)}" if len(images) > 1 else None,
         )
 
