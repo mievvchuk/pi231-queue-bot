@@ -1,12 +1,24 @@
 import html
-from datetime import datetime
+from datetime import date, datetime
 from zoneinfo import ZoneInfo
 from queue_bot import config
+from queue_bot.services.errors import BotError
 UK_TZ = ZoneInfo(config.TIMEZONE)
 
 
 def get_today_key() -> str:
     return datetime.now(UK_TZ).strftime("%Y-%m-%d")
+
+
+def validate_publication_date(value: str) -> None:
+    try:
+        day = date.fromisoformat(value)
+        if day.isoformat() != value:
+            raise ValueError
+    except (TypeError, ValueError):
+        raise BotError("Вкажіть коректну дату замін у форматі ДД.ММ.РРРР.") from None
+    if value < get_today_key():
+        raise BotError(f"Дата замін {day:%d.%m.%Y} вже минула. Вкажіть сьогоднішню або майбутню дату.")
 
 
 def get_replacements(conn, date: str | None = None, group_name: str = "ПІ-231", include_archived: bool = False, *, from_date: str | None = None) -> list[dict]:

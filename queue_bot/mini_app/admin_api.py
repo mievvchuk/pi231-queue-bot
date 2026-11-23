@@ -240,6 +240,7 @@ async def manage(request):
             items = [replacement_item(item) for item in items]
             if len({item['date'] for item in items}) != 1:
                 raise BotError('Зберігайте заміни однієї дати разом.')
+            replacements.validate_publication_date(items[0]['date'])
             with transaction(conn):
                 replacements.archive_previous_replacements(conn, items[0]['date'], config.STUDENT_GROUP)
                 for item in items: replacements.save_replacement(conn, item, auto_archive_previous=False)

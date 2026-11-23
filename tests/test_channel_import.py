@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from queue_bot import config
-from queue_bot.services import channel_import as channel, recognition
+from queue_bot.services import channel_import as channel, recognition, replacements
 from queue_bot.services.errors import BotError
 
 
@@ -61,7 +61,8 @@ async def test_empty_requires_explicit_readable_table(conn, monkeypatch, readabl
 @pytest.mark.asyncio
 async def test_confirm_empty_clears_date_once(conn, monkeypatch):
     from queue_bot.handlers.schedule import confirm_channel_import
-    from queue_bot.services import updates, replacements
+    from queue_bot.services import updates
+    monkeypatch.setattr(replacements, 'get_today_key', lambda: '2026-11-09')
     monkeypatch.setattr(config, 'OWNER_ID', 100)
     draft = dict(date='2026-11-09', replacements=[], status='pending', source='https://t.me/replacements_xpk/828')
     channel.set_state(conn, 'channel_draft:replacements_xpk:828', draft)
@@ -119,6 +120,7 @@ async def test_cdn_failure_never_advances_cursor_or_calls_ocr(conn, monkeypatch)
 @pytest.mark.asyncio
 async def test_phone_editor_edits_channel_draft_with_buttons(conn, monkeypatch):
     from queue_bot.handlers import schedule as handlers
+    monkeypatch.setattr(replacements, 'get_today_key', lambda: '2026-11-09')
     monkeypatch.setattr(config, 'OWNER_ID', 100)
     monkeypatch.setattr(handlers.admins, 'is_admin', lambda *_: True)
     item = dict(date='2026-11-11', group_name='ПІ-231', lesson_number=3, new_subject='Системне програм', teacher='Задніпровський', room='232')
@@ -144,6 +146,7 @@ async def test_phone_editor_edits_channel_draft_with_buttons(conn, monkeypatch):
 async def test_edit_confirmed_result_requires_new_approval_and_updates_schedule(conn, monkeypatch):
     from queue_bot.handlers.schedule import confirm_channel_import
     from queue_bot.services import updates, schedule
+    monkeypatch.setattr(replacements, 'get_today_key', lambda: '2026-11-09')
     monkeypatch.setattr(config, 'OWNER_ID', 100)
     key = 'channel_draft:replacements_xpk:828'
     draft = dict(date='2026-11-09', replacements=[], status='confirmed', source='https://t.me/replacements_xpk/828')
@@ -186,7 +189,6 @@ async def test_replacements_menu_shows_empty_date_and_edit_button(conn, monkeypa
     from queue_bot.handlers.schedule import show_replacements
     monkeypatch.setattr(config, 'OWNER_ID', 100)
     monkeypatch.setattr(channel.config, 'REPLACEMENTS_CHANNEL', 'replacements_xpk')
-    from queue_bot.services import replacements
     monkeypatch.setattr(replacements, 'get_today_key', lambda: '2026-11-06')
     channel.set_state(conn, 'channel_draft:replacements_xpk:828', dict(date='2026-11-09', replacements=[], status='confirmed'))
     message = MagicMock(chat=MagicMock(type='private'), from_user=MagicMock(id=100), answer=AsyncMock())
@@ -199,7 +201,8 @@ async def test_replacements_menu_shows_empty_date_and_edit_button(conn, monkeypa
 @pytest.mark.asyncio
 async def test_next_date_confirmation_archives_previous_even_if_new_date_has_no_replacements(conn, monkeypatch):
     from queue_bot.handlers.schedule import confirm_channel_import
-    from queue_bot.services import updates, replacements
+    from queue_bot.services import updates
+    monkeypatch.setattr(replacements, 'get_today_key', lambda: '2026-11-09')
     monkeypatch.setattr(config, 'OWNER_ID', 100)
     replacements.save_replacement(conn, dict(date='2026-11-09', group_name='ПІ-231', lesson_number=1, new_subject='Попередня заміна'))
     channel.set_state(conn, 'channel_draft:replacements_xpk:830', dict(date='2026-11-10', replacements=[], status='pending', source='https://t.me/replacements_xpk/830'))
@@ -360,3 +363,29 @@ async def test_content_errors_from_recognition_are_unreadable_table(conn, monkey
     with pytest.raises(BotError) as raised:
         await recognition.recognize_replacements_from_images([b'a'], conn=conn, allow_empty=True)
     assert not isinstance(raised.value, UnreadableTable)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('date_str, message', [('2020-11-24', '24.11.2020'), ('2026-02-30', 'коректну дату')])
+async def test_channel_confirmation_rejects_bad_dates_without_writing_or_notifying(conn, monkeypatch, date_str, message):
+    from queue_bot.handlers.schedule import confirm_channel_import
+    from queue_bot.services import updates
+
+    monkeypatch.setattr(config, 'OWNER_ID', 100)
+    monkeypatch.setattr(replacements, 'get_today_key', lambda: '2026-11-23')
+    broadcast = AsyncMock()
+    monkeypatch.setattr(updates, 'broadcast_message_to_users', broadcast)
+    key = 'channel_draft:replacements_xpk:828'
+    draft = dict(date=date_str, status='pending', replacements=[], source='https://t.me/replacements_xpk/828')
+    channel.set_state(conn, key, draft)
+    callback = MagicMock(data='ch_yes:828', from_user=MagicMock(id=100), answer=AsyncMock())
+    callback.message.edit_text = AsyncMock()
+
+    await confirm_channel_import(callback, conn)
+
+    assert message in callback.answer.call_args.args[0]
+    assert callback.answer.call_args.kwargs['show_alert']
+    assert channel.get_state(conn, key) == draft
+    assert conn.execute('SELECT COUNT(*) FROM replacements').fetchone()[0] == 0
+    callback.message.edit_text.assert_not_awaited()
+    broadcast.assert_not_awaited()

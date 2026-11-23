@@ -23,6 +23,7 @@ from queue_bot.handlers.common import (
 from queue_bot.services import admins, recognition, replacements, schedule, working_days
 from queue_bot.services.errors import BotError
 from queue_bot.handlers.photo_albums import PhotoAlbums
+from queue_bot.storage.database import transaction
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -345,22 +346,25 @@ async def confirm_recognition(callback: CallbackQuery, state: FSMContext, conn):
         return
 
     token = callback.data.split(":", 1)[1]
-    reps = _PENDING_RECOGNITIONS.pop(token, None)
+    reps = _PENDING_RECOGNITIONS.get(token)
     if not reps:
         await callback.answer("Дані вже збережені або застаріли.", show_alert=True)
         return
 
-    target_date = reps[0].get("date") if reps else None
-    archived_count = 0
-    if target_date:
+    try:
+        for item in reps:
+            replacements.validate_publication_date(item.get("date"))
+    except BotError as err:
+        await callback.answer(str(err), show_alert=True)
+        return
+
+    target_date = reps[0]["date"]
+    with transaction(conn):
         archived_count = replacements.archive_previous_replacements(conn, target_date, group_name=config.STUDENT_GROUP)
+        saved_count = sum(replacements.save_replacement(conn, item, auto_archive_previous=False) for item in reps)
+        admins.log_action(conn, callback.from_user.id, "save_replacements", f"count={saved_count}, date={target_date}, archived={archived_count}")
 
-    saved_count = 0
-    for r in reps:
-        if replacements.save_replacement(conn, r, auto_archive_previous=False):
-            saved_count += 1
-
-    admins.log_action(conn, callback.from_user.id, "save_replacements", f"count={saved_count}, date={target_date}, archived={archived_count}")
+    _PENDING_RECOGNITIONS.pop(token, None)
     await callback.answer("Заміни збережено!")
 
     broadcast_info = ""
@@ -658,6 +662,12 @@ async def set_date_value_handler(callback: CallbackQuery, conn):
         await callback.answer()
         return
 
+    try:
+        replacements.validate_publication_date(date_str)
+    except BotError as err:
+        await callback.answer(str(err), show_alert=True)
+        return
+
     reps[idx]["date"] = date_str
     await callback.answer(f"Дату встановлено: {date_str}!")
     text, kb = render_item_edit_menu(token, idx, reps[idx])
@@ -735,30 +745,36 @@ async def process_field_value_text(message: Message, state: FSMContext, conn):
     token = data.get("token")
     idx = data.get("idx")
     field = data.get("field")
-    await state.clear()
 
     reps = _PENDING_RECOGNITIONS.get(token)
-    if not reps or idx >= len(reps):
+    if not reps or not isinstance(idx, int) or not 0 <= idx < len(reps):
+        await state.clear()
         await message.answer("⚠️ Дані замін застаріли або не знайдені.")
         return
 
-    val = message.text.strip()
+    val = (message.text or "").strip()
     if val.lower() in {"скасувати", "відміна", "/cancel", "cancel"}:
+        await state.clear()
         await message.answer("Редагування скасовано.")
         text, kb = render_item_edit_menu(token, idx, reps[idx])
         await message.answer(text, reply_markup=kb)
         return
 
-    if val == "-":
+    if field == "date":
+        val = normalize_date_input(val)
+        try:
+            replacements.validate_publication_date(val)
+        except BotError as err:
+            await message.answer(f"⚠️ {err}")
+            return
+    elif val == "-":
         val = ""
-    else:
-        if field in ("new_subject", "old_subject"):
-            val = recognition.expand_subject(val)
-        elif field == "teacher":
-            val = recognition.expand_teacher(val)
-        elif field == "date":
-            val = normalize_date_input(val)
+    elif field in ("new_subject", "old_subject"):
+        val = recognition.expand_subject(val)
+    elif field == "teacher":
+        val = recognition.expand_teacher(val)
 
+    await state.clear()
     reps[idx][field] = val
     f_title = FIELD_NAMES_UK.get(field, field)
     await message.answer(f"✅ Поле <b>{f_title}</b> оновлено на: <b>{html.escape(str(val or '—'))}</b>")
@@ -923,7 +939,6 @@ async def save_schedule_pair(message: Message, state: FSMContext, conn):
 @router.callback_query(F.data.startswith('ch_yes:') | F.data.startswith('ch_no:'))
 async def confirm_channel_import(callback: CallbackQuery, conn):
     from queue_bot.services.channel_import import get_state, set_state, format_no_replacements, approval_keyboard
-    from queue_bot.storage.database import transaction
     if callback.from_user.id != config.OWNER_ID or not admins.is_admin(conn, callback.from_user.id):
         await callback.answer('Тільки для власника бота.', show_alert=True)
         return
@@ -946,6 +961,11 @@ async def confirm_channel_import(callback: CallbackQuery, conn):
     edited = draft.pop('edit', None)
     if edited:
         draft.update(edited)
+    try:
+        replacements.validate_publication_date(draft.get('date'))
+    except BotError as err:
+        await callback.answer(str(err), show_alert=True)
+        return
     # No await inside the transaction: concurrent callbacks cannot apply twice.
     with transaction(conn):
         if was_confirmed and previous_date != draft['date']:
@@ -1015,16 +1035,22 @@ async def save_channel_edit(callback: CallbackQuery, conn):
     post_id = callback.data.split(':', 1)[1]
     key = f'channel_draft:{config.REPLACEMENTS_CHANNEL}:{post_id}'
     draft = get_state(conn, key)
-    reps = _PENDING_RECOGNITIONS.pop(f'ch{post_id}', None)
+    reps = _PENDING_RECOGNITIONS.get(f'ch{post_id}')
     if not draft or reps is None:
         await callback.answer('Дані застаріли. Натисніть «✏️ Редагувати» ще раз.', show_alert=True)
         return
     # shortcut: one post is one day; the first pair's date wins if pairs were given different dates.
     day = reps[0]['date'] if reps else (draft.get('edit') or draft)['date']
+    try:
+        replacements.validate_publication_date(day)
+    except BotError as err:
+        await callback.answer(str(err), show_alert=True)
+        return
     for item in reps:
         item.update(date=day, group_name=config.STUDENT_GROUP)
     draft['edit'] = dict(date=day, replacements=reps)
     set_state(conn, key, draft)
+    _PENDING_RECOGNITIONS.pop(f'ch{post_id}', None)
     text = ('\n\n'.join(replacements.format_replacement(r) for r in reps) if reps else format_no_replacements(day))
     await callback.answer()
     await callback.message.edit_text('✏️ <b>Перевірте виправлення перед збереженням:</b>\n\n' + text,

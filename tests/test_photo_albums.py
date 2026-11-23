@@ -149,3 +149,42 @@ async def test_nonadmin_photos_do_not_enter_collector(conn, monkeypatch):
     monkeypatch.setattr(handlers, '_PHOTO_ALBUMS', collector)
     await handlers.handle_photo_replacement(photo(1, actor=999), conn)
     assert not collector.pending
+
+
+@pytest.mark.asyncio
+async def test_bad_photo_date_keeps_batch_editable_and_prevents_partial_publication(conn, monkeypatch):
+    from queue_bot.handlers import schedule as handlers
+    from queue_bot.services import replacements, updates
+
+    monkeypatch.setattr(replacements, 'get_today_key', lambda: '2026-11-23')
+    broadcast = AsyncMock()
+    monkeypatch.setattr(updates, 'broadcast_message_to_users', broadcast)
+    items = [
+        dict(date='2026-11-24', lesson_number=2, new_subject='Людино-машинна взаємодія'),
+        dict(date='2020-11-24', lesson_number=4, new_subject='Перездача заборгованостей'),
+    ]
+    monkeypatch.setattr(handlers, '_PENDING_RECOGNITIONS', {'photo': items})
+    callback = MagicMock(data='rec_cf:photo', from_user=MagicMock(id=100), answer=AsyncMock())
+    callback.message.edit_text = AsyncMock()
+    state = MagicMock(clear=AsyncMock(), get_data=AsyncMock(return_value={
+        'token': 'photo', 'idx': 1, 'field': 'date',
+    }))
+    await handlers.confirm_recognition(callback, state, conn)
+    assert '24.11.2020' in callback.answer.call_args.args[0]
+    assert conn.execute('SELECT COUNT(*) FROM replacements').fetchone()[0] == 0
+    broadcast.assert_not_awaited()
+    assert handlers._PENDING_RECOGNITIONS['photo'] is items
+
+    state.clear.reset_mock()
+    message = MagicMock(text='30.02.2026', from_user=MagicMock(id=100), answer=AsyncMock())
+    await handlers.process_field_value_text(message, state, conn)
+    assert 'коректну дату' in message.answer.call_args.args[0]
+    assert items[1]['date'] == '2020-11-24'
+    state.clear.assert_not_awaited()
+
+    message.text = '24.11.2026'
+    await handlers.process_field_value_text(message, state, conn)
+    await handlers.confirm_recognition(callback, state, conn)
+    await asyncio.sleep(0)
+    assert [r['lesson_number'] for r in replacements.get_replacements(conn, date='2026-11-24')] == [2, 4]
+    broadcast.assert_awaited_once()

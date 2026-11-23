@@ -132,6 +132,7 @@ async def test_history_detail_identifies_selected_session_and_rejects_unknown(ad
 @pytest.mark.asyncio
 async def test_replacement_validation_is_atomic_and_recognition_only_drafts(admin_client, conn, monkeypatch):
     from queue_bot.services import recognition, replacements
+    monkeypatch.setattr(replacements, 'get_today_key', lambda: '2026-11-02')
     draft = {'date': '2026-11-02', 'confidence': .9, 'replacements': [{'date': '2026-11-02', 'lesson_number': 2, 'new_subject': 'Алгебра', 'source_note': 'З шапки'}]}
     fake = AsyncMock(return_value=draft)
     monkeypatch.setattr(recognition, 'recognize_replacements_from_images', fake)
@@ -141,6 +142,10 @@ async def test_replacement_validation_is_atomic_and_recognition_only_drafts(admi
     assert replacements.get_replacements(conn, date='2026-11-02') == []
     assert (await post(admin_client, 'replacements', {'action': 'save', 'items': [draft['replacements'][0], {'date': 'oops'}]})).status == 400
     assert replacements.get_replacements(conn, date='2026-11-02') == []
+    past_item = {**draft['replacements'][0], 'date': '2020-11-02'}
+    invalid = await post(admin_client, 'replacements', {'action': 'save', 'items': [past_item]})
+    assert invalid.status == 400 and '02.11.2020' in await invalid.text()
+    assert conn.execute('SELECT COUNT(*) FROM replacements').fetchone()[0] == 0
     assert (await post(admin_client, 'replacements', {'action': 'save', 'items': draft['replacements']})).status == 200
     assert replacements.get_replacements(conn, date='2026-11-02')[0]['new_subject'] == 'Алгебра'
 
