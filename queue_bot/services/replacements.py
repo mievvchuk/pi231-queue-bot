@@ -21,6 +21,46 @@ def validate_publication_date(value: str) -> None:
         raise BotError(f"Дата замін {day:%d.%m.%Y} вже минула. Вкажіть сьогоднішню або майбутню дату.")
 
 
+def validate_review(day: str, items: list[dict]) -> None:
+    validate_publication_date(day)
+    seen = set()
+    for item in items:
+        number = item.get("lesson_number")
+        subject = (item.get("new_subject") or "").strip()
+        if type(number) is not int or not 1 <= number <= 10 or not subject:
+            raise BotError("Для кожної заміни вкажіть номер пари від 1 до 10 і предмет.")
+        key = (number, subject.casefold())
+        if key in seen:
+            raise BotError(f"{number} пара повторюється з тим самим предметом. Перевірте список замін.")
+        seen.add(key)
+
+
+def format_review(day: str, items: list[dict]) -> str:
+    try:
+        display_date = f"{date.fromisoformat(day):%d.%m.%Y}"
+    except (TypeError, ValueError):
+        display_date = "уточніть дату"
+    lines = [f"<b>Перевірка замін · {html.escape(display_date)}</b>"]
+    try:
+        validate_review(day, items)
+    except BotError as err:
+        lines.append(f"⚠️ {html.escape(str(err))}")
+    lines.append("")
+    for item in items:
+        subject = html.escape((item.get("new_subject") or "Без предмета")[:120])
+        number = html.escape(str(item.get("lesson_number") or "—"))
+        line = f"<b>{number} пара</b> · {subject}"
+        details = [item.get("teacher"), f"ауд. {item['room']}" if item.get("room") else None,
+                   f"замість {item['old_subject']}" if item.get("old_subject") else None]
+        lines.append(line + "".join(f" · {html.escape(str(value)[:65])}" for value in details if value))
+    if not items:
+        lines.append("Замін немає.")
+    notes = dict.fromkeys(item["source_note"] for item in items if item.get("source_note"))
+    if notes:
+        lines.append(f"📝 {html.escape(' · '.join(str(note) for note in notes)[:260])}")
+    return "\n".join(lines)
+
+
 def get_replacements(conn, date: str | None = None, group_name: str = "ПІ-231", include_archived: bool = False, *, from_date: str | None = None) -> list[dict]:
     """Повертає заміни на конкретну дату або починаючи з from_date (типово сьогодні)."""
     arch_sql = "" if include_archived else "AND (is_archived = FALSE OR is_archived IS NULL)"

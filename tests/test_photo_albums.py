@@ -123,7 +123,7 @@ async def test_handler_album_downloads_both_and_creates_one_preview(conn, monkey
     from queue_bot.handlers import schedule as handlers
     monkeypatch.setattr(handlers, '_PHOTO_ALBUMS', PhotoAlbums(quiet_seconds=0.02))
     monkeypatch.setattr(handlers, '_PENDING_RECOGNITIONS', {})
-    recognize = AsyncMock(return_value={'confidence': .99, 'replacements': [
+    recognize = AsyncMock(return_value={'date': '2026-10-30', 'confidence': .99, 'replacements': [
         {'date': '2026-10-30', 'group_name': 'ПІ-231', 'lesson_number': 3, 'new_subject': 'Філософія'}]})
     monkeypatch.setattr(recognition, 'recognize_replacements_from_images', recognize)
     first, second = photo(1), photo(2)
@@ -159,31 +159,34 @@ async def test_bad_photo_date_keeps_batch_editable_and_prevents_partial_publicat
     monkeypatch.setattr(replacements, 'get_today_key', lambda: '2026-11-23')
     broadcast = AsyncMock()
     monkeypatch.setattr(updates, 'broadcast_message_to_users', broadcast)
-    items = [
-        dict(date='2026-11-24', lesson_number=2, new_subject='Людино-машинна взаємодія'),
-        dict(date='2020-11-24', lesson_number=4, new_subject='Перездача заборгованостей'),
-    ]
-    monkeypatch.setattr(handlers, '_PENDING_RECOGNITIONS', {'photo': items})
+    draft = handlers.ReplacementDraft('2020-11-24', [
+        dict(lesson_number=2, new_subject='Людино-машинна взаємодія'),
+        dict(lesson_number=4, new_subject='Перездача заборгованостей'),
+    ])
+    monkeypatch.setattr(handlers, '_PENDING_RECOGNITIONS', {'photo': draft})
     callback = MagicMock(data='rec_cf:photo', from_user=MagicMock(id=100), answer=AsyncMock())
     callback.message.edit_text = AsyncMock()
     state = MagicMock(clear=AsyncMock(), get_data=AsyncMock(return_value={
-        'token': 'photo', 'idx': 1, 'field': 'date',
+        'token': 'photo', 'message_id': 12,
     }))
     await handlers.confirm_recognition(callback, state, conn)
     assert '24.11.2020' in callback.answer.call_args.args[0]
     assert conn.execute('SELECT COUNT(*) FROM replacements').fetchone()[0] == 0
     broadcast.assert_not_awaited()
-    assert handlers._PENDING_RECOGNITIONS['photo'] is items
+    assert handlers._PENDING_RECOGNITIONS['photo'] is draft
 
     state.clear.reset_mock()
     message = MagicMock(text='30.02.2026', from_user=MagicMock(id=100), answer=AsyncMock())
+    message.bot.edit_message_text = AsyncMock()
     await handlers.process_field_value_text(message, state, conn)
     assert 'коректну дату' in message.answer.call_args.args[0]
-    assert items[1]['date'] == '2020-11-24'
+    assert draft.date == '2020-11-24'
     state.clear.assert_not_awaited()
 
     message.text = '24.11.2026'
     await handlers.process_field_value_text(message, state, conn)
+    assert draft.date == '2026-11-24'
+    assert message.bot.edit_message_text.call_args.kwargs['text'].count('24.11.2026') == 1
     await handlers.confirm_recognition(callback, state, conn)
     await asyncio.sleep(0)
     assert [r['lesson_number'] for r in replacements.get_replacements(conn, date='2026-11-24')] == [2, 4]
@@ -191,26 +194,53 @@ async def test_bad_photo_date_keeps_batch_editable_and_prevents_partial_publicat
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('day, weekday', [(24, 'Вівторок'), (28, 'Субота')])
-async def test_replacement_date_editor_opens_and_applies_next_working_day(conn, monkeypatch, day, weekday):
+async def test_date_shortcut_and_pair_corrections_share_a_single_preview(conn, monkeypatch):
     from datetime import date
-
     from queue_bot.handlers import schedule as handlers
 
-    next_working_day = date(2026, 11, day)
-    monkeypatch.setattr(handlers.working_days, 'get_next_working_day', lambda _: next_working_day)
+    monkeypatch.setattr(handlers.working_days, 'get_next_working_day', lambda _: date(2026, 11, 28))
     monkeypatch.setattr(handlers.replacements, 'get_today_key', lambda: '2026-11-23')
-    item = dict(date='2020-11-24', lesson_number=2, new_subject='Людино-машинна взаємодія')
-    monkeypatch.setattr(handlers, '_PENDING_RECOGNITIONS', {'photo': [item]})
-    callback = MagicMock(data='rec_fld:photo:0:date', from_user=MagicMock(id=100), answer=AsyncMock())
+    draft = handlers.ReplacementDraft('2020-11-24', [
+        dict(lesson_number=2, new_subject='Архітектура', teacher='Кондратюк', room='231'),
+    ])
+    monkeypatch.setattr(handlers, '_PENDING_RECOGNITIONS', {'photo': draft})
+    callback = MagicMock(data='rec_date:photo', from_user=MagicMock(id=100), answer=AsyncMock())
     callback.message.edit_text = AsyncMock()
-    state = MagicMock(clear=AsyncMock())
+    state = MagicMock(clear=AsyncMock(), set_state=AsyncMock(), update_data=AsyncMock())
 
-    await handlers.edit_field_prompt_handler(callback, state, conn)
-
+    await handlers.edit_replacement_draft(callback, state, conn)
     keyboard = callback.message.edit_text.call_args.kwargs['reply_markup'].inline_keyboard
-    assert weekday in keyboard[0][0].text
-    assert keyboard[2][0].callback_data == 'rec_txtdate:photo:0'
+    assert len(keyboard) == 2
+    callback.data = keyboard[0][1].callback_data
+    await handlers.edit_replacement_draft(callback, state, conn)
+    assert draft.date == '2026-11-28'
+
+    callback.data = 'rec_ed:photo'
+    await handlers.edit_replacement_draft(callback, state, conn)
+    keyboard = callback.message.edit_text.call_args.kwargs['reply_markup'].inline_keyboard
+    assert [button.callback_data for row in keyboard for button in row] == [
+        'rec_it:photo:0', 'rec_add:photo', 'rec_done:photo',
+    ]
     callback.data = keyboard[0][0].callback_data
-    await handlers.set_date_value_handler(callback, conn)
-    assert item['date'] == next_working_day.isoformat()
+    await handlers.edit_replacement_draft(callback, state, conn)
+    state.get_data = AsyncMock(return_value=state.update_data.call_args.kwargs)
+    message = MagicMock(text='3 | Машинне навчання', from_user=MagicMock(id=100))
+    message.bot.edit_message_text = AsyncMock()
+    await handlers.process_field_value_text(message, state, conn)
+    assert draft.items[0] == dict(lesson_number=3, new_subject='Машинне навчання', teacher='Кондратюк', room='231')
+
+    callback.data = 'rec_it:photo:0'
+    await handlers.edit_replacement_draft(callback, state, conn)
+    keyboard = callback.message.edit_text.call_args.kwargs['reply_markup'].inline_keyboard
+    callback.data = keyboard[0][0].callback_data
+    await handlers.edit_replacement_draft(callback, state, conn)
+    assert not draft.items
+    assert 'Замін немає' in callback.message.edit_text.call_args.args[0]
+
+    callback.data = 'rec_add:photo'
+    await handlers.edit_replacement_draft(callback, state, conn)
+    state.get_data = AsyncMock(return_value=state.update_data.call_args.kwargs)
+    message.text = '1 | Філософія'
+    await handlers.process_field_value_text(message, state, conn)
+    assert draft.items == [dict(lesson_number=1, new_subject='Філософія')]
+    assert conn.execute('SELECT COUNT(*) FROM replacements').fetchone()[0] == 0

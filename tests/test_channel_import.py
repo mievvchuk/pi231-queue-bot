@@ -30,7 +30,8 @@ async def test_poll_persists_draft_and_does_not_repeat(conn, monkeypatch):
     await channel.poll_once(bot, conn, None)
     assert recognize.await_count == 1
     assert bot.send_message.await_count == 1
-    assert f'У групи ПІ-231 замін немає. 📅 {upcoming:%d.%m.%Y}' in bot.send_message.call_args.args[1]
+    assert f'Перевірка замін · {upcoming:%d.%m.%Y}' in bot.send_message.call_args.args[1]
+    assert 'Замін немає.' in bot.send_message.call_args.args[1]
     assert channel.get_state(conn, 'channel_draft:replacements_xpk:828')['status'] == 'pending'
     assert conn.execute('SELECT COUNT(*) FROM replacements').fetchone()[0] == 0
 
@@ -118,28 +119,44 @@ async def test_cdn_failure_never_advances_cursor_or_calls_ocr(conn, monkeypatch)
 
 
 @pytest.mark.asyncio
-async def test_phone_editor_edits_channel_draft_with_buttons(conn, monkeypatch):
+async def test_channel_editor_publishes_corrected_draft_with_one_final_click(conn, monkeypatch):
+    import asyncio
+
     from queue_bot.handlers import schedule as handlers
+    from queue_bot.services import updates
+
     monkeypatch.setattr(replacements, 'get_today_key', lambda: '2026-11-09')
     monkeypatch.setattr(config, 'OWNER_ID', 100)
-    monkeypatch.setattr(handlers.admins, 'is_admin', lambda *_: True)
-    item = dict(date='2026-11-11', group_name='ПІ-231', lesson_number=3, new_subject='Системне програм', teacher='Задніпровський', room='232')
-    channel.set_state(conn, 'channel_draft:replacements_xpk:837', dict(date='2026-11-11', replacements=[item], status='pending'))
-    cb = lambda data: MagicMock(data=data, from_user=MagicMock(id=100), answer=AsyncMock(),
-                                message=MagicMock(answer=AsyncMock(), edit_text=AsyncMock()))
-    state = MagicMock(clear=AsyncMock())
-    await handlers.edit_channel_result(cb('ch_edit:837'), state, conn)
-    subjects = handlers.schedule_choices('new_subject')
-    pick = subjects.index('Машинне навчання')
-    await handlers.pick_field_value_handler(cb(f'rec_pk:ch837:0:new_subject:{pick}'), state, conn)
-    await handlers.pick_field_value_handler(cb('rec_pk:ch837:0:room:-1'), state, conn)
-    await handlers.set_pair_number_handler(cb('rec_sp:ch837:0:4'), conn)
-    saved = cb('ch_sv:837')
-    await handlers.save_channel_edit(saved, conn)
-    edit = channel.get_state(conn, 'channel_draft:replacements_xpk:837')['edit']
-    assert edit['date'] == '2026-11-11'
-    assert [(r['lesson_number'], r['new_subject'], r['room']) for r in edit['replacements']] == [(4, 'Машинне навчання', '')]
-    assert saved.message.edit_text.call_args.kwargs['reply_markup'].inline_keyboard[0][0].callback_data == 'ch_yes:837'
+    monkeypatch.setattr(handlers, '_PENDING_RECOGNITIONS', {})
+    broadcast = AsyncMock()
+    monkeypatch.setattr(updates, 'broadcast_message_to_users', broadcast)
+    key = 'channel_draft:replacements_xpk:837'
+    item = dict(date='2026-11-11', group_name='ПІ-231', lesson_number=3, new_subject='Системне програм', room='232')
+    original = dict(date='2026-11-11', replacements=[item], status='pending', source='https://t.me/replacements_xpk/837')
+    channel.set_state(conn, key, original)
+    callback = MagicMock(data='ch_edit:837', from_user=MagicMock(id=100), answer=AsyncMock(),
+                         message=MagicMock(answer=AsyncMock(), edit_text=AsyncMock()))
+    state = MagicMock(clear=AsyncMock(), set_state=AsyncMock(), update_data=AsyncMock())
+    await handlers.edit_channel_result(callback, state, conn)
+    keyboard = callback.message.answer.call_args.kwargs['reply_markup'].inline_keyboard
+    assert keyboard[0][0].callback_data == 'ch_sv:837'
+    callback.data = 'rec_it:ch837:0'
+    await handlers.edit_replacement_draft(callback, state, conn)
+    state.get_data = AsyncMock(return_value=state.update_data.call_args.kwargs)
+    message = MagicMock(text='4 | Машинне навчання | - | -', from_user=MagicMock(id=100))
+    message.bot.edit_message_text = AsyncMock()
+    await handlers.process_field_value_text(message, state, conn)
+    assert channel.get_state(conn, key) == original
+    broadcast.assert_not_awaited()
+
+    callback.data = keyboard[0][0].callback_data
+    await handlers.confirm_channel_import(callback, conn)
+    await handlers.confirm_channel_import(callback, conn)
+    await asyncio.sleep(0)
+    assert channel.get_state(conn, key)['status'] == 'confirmed'
+    row, = replacements.get_replacements(conn, date='2026-11-11')
+    assert (row['lesson_number'], row['new_subject'], row['room']) == (4, 'Машинне навчання', '')
+    broadcast.assert_awaited_once()
 
 
 @pytest.mark.asyncio

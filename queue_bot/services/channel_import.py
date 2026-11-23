@@ -159,12 +159,10 @@ async def poll_once(bot, conn, session):
                 draft.update(status='expired', notified=True)
             set_state(conn, key, draft)
         if not draft.get('notified'):
-            from queue_bot.services.replacements import format_replacement
+            from queue_bot.services.replacements import format_review
             text = '🔁 <b>Повторне розпізнавання</b>\n' if post['id'] in stale else ''
-            text += (f'📷 <a href="{post["url"]}">Новий допис із замінами</a>\n'
-                    f'📅 {datetime.date.fromisoformat(draft["date"]):%d.%m.%Y}\n\n')
-            text += '\n\n'.join(format_replacement(r) for r in draft['replacements']) if draft['replacements'] else format_no_replacements(draft['date'])
-            text += '\n\nПідтвердити цей результат і сповістити студентів?'
+            text += f'📷 <a href="{post["url"]}">Допис із замінами</a>\n\n'
+            text += format_review(draft['date'], draft['replacements'])
             keyboard = approval_keyboard(post['id'])
             await bot.send_message(config.OWNER_ID, text, reply_markup=keyboard)
             draft['notified'] = True
@@ -202,8 +200,8 @@ async def watch_channel(bot, conn):
 
 def approval_keyboard(post_id, *, confirmed=False):
     rows = [] if confirmed else [[
-        InlineKeyboardButton(text='✅ Підтвердити', callback_data=f'ch_yes:{post_id}'),
-        InlineKeyboardButton(text='❌ Скасувати', callback_data=f'ch_no:{post_id}'),
+        InlineKeyboardButton(text='✅ Опублікувати', callback_data=f'ch_yes:{post_id}'),
+        InlineKeyboardButton(text='Відхилити', callback_data=f'ch_no:{post_id}'),
     ]]
     rows.append([InlineKeyboardButton(text='✏️ Редагувати', callback_data=f'ch_edit:{post_id}')])
     return InlineKeyboardMarkup(inline_keyboard=rows)
