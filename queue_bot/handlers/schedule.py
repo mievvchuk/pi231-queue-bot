@@ -204,10 +204,17 @@ def render_main_preview(token: str, reps: list[dict], conf_pct: int | None = Non
     cards = [replacements.format_replacement(r) for r in reps]
     cards_text = "\n\n────────────────\n\n".join(cards)
     conf_str = f"Точність: ~{conf_pct}%\n\n" if conf_pct is not None else ""
+    date_warning = ""
+    try:
+        for item in reps:
+            replacements.validate_publication_date(item.get("date"))
+    except BotError as err:
+        date_warning = f"⚠️ {html.escape(str(err))} Натисніть «Внести корективи».\n\n"
 
     text = (
         f"🔍 <b>Розпізнані заміни для групи {html.escape(config.STUDENT_GROUP)}:</b>\n"
         f"{conf_str}"
+        f"{date_warning}"
         f"{cards_text}\n\n"
         "Зберегти ці заміни в розклад?"
     )

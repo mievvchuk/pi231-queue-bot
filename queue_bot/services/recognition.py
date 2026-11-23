@@ -4,9 +4,11 @@ import json
 import logging
 import math
 import re
+
 import aiohttp
 
 from queue_bot import config
+from queue_bot.services import replacements
 from queue_bot.services.errors import BotError, UnreadableTable
 from queue_bot.services.schedule_notes import normalize_group, resolve_header_notes
 
@@ -250,6 +252,78 @@ def enlarge(image: bytes, target: int = 2400) -> bytes:
     return out.getvalue()
 
 
+def _header_crop(image: bytes) -> bytes | None:
+    """Isolate the title so the provider can read the year at a larger scale."""
+    from io import BytesIO
+    from PIL import Image, ImageOps
+
+    try:
+        with Image.open(BytesIO(image)) as source:
+            if source.width * source.height > 20_000_000:
+                return None
+            source = ImageOps.exif_transpose(source)
+            header = source.crop((0, 0, source.width, max(1, source.height * 15 // 100))).convert("RGB")
+    except (OSError, ValueError, Image.DecompressionBombError):
+        return None
+    scale = min(3, 1600 / header.width)
+    header = header.resize((max(1, round(header.width * scale)), max(1, round(header.height * scale))),
+                           Image.Resampling.LANCZOS)
+    out = BytesIO()
+    header.save(out, "JPEG", quality=95)
+    return out.getvalue()
+
+
+def _vision_message(prompt, images, provider_name):
+    return {
+        "role": "user",
+        "content": [
+            {"type": "text", "text": prompt},
+            *[{
+                "type": "image_url",
+                "image_url": {"url": 'data:image/jpeg;base64,' + base64.b64encode(part).decode('ascii'),
+                              **({"detail": "high"} if provider_name == "OpenAI" else {})},
+            } for part in images],
+        ],
+    }
+
+
+async def _request_vision(url, headers, payload, provider_name, model_name):
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(url, headers=headers, json=payload, timeout=aiohttp.ClientTimeout(total=config.RECOGNITION_TIMEOUT_SECONDS)) as resp:
+                if resp.status != 200:
+                    err_body = await resp.text()
+                    log.error(f"{provider_name} API error {resp.status}: {err_body}")
+                    reasons = {
+                        401: "ключ RECOGNITION_API_KEY недійсний або видалений",
+                        402: "на балансі провайдера (OpenRouter) закінчились кошти — поповніть кредити",
+                        403: "ключу заборонено доступ до цієї моделі",
+                        404: f"модель {model_name} не знайдено — перевірте {provider_name.upper()}_MODEL",
+                        410: f"модель {model_name} знято з {provider_name} — вкажіть актуальну в {provider_name.upper()}_MODEL",
+                        429: "перевищено ліміт запитів, повторю пізніше",
+                    }
+                    reason = reasons.get(resp.status, "спробуйте пізніше або надішліть чіткіше фото")
+                    raise BotError(f"Помилка {provider_name} API ({resp.status}): {reason}.")
+                data = await resp.json()
+                choice = data["choices"][0]
+                content = choice["message"].get("content")
+                if not content:
+                    log.error("%s returned no content (finish_reason=%s, reasoning=%s chars)", provider_name,
+                              choice.get("finish_reason"), len(choice["message"].get("reasoning_content") or ""))
+                    hint = ("модель витратила весь ліміт RECOGNITION_MAX_TOKENS на міркування — збільште його "
+                            "або оберіть модель без режиму міркування" if choice.get("finish_reason") == "length"
+                            else "модель повернула порожню відповідь")
+                    raise BotError(f"{provider_name} не повернув таблицю: {hint}.")
+                # Without JSON mode some models wrap the answer in ```json fences.
+                fenced = re.fullmatch(r"\s*```(?:json)?\s*(.*?)\s*```\s*", content, re.DOTALL)
+                return json.loads(fenced[1] if fenced else content)
+    except BotError:
+        raise
+    except Exception as e:
+        log.exception(f"Error calling {provider_name} API for recognition: {e}")
+        raise BotError(f"Не вдалося обробити зображення: {e}")
+
+
 async def _ask_ai(images: list[bytes], group_name: str, next_work_date: str, allow_empty: bool) -> dict:
     api_key = config.RECOGNITION_API_KEY
     if not api_key:
@@ -262,6 +336,7 @@ async def _ask_ai(images: list[bytes], group_name: str, next_work_date: str, all
     whole_table = provider_name == "NVIDIA" or config.RECOGNITION_MAX_TOKENS >= WHOLE_TABLE_MIN_TOKENS
     # A 54-row table took ~1600 output tokens; keep headroom even if an old 900 limit is still set.
     max_tokens = max(config.RECOGNITION_MAX_TOKENS, 4096) if whole_table else config.RECOGNITION_MAX_TOKENS
+    originals = images
     if whole_table:
         images = [enlarge(part) for part in images]
         rows_rule = (
@@ -340,20 +415,7 @@ async def _ask_ai(images: list[bytes], group_name: str, next_work_date: str, all
     }
     payload = {
         "model": model_name,
-        "messages": [
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": prompt},
-                    *[{
-                        "type": "image_url",
-                        # Dense tables are unreadable at the default downscaled resolution.
-                        "image_url": {"url": 'data:image/jpeg;base64,' + base64.b64encode(part).decode('ascii'),
-                                      **({"detail": "high"} if provider_name == "OpenAI" else {})},
-                    } for part in images],
-                ],
-            }
-        ],
+        "messages": [_vision_message(prompt, images, provider_name)],
         # NVIDIA vision models may reject JSON mode; the prompt already demands bare JSON.
         **({} if provider_name == "NVIDIA" else {"response_format": {"type": "json_object"}}),
         # Nemotron reasoning models otherwise spend the whole max_tokens thinking and return content=null.
@@ -363,46 +425,38 @@ async def _ask_ai(images: list[bytes], group_name: str, next_work_date: str, all
         "max_tokens": max_tokens,
     }
 
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.post(url, headers=headers, json=payload, timeout=aiohttp.ClientTimeout(total=config.RECOGNITION_TIMEOUT_SECONDS)) as resp:
-                if resp.status != 200:
-                    err_body = await resp.text()
-                    log.error(f"{provider_name} API error {resp.status}: {err_body}")
-                    reasons = {
-                        401: "ключ RECOGNITION_API_KEY недійсний або видалений",
-                        402: "на балансі провайдера (OpenRouter) закінчились кошти — поповніть кредити",
-                        403: "ключу заборонено доступ до цієї моделі",
-                        404: f"модель {model_name} не знайдено — перевірте {provider_name.upper()}_MODEL",
-                        410: f"модель {model_name} знято з {provider_name} — вкажіть актуальну в {provider_name.upper()}_MODEL",
-                        429: "перевищено ліміт запитів, повторю пізніше",
-                    }
-                    reason = reasons.get(resp.status, "спробуйте пізніше або надішліть чіткіше фото")
-                    raise BotError(f"Помилка {provider_name} API ({resp.status}): {reason}.")
-                data = await resp.json()
-                choice = data["choices"][0]
-                content = choice["message"].get("content")
-                if not content:
-                    log.error("%s returned no content (finish_reason=%s, reasoning=%s chars)", provider_name,
-                              choice.get("finish_reason"), len(choice["message"].get("reasoning_content") or ""))
-                    hint = ("модель витратила весь ліміт RECOGNITION_MAX_TOKENS на міркування — збільште його "
-                            "або оберіть модель без режиму міркування" if choice.get("finish_reason") == "length"
-                            else "модель повернула порожню відповідь")
-                    raise BotError(f"{provider_name} не повернув таблицю: {hint}.")
-                # Without JSON mode some models wrap the answer in ```json fences.
-                fenced = re.fullmatch(r"\s*```(?:json)?\s*(.*?)\s*```\s*", content, re.DOTALL)
-                result = json.loads(fenced[1] if fenced else content)
-    except BotError:
-        raise
-    except Exception as e:
-        log.exception(f"Error calling {provider_name} API for recognition: {e}")
-        raise BotError(f"Не вдалося обробити зображення: {e}")
-    if isinstance(result, dict) and result.get("dateText"):
-        # Models mix up month names ('17 листопада' came back as 2026-10-17); the words on the photo decide.
+    result = await _request_vision(url, headers, payload, provider_name, model_name)
+    if isinstance(result, dict):
         from queue_bot.services.table_ocr import parse_date
-        written = parse_date([str(result["dateText"])])
-        if written:
+
+        date_text = result.get("dateText")
+        if isinstance(date_text, str) and (written := parse_date(date_text.splitlines())):
             result["date"] = written
+        try:
+            replacements.validate_publication_date(result.get("date"))
+        except BotError:
+            crops = [crop for image in originals if (crop := _header_crop(image))]
+            if crops:
+                check = {
+                    **payload,
+                    "messages": [_vision_message(
+                        'Перепиши дослівно дату та день тижня з назви таблиці на збільшеному фрагменті. '
+                        'Уважно звір усі чотири цифри року. Читай лише надрукований заголовок, '
+                        'не відновлюй відсутні цифри за календарем. Якщо дата нерозбірлива або '
+                        'фрагменти мають різні дати, поверни {"dateText": null}. '
+                        'Інакше поверни лише JSON {"dateText": "<дослівний заголовок із датою і днем тижня>"}.',
+                        crops, provider_name,
+                    )],
+                    "max_tokens": 160,
+                }
+                try:
+                    checked = await _request_vision(url, headers, check, provider_name, model_name)
+                except BotError:
+                    log.warning("Could not re-read the replacement table header via %s", provider_name)
+                else:
+                    text = checked.get("dateText") if isinstance(checked, dict) else None
+                    if isinstance(text, str) and (written := parse_date(text.splitlines())):
+                        result["date"] = written
     if whole_table and isinstance(result, dict) and isinstance(result.get("rows"), list):
         result["rows"] = [dict(zip(ROW_FIELDS, (" ".join(str(cell or "").split()) for cell in row))) if isinstance(row, list) else row
                           for row in result["rows"]]
@@ -412,7 +466,7 @@ async def _ask_ai(images: list[bytes], group_name: str, next_work_date: str, all
 
 
 async def recognize_replacements_from_images(images: list[bytes], group_name: str = "ПІ-231", conn=None, *, allow_empty: bool = False) -> dict:
-    """Recognize one table split across one or two photos in one API request."""
+    """Recognize one table split across one or two photos and verify suspicious dates."""
     if (not isinstance(images, (list, tuple)) or not 1 <= len(images) <= 2
             or any(not isinstance(part, bytes) or not part for part in images)):
         raise BotError('Надішліть одне або два непорожні фото таблиці замін.')

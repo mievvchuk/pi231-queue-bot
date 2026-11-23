@@ -5,7 +5,8 @@ header notes stay in recognition.py.
 """
 import difflib
 import re
-from datetime import date, timedelta
+from calendar import monthrange
+from datetime import date
 from functools import lru_cache
 
 from queue_bot.services.errors import BotError
@@ -137,16 +138,23 @@ def parse_date(lines: list[str]) -> str | None:
     weekday = next((i for i, (stem, _) in enumerate(DAY_STEMS) if fold(stem) in weekday_text), None)
     m = re.search(r'(\d{1,2})\s*([^\W\d_]+)\s*(\d\d[\dбзо]{2})', text)  # '202бр.'
     month = next((i for i, stem in enumerate(MONTHS, 1) if m and m[2].startswith(fold(stem))), None)
-    if not month:
+    if month:
+        day, year = m[1], m[3].translate(str.maketrans('бзо', '630'))
+    else:
+        numeric = re.search(r'(?<!\d)(\d{1,2})[./](\d{1,2})[./](\d{4})(?!\d)', text)
+        if not numeric:
+            return None
+        day, month, year = numeric[1], int(numeric[2]), numeric[3]
+    year = int(year)
+    if not year or not 1 <= month <= 12:
         return None
-    first = date(int(m[3].translate(str.maketrans('бзо', '630'))), month, 1)
-    days = [first + timedelta(n) for n in range(31) if (first + timedelta(n)).month == month]
-    exact = [d for d in days if d.day == int(m[1])]
+    days = [date(year, month, d) for d in range(1, monthrange(year, month)[1] + 1)]
+    exact = [d for d in days if d.day == int(day)]
     if weekday is None:
         return exact[0].isoformat() if exact else None
     if exact and exact[0].weekday() == weekday:
         return exact[0].isoformat()
-    fits = [d for d in days if d.weekday() == weekday and m[1] in str(d.day)]
+    fits = [d for d in days if d.weekday() == weekday and day in str(d.day)]
     return fits[0].isoformat() if len(fits) == 1 else None
 
 
@@ -253,7 +261,10 @@ def read_table(image: bytes) -> dict:
         rows.append({'cells': cells})
     # Full-width rows before the column titles are the title itself (a photo may start at a line).
     lead = next((i for i, row in enumerate(rows) if 'cells' in row), len(rows))
-    header = read_lines(clean[:max(ys[0] - 1, 0)], scores) + [row['note'] for row in rows[:lead]]
+    title = clean[:max(ys[0] - 1, 0)]
+    title_lines = (read_lines(cv2.resize(title, None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC), scores)
+                   if title.size else [])
+    header = title_lines + [row['note'] for row in rows[:lead]]
     return {'header': header, 'rows': rows[lead:], 'scores': scores}
 
 

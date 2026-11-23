@@ -200,3 +200,50 @@ async def test_nvidia_whole_table_without_group_rows_reports_no_replacements(mon
     monkeypatch.setattr(recognition.aiohttp, 'ClientSession', lambda: session_context)
     result = await recognition.recognize_replacements_from_images([b'offline-test'], 'ПІ-231', None, allow_empty=True)
     assert result['replacements'] == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("header, expected", [
+    ("Заміни в розкладі 24 листопада 2026 р.\nВівторок – знаменник", "2026-11-24"),
+    ("Заміни в розкладі 24.11.2026 р.\nВівторок – знаменник", "2026-11-24"),
+    ("Заміни в розкладі 24 листопада 2020 р.\nВівторок – знаменник", "2020-11-24"),
+    (None, "2020-11-24"),
+])
+async def test_past_vision_date_is_reread_from_enlarged_header(monkeypatch, header, expected):
+    import base64
+    from io import BytesIO
+
+    from PIL import Image, ImageDraw
+
+    monkeypatch.setattr(config, "RECOGNITION_API_KEY", "nvapi-test")
+    monkeypatch.setattr(config, "RECOGNITION_PROVIDER", "nvidia")
+    monkeypatch.setattr(recognition.replacements, "get_today_key", lambda: "2026-11-23")
+    picture = Image.new("RGB", (605, 844), "white")
+    draw = ImageDraw.Draw(picture)
+    draw.rectangle((0, 200, 604, 843), fill="black")
+    file = BytesIO()
+    picture.save(file, "PNG")
+    read = AsyncMock(side_effect=[
+        {
+            "date": "2020-11-24",
+            "dateText": "Заміни в розкладі 24 листопада 2020 р.\nВівторок – знаменник",
+            "confidence": .95,
+            "rows": [["ПІ-231", "3-4", "", "ЛМВ", "Кондратюк", "231"],
+                     ["", "7-8", "", "Перездача заборгованостей", "", ""]],
+        },
+        {"dateText": header},
+    ])
+    monkeypatch.setattr(recognition, "_request_vision", read)
+
+    result = await recognition.recognize_replacements_from_image(file.getvalue())
+
+    assert result["date"] == expected
+    assert [(item["lesson_number"], item["date"]) for item in result["replacements"]] == [(2, expected), (4, expected)]
+    first, second = [call.args[2] for call in read.await_args_list]
+    assert len(first["messages"][0]["content"]) == len(second["messages"][0]["content"]) == 2
+    details, image = second["messages"][0]["content"]
+    assert "чотири цифри року" in details["text"]
+    crop = Image.open(BytesIO(base64.b64decode(image["image_url"]["url"].split(",", 1)[1])))
+    assert crop.width > picture.width
+    assert crop.height / crop.width <= .22
+    assert crop.convert("L").getextrema() == (255, 255)

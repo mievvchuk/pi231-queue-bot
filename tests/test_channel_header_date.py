@@ -20,3 +20,8 @@ def test_weekday_still_recovers_a_dropped_date_digit():
 
 def test_contradictory_target_weekday_remains_unresolved():
     assert parse_date(['Заміни в розкладі 18 листопада 2026 р.', 'Вівторок']) is None
+
+
+def test_numeric_header_date_and_invalid_year():
+    assert parse_date(['Заміни в розкладі 24.11.2026', 'Вівторок – знаменник']) == '2026-11-24'
+    assert parse_date(['Заміни в розкладі 24 листопада 0000']) is None
