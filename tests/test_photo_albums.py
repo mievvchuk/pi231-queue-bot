@@ -188,3 +188,29 @@ async def test_bad_photo_date_keeps_batch_editable_and_prevents_partial_publicat
     await asyncio.sleep(0)
     assert [r['lesson_number'] for r in replacements.get_replacements(conn, date='2026-11-24')] == [2, 4]
     broadcast.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('day, weekday', [(24, 'Вівторок'), (28, 'Субота')])
+async def test_replacement_date_editor_opens_and_applies_next_working_day(conn, monkeypatch, day, weekday):
+    from datetime import date
+
+    from queue_bot.handlers import schedule as handlers
+
+    next_working_day = date(2026, 11, day)
+    monkeypatch.setattr(handlers.working_days, 'get_next_working_day', lambda _: next_working_day)
+    monkeypatch.setattr(handlers.replacements, 'get_today_key', lambda: '2026-11-23')
+    item = dict(date='2020-11-24', lesson_number=2, new_subject='Людино-машинна взаємодія')
+    monkeypatch.setattr(handlers, '_PENDING_RECOGNITIONS', {'photo': [item]})
+    callback = MagicMock(data='rec_fld:photo:0:date', from_user=MagicMock(id=100), answer=AsyncMock())
+    callback.message.edit_text = AsyncMock()
+    state = MagicMock(clear=AsyncMock())
+
+    await handlers.edit_field_prompt_handler(callback, state, conn)
+
+    keyboard = callback.message.edit_text.call_args.kwargs['reply_markup'].inline_keyboard
+    assert weekday in keyboard[0][0].text
+    assert keyboard[2][0].callback_data == 'rec_txtdate:photo:0'
+    callback.data = keyboard[0][0].callback_data
+    await handlers.set_date_value_handler(callback, conn)
+    assert item['date'] == next_working_day.isoformat()

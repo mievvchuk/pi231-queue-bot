@@ -505,9 +505,8 @@ async def edit_field_prompt_handler(callback: CallbackQuery, state: FSMContext, 
     if field == "date":
         today_str = replacements.get_today_key()
         next_work_dt = working_days.get_next_working_day(conn)
-        next_work_str = next_work_dt.strftime("%Y-%m-%d")
-        w_idx = next_work_dt.weekday()
-        day_name = schedule.DAY_NAMES_UK.get(schedule.DAY_KEYS_ORDER[w_idx] if w_idx < 5 else "saturday", "Робочий день")
+        next_work_str = next_work_dt.isoformat()
+        day_name = schedule.DAY_NAMES_UK[schedule.DAY_KEYS[next_work_dt.weekday()]]
 
         date_kb = InlineKeyboardMarkup(
             inline_keyboard=[

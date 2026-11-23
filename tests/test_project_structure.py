@@ -4,6 +4,8 @@ from pathlib import Path
 import subprocess
 import sys
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -21,6 +23,7 @@ def read_config(tmp_path, values, cwd=None):
     env.update(ENV_FILE=str(env_path), PYTHONPATH=str(ROOT))
     code = ('import json; from queue_bot import config; '
             'print(json.dumps({"owner": config.OWNER_ID, "model": config.recognition_settings()[1], '
+            '"recognition_provider": config.RECOGNITION_PROVIDER, '
             '"subjects_exist": __import__("pathlib").Path(config.SUBJECTS_PATH).exists(), '
             '"port": config.PORT, "admins": config.get_initial_admin_ids()}))')
     return json.loads(subprocess.check_output([sys.executable, '-c', code], env=env, cwd=cwd or ROOT, text=True))
@@ -28,7 +31,17 @@ def read_config(tmp_path, values, cwd=None):
 
 def test_env_file_configures_owner_model_and_port_independent_of_cwd(tmp_path):
     result = read_config(tmp_path, 'OWNER_ID=100\nINITIAL_ADMIN_IDS=100,200\nRECOGNITION_PROVIDER=groq\nGROQ_MODEL=custom-vision\nPORT=9090\n', cwd=tmp_path)
-    assert result == {'owner': 100, 'model': 'custom-vision', 'subjects_exist': True, 'port': 9090, 'admins': [100, 200]}
+    assert result == {'owner': 100, 'model': 'custom-vision', 'recognition_provider': 'groq',
+                      'subjects_exist': True, 'port': 9090, 'admins': [100, 200]}
+
+
+@pytest.mark.parametrize('values, provider', [
+    ('', 'disabled'),
+    ('RECOGNITION_PROVIDER=ocr\n', 'disabled'),
+    ('RECOGNITION_PROVIDER=ocr\nRECOGNITION_API_KEY=nvapi-test\n', 'auto'),
+])
+def test_replacement_recognition_uses_only_ai_when_a_key_is_available(tmp_path, values, provider):
+    assert read_config(tmp_path, values)['recognition_provider'] == provider
 
 
 def test_owner_has_no_personal_fallback(tmp_path):

@@ -1,9 +1,10 @@
-import asyncio
 import base64
 import json
 import logging
 import math
 import re
+from calendar import monthrange
+from datetime import date
 
 import aiohttp
 
@@ -128,13 +129,51 @@ def rows_to_replacements(rows: list[dict], group_name: str) -> list[dict]:
     return picked
 
 
-# 'Немає пари', 'Нема пари', 'Пари немає' and OCR-damaged 'Немає паон'.
+# Includes transcription variants such as 'Немає паон'.
 NO_LESSON = re.compile(r"^\s*(нема\w*\s+па\w*|пар\w*\s+нема\w*)\s*\.?\s*$", re.IGNORECASE)
 
 
 ORDINALS = (("перш", 1), ("друг", 2), ("трет", 3), ("четверт", 4), ("п'ят", 5))
 DAY_STEMS = (("понеділ", "monday"), ("вівтор", "tuesday"), ("серед", "wednesday"), ("четвер", "thursday"),
              ("п'ятниц", "friday"), ("субот", "saturday"), ("неділ", "sunday"))
+
+MONTHS = ('січ', 'лют', 'берез', 'квіт', 'трав', 'черв', 'лип', 'серп', 'верес', 'жовт', 'листоп', 'груд')
+FOLD = str.maketrans('іїйєґ’ʼ`', "иииег'''")
+
+
+def _fold_header(text: str) -> str:
+    return text.lower().translate(FOLD)
+
+
+def parse_date(lines: list[str]) -> str | None:
+    """Date from the title, checked against the weekday line: a dropped digit ('4' for '14')
+    is recovered only when exactly one day of that month fits both."""
+    text = _fold_header(' '.join(lines))
+    # A schedule announcement names the SOURCE weekday, not the photo's date.
+    # Only title/weekday lines may validate the target date.
+    weekday_text = ' '.join(_fold_header(line) for line in lines
+                            if not re.search(r'пар|чергов|викладач', _fold_header(line)))
+    weekday = next((i for i, (stem, _) in enumerate(DAY_STEMS) if _fold_header(stem) in weekday_text), None)
+    m = re.search(r'(\d{1,2})\s*([^\W\d_]+)\s*(\d\d[\dбзо]{2})', text)  # '202бр.'
+    month = next((i for i, stem in enumerate(MONTHS, 1) if m and m[2].startswith(_fold_header(stem))), None)
+    if month:
+        day, year = m[1], m[3].translate(str.maketrans('бзо', '630'))
+    else:
+        numeric = re.search(r'(?<!\d)(\d{1,2})[./](\d{1,2})[./](\d{4})(?!\d)', text)
+        if not numeric:
+            return None
+        day, month, year = numeric[1], int(numeric[2]), numeric[3]
+    year = int(year)
+    if not year or not 1 <= month <= 12:
+        return None
+    days = [date(year, month, d) for d in range(1, monthrange(year, month)[1] + 1)]
+    exact = [d for d in days if d.day == int(day)]
+    if weekday is None:
+        return exact[0].isoformat() if exact else None
+    if exact and exact[0].weekday() == weekday:
+        return exact[0].isoformat()
+    fits = [d for d in days if d.weekday() == weekday and day in str(d.day)]
+    return fits[0].isoformat() if len(fits) == 1 else None
 
 
 def _pair_word(token: str):
@@ -172,7 +211,6 @@ def apply_parsed_notes(result: dict, date_str: str) -> None:
     week = result.get("headerWeekType")
     if week not in ("numerator", "denominator"):
         try:
-            from datetime import date
             from queue_bot.services.schedule import get_week_type
             week = get_week_type(date.fromisoformat(date_str))
         except (ValueError, TypeError):
@@ -181,7 +219,7 @@ def apply_parsed_notes(result: dict, date_str: str) -> None:
              for n in result[key] if isinstance(n, str)]
     parsed = [o for o in (parse_header_note(n, week) for n in notes) if o]
     if not parsed:
-        # OCR may split a full-width announcement across several lines.
+        # A transcript may split a full-width announcement across several lines.
         combined_text = ' '.join(dict.fromkeys(notes))
         references = re.findall(r'(?:за|по|згідно\s+з)\s+розклад', combined_text, re.I)
         combined = parse_header_note(combined_text, week) if len(references) == 1 else None
@@ -327,10 +365,7 @@ async def _request_vision(url, headers, payload, provider_name, model_name):
 async def _ask_ai(images: list[bytes], group_name: str, next_work_date: str, allow_empty: bool) -> dict:
     api_key = config.RECOGNITION_API_KEY
     if not api_key:
-        raise BotError(
-            "⚠️ Розпізнавання через ШІ не налаштовано (немає RECOGNITION_API_KEY в .env).\n"
-            "Встановіть RECOGNITION_PROVIDER=ocr, щоб читати таблиці без ШІ."
-        )
+        raise BotError("⚠️ Для розпізнавання замін через ШІ потрібен RECOGNITION_API_KEY.")
     url, model_name, provider_name = config.recognition_settings()
     # Nemotron VL picked another group's row or nothing when asked for one group, so NVIDIA always copies the table.
     whole_table = provider_name == "NVIDIA" or config.RECOGNITION_MAX_TOKENS >= WHOLE_TABLE_MIN_TOKENS
@@ -427,8 +462,6 @@ async def _ask_ai(images: list[bytes], group_name: str, next_work_date: str, all
 
     result = await _request_vision(url, headers, payload, provider_name, model_name)
     if isinstance(result, dict):
-        from queue_bot.services.table_ocr import parse_date
-
         date_text = result.get("dateText")
         if isinstance(date_text, str) and (written := parse_date(date_text.splitlines())):
             result["date"] = written
@@ -471,7 +504,7 @@ async def recognize_replacements_from_images(images: list[bytes], group_name: st
             or any(not isinstance(part, bytes) or not part for part in images)):
         raise BotError('Надішліть одне або два непорожні фото таблиці замін.')
     if config.RECOGNITION_PROVIDER == "disabled":
-        raise BotError("⚠️ Автоматичне розпізнавання фото вимкнено (RECOGNITION_PROVIDER=disabled).")
+        raise BotError("⚠️ Автоматичне розпізнавання фото вимкнено.")
 
     try:
         from queue_bot.services.working_days import get_next_working_day_key
@@ -484,13 +517,9 @@ async def recognize_replacements_from_images(images: list[bytes], group_name: st
 
     from queue_bot.services import schedule
     schedule_data = schedule.read_schedule(conn)
-    if config.RECOGNITION_PROVIDER == "ocr":
-        from queue_bot.services import table_ocr
-        result = await asyncio.to_thread(table_ocr.recognize, list(images), group_name, schedule_data)
-    else:
-        result = await _ask_ai(images, group_name, next_work_date, allow_empty)
+    result = await _ask_ai(images, group_name, next_work_date, allow_empty)
 
-    # The provider answered: whatever is wrong now is about the photo itself, and asking again will not fix it.
+    # Treat errors in completed recognition results as unreadable table content.
     try:
         return _parse_result(result, group_name, next_work_date, allow_empty, schedule_data)
     except UnreadableTable:
@@ -504,7 +533,6 @@ def _parse_result(result, group_name: str, next_work_date: str, allow_empty: boo
         raise BotError('ШІ повернув некоректний формат таблиці. Повторіть розпізнавання.')
     date_str = result.get("date")
     if allow_empty:
-        from datetime import date
         try:
             date.fromisoformat(str(date_str))
         except ValueError:

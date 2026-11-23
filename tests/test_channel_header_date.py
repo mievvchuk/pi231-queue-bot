@@ -1,4 +1,4 @@
-from queue_bot.services.table_ocr import parse_date
+from queue_bot.services.recognition import parse_date
 
 
 def test_source_weekday_in_announcement_does_not_override_table_date():

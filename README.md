@@ -167,7 +167,7 @@ See [`.env.example`](.env.example) and [`docs/CONFIGURATION.md`](docs/CONFIGURAT
 | `LAB_CATALOG_PATH` | Optional lab catalog JSON file |
 | `MINI_APP_URL` | Optional public HTTPS URL ending in `/app/` to expose Mini App launch controls |
 | `TELEGRAM_LOGIN_CLIENT_ID`, `TELEGRAM_LOGIN_CLIENT_SECRET` | Optional Telegram Login credentials for browser/PWA access; both required together with `MINI_APP_URL` |
-| `RECOGNITION_PROVIDER` | `disabled`, `auto`, `groq`, `openai`, or `ocr` (offline, no API key; default without a key) |
+| `RECOGNITION_PROVIDER` | `disabled`, `auto`, `groq`, `openai`, or `nvidia`. With no API key, `auto` disables photo recognition. |
 | `RECOGNITION_API_KEY` | Key for optional image recognition; `OPENAI_API_KEY` is supported as a fallback |
 | `GROQ_MODEL`, `OPENAI_MODEL` | Recognition model selection |
 | `GROQ_API_URL`, `OPENAI_API_URL` | Recognition API endpoints |
