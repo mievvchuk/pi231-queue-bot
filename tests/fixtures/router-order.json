@@ -17,6 +17,7 @@
   },
   {
     "message": [
+      "handle_text_replacement",
       "student_queues_section",
       "student_more_section",
       "student_mode",

@@ -24,6 +24,7 @@ from queue_bot.handlers.common import (
 )
 from queue_bot.services import admins, recognition, replacements, schedule, working_days
 from queue_bot.services.errors import BotError
+from queue_bot.services.schedule_notes import normalize_group, resolve_header_notes
 from queue_bot.handlers.photo_albums import PhotoAlbums
 from queue_bot.storage.database import transaction
 
@@ -34,6 +35,7 @@ router = Router()
 class ReplacementDraft:
     date: str
     items: list[dict]
+    from_text: bool = False
 
 
 _PENDING_RECOGNITIONS: dict[str, ReplacementDraft] = {}
@@ -263,6 +265,49 @@ def _replacement_markup(*rows):
 
 # ---------- Обробка фотографій таблиць замін ----------
 
+_NOTICE_DATE = r"(?P<day>післязавтра|завтра|сьогодні|\d{1,2}\.\d{1,2}\.\d{4}|\d{4}-\d{2}-\d{2})"
+_SCHEDULE_REFERENCE = r"\b(?:за|по|згідно\s+з)\s+розклад\w*\b"
+_TEXT_REPLACEMENT = re.compile(rf"^\s*{_NOTICE_DATE}\b.*\bпар\w*\b.*{_SCHEDULE_REFERENCE}", re.IGNORECASE | re.DOTALL)
+_RELATIVE_NOTICE_DAYS = {"сьогодні": 0, "завтра": 1, "післязавтра": 2}
+
+
+def is_text_replacement(message: Message) -> bool:
+    return bool(message.text and _TEXT_REPLACEMENT.match(message.text))
+
+
+async def handle_text_replacement(message: Message, conn):
+    if not admins.is_admin(conn, message.from_user.id):
+        return
+
+    text = " ".join(message.text.split())
+    groups = re.findall(r"\b[а-яіїєґa-z]{1,5}[-–]\d{2,4}\b", text, re.IGNORECASE)
+    if groups and normalize_group(config.STUDENT_GROUP) not in {
+        normalize_group(group.replace("–", "-")) for group in groups
+    }:
+        return
+    match = _TEXT_REPLACEMENT.match(text)
+    value = match["day"].casefold()
+    if value in _RELATIVE_NOTICE_DAYS:
+        sent_at = (message.forward_origin or message).date
+        sent_day = sent_at.astimezone(ZoneInfo(config.TIMEZONE)).date()
+        day = (sent_day + datetime.timedelta(days=_RELATIVE_NOTICE_DAYS[value])).isoformat()
+    else:
+        day = normalize_date_input(value)
+    replacements.validate_publication_date(day)
+
+    week = schedule.get_week_type(datetime.date.fromisoformat(day))
+    note = recognition.parse_header_note(text, week)
+    if note is None or len(re.findall(_SCHEDULE_REFERENCE, text, re.IGNORECASE)) != 1:
+        raise BotError("Не вдалося визначити заміну. Надішліть одну зміну у форматі «Завтра 4 пара за розкладом 1 пари вівторка».")
+    items = resolve_header_notes({"scheduleOverrides": [note]}, day, config.STUDENT_GROUP, [],
+                                 schedule.read_schedule(conn))
+    token = uuid.uuid4().hex[:8]
+    draft = ReplacementDraft(day, items, from_text=True)
+    _PENDING_RECOGNITIONS[token] = draft
+    preview, markup = render_main_preview(token, draft)
+    await message.answer(preview, reply_markup=markup)
+
+
 @router.message(_private_only, F.photo)
 async def handle_photo_replacement(message: Message, conn):
     if not admins.is_admin(conn, message.from_user.id):
@@ -334,7 +379,14 @@ async def confirm_recognition(callback: CallbackQuery, state: FSMContext, conn):
 
     reps = [dict(item, date=target_date, group_name=config.STUDENT_GROUP) for item in draft.items]
     with transaction(conn):
-        archived_count = replacements.archive_previous_replacements(conn, target_date, group_name=config.STUDENT_GROUP)
+        archived_count = 0
+        if draft.from_text:
+            for pair in {item["lesson_number"] for item in reps}:
+                conn.execute("""UPDATE replacements SET is_archived = TRUE
+                    WHERE date = ? AND group_name = ? AND lesson_number = ?""",
+                    (target_date, config.STUDENT_GROUP, pair))
+        else:
+            archived_count = replacements.archive_previous_replacements(conn, target_date, group_name=config.STUDENT_GROUP)
         saved_count = sum(replacements.save_replacement(conn, item, auto_archive_previous=False) for item in reps)
         admins.log_action(conn, callback.from_user.id, "save_replacements", f"count={saved_count}, date={target_date}, archived={archived_count}")
 

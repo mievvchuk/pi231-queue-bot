@@ -4,12 +4,14 @@ from aiogram.filters import Command, StateFilter
 from aiogram.fsm.state import State, StatesGroup
 
 from queue_bot.handlers import journal as journal_handlers
+from queue_bot.handlers import schedule as schedule_handlers
 from queue_bot.handlers.common import JOURNAL_TEXT, get_reply_menu, get_student_more_menu
 from queue_bot.services import admins, queues, users
 from queue_bot.services.errors import BotError
 
 router = Router()
 router.message.filter(F.chat.type == 'private')
+router.message(schedule_handlers.is_text_replacement)(schedule_handlers.handle_text_replacement)
 
 
 class AdminNavigation(StatesGroup):

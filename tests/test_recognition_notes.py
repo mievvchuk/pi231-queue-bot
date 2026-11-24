@@ -224,3 +224,73 @@ def test_source_note_migration_preserves_existing_replacements(tmp_path):
     conn = connect(path)
     assert replacements.get_replacements(conn, item['date'])[0]['source_note'] == 'Оголошення'
     conn.close()
+
+
+@pytest.mark.asyncio
+async def test_admin_forwards_text_replacement_for_review_and_students_are_ignored(conn, make_user, monkeypatch):
+    import asyncio
+    from datetime import datetime, timezone
+    from aiogram.fsm.storage.base import StorageKey
+    from aiogram.types import CallbackQuery, Chat, Message, MessageOriginChannel, Update, User
+    from queue_bot.handlers import schedule as handlers
+    from queue_bot.handlers.start import NameForm
+    from queue_bot.routing import create_dispatcher, ordered_routers
+    from queue_bot.services import updates
+
+    make_user(1, 'Петренко Іван')
+    make_user(100, 'Адмін Власник')
+    for router in ordered_routers():
+        router._parent_router = None
+    dispatcher = create_dispatcher(conn, [])
+    bot = AsyncMock()
+    bot.id = 5
+    monkeypatch.setattr(handlers, '_PENDING_RECOGNITIONS', {})
+    monkeypatch.setattr(replacements, 'get_today_key', lambda: '2026-11-25')
+    data = {
+        'tuesday': [
+            {'pair': 1, 'subject': 'КПЗ', 'teacher': 'Кондратюк', 'room': '231', 'week_type': 'denominator'},
+            {'pair': 1, 'subject': 'Інший предмет', 'week_type': 'numerator'},
+        ],
+        'wednesday': [{'pair': 4, 'subject': 'Стара пара'}],
+    }
+    monkeypatch.setattr(schedule, 'read_schedule', lambda _: data)
+    broadcast = AsyncMock()
+    monkeypatch.setattr(updates, 'broadcast_message_to_users', broadcast)
+    for day, pair, subject in [('2026-11-24', 1, 'Вчорашня'), ('2026-11-25', 2, 'Інша заміна'),
+                               ('2026-11-25', 4, 'Попередня заміна')]:
+        replacements.save_replacement(conn, {'date': day, 'lesson_number': pair, 'new_subject': subject},
+                                      auto_archive_previous=False)
+    source = MessageOriginChannel(date=datetime(2026, 11, 24, 18, tzinfo=timezone.utc),
+                                  chat=Chat(id=-1005, type='channel', title='Заміни ХПК'), message_id=17)
+    sent_at = datetime(2026, 11, 25, 8, tzinfo=timezone.utc)
+    text = 'Завтра 4 пари проводяться за розкладом 1 пари вівторка'
+
+    def notice(uid, body=text):
+        return Message(message_id=18, date=sent_at, chat=Chat(id=uid, type='private'), text=body,
+                       from_user=User(id=uid, is_bot=False, first_name='Тест'), forward_origin=source)
+
+    await dispatcher.storage.set_state(StorageKey(bot_id=5, chat_id=1, user_id=1), NameForm.registration)
+    await dispatcher.feed_update(bot, Update(update_id=1, message=notice(1)))
+    bot.assert_not_awaited()
+    assert not handlers._PENDING_RECOGNITIONS
+
+    await dispatcher.feed_update(bot, Update(update_id=2, message=notice(100, f'Завтра для КІ-231 {text[7:]}')))
+    bot.assert_not_awaited()
+    await dispatcher.feed_update(bot, Update(update_id=3, message=notice(100)))
+    preview = bot.call_args.args[0]
+    assert '25.11.2026' in preview.text and '4 пара</b> · КПЗ · Кондратюк · ауд. 231' in preview.text
+    assert [r['new_subject'] for r in replacements.get_replacements(conn, date='2026-11-25')] == [
+        'Інша заміна', 'Попередня заміна',
+    ]
+    broadcast.assert_not_awaited()
+
+    selected = preview.reply_markup.inline_keyboard[0][0]
+    callback = CallbackQuery(id='publish', from_user=User(id=100, is_bot=False, first_name='Адмін'),
+                             chat_instance='private', message=notice(100), data=selected.callback_data)
+    await dispatcher.feed_update(bot, Update(update_id=4, callback_query=callback))
+    await asyncio.sleep(0)
+    assert [r['new_subject'] for r in replacements.get_replacements(conn, date='2026-11-25')] == ['Інша заміна', 'КПЗ']
+    assert replacements.get_replacements(conn, date='2026-11-24')[0]['new_subject'] == 'Вчорашня'
+    day, _ = schedule.get_actual_schedule(conn, data, date(2026, 11, 25))
+    assert next(row for row in day if row['number'] == 4)['subject'] == 'КПЗ'
+    broadcast.assert_awaited_once()
