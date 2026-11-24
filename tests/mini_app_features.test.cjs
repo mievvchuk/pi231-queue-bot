@@ -650,3 +650,28 @@ for (const presentation of ['personal', 'table', 'cards']) {
     }
   });
 }
+
+test("deleting a queue requires confirmation and reloads the active list", async () => {
+  const writes = [];
+  const session = { id: 14, subject: "КПЗ", status: "open" };
+  const { features, S, panels } = setup(async (path, body) => {
+    if (body) {
+      writes.push(body);
+      return { message: "Чергу видалено з активного списку." };
+    }
+    return {
+      sessions: writes.length ? [] : [session],
+      entries: [],
+      session_id: path.includes("sid=14") ? 14 : null,
+    };
+  });
+  S.mode = "admin";
+  await features.open("admin-history", false, "?sid=14");
+  const remove = descendants(features.page("admin-history")).find(n => n.tag === "button" && n.textContent === "Видалити чергу");
+  remove.events.click();
+  assert.equal(writes.length, 0);
+  const form = descendants(panels[0]).find(n => n.tag === "form");
+  await form.events.submit({ preventDefault() {} });
+  assert.deepEqual(writes.map(body => [body.action, body.session_id]), [["delete", 14]]);
+  assert.doesNotMatch(features.page("admin-history").textContent, /КПЗ/);
+});

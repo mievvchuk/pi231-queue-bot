@@ -150,6 +150,8 @@
       "admin_paginate_active_queues",
       "admin_reports_removed",
       "admin_selected_queue_view",
+      "admin_ask_queue_deletion",
+      "admin_confirm_queue_deletion",
       "admin_click_add_students",
       "receive_student_names",
       "start_managing_students",

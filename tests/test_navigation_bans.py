@@ -293,3 +293,26 @@ async def test_admin_opens_one_queue_list_and_manages_the_selected_queue(conn, a
     await send(app, '🔙 Назад до черги')
     await send(app, '🔙 Назад')
     assert 'Активні черги' in app[1].call_args.args[0].text
+
+
+@pytest.mark.asyncio
+async def test_admin_can_cancel_or_confirm_deleting_the_selected_queue(conn, app):
+    sid = queues.create_session(conn, 100, 1, 1)
+    queues.join_queue(conn, 1, sid)
+    await send(app, '📋 Черги та студенти')
+    label = next(button.text for row in app[1].call_args.args[0].reply_markup.keyboard
+                 for button in row if button.text.startswith('📋 '))
+    await send(app, label)
+    await send(app, '🗑 Видалити чергу')
+    assert label[2:] in app[1].call_args.args[0].text
+    assert queues.get_session(conn, sid)['status'] == 'open'
+    await send(app, '🔙 Назад до черги')
+    await send(app, 'Підтвердити видалення черги')
+    assert queues.get_session(conn, sid)['status'] == 'open'
+
+    await send(app, '🗑 Видалити чергу')
+    await send(app, 'Підтвердити видалення черги', uid=1)
+    assert queues.get_session(conn, sid)['status'] == 'open'
+    await send(app, 'Підтвердити видалення черги')
+    assert queues.get_session(conn, sid)['status'] == 'archived'
+    assert 'Активних черг немає' in app[1].call_args.args[0].text

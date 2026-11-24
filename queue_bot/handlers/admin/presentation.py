@@ -33,6 +33,7 @@ def get_admin_queue_menu(is_open: bool) -> ReplyKeyboardMarkup:
     rows = [
         ["➕ Додати студентів", "🔢 Порядок черги"],
         ["👤 Режим студента", "🔄 Оновити"],
+        ["🗑 Видалити чергу"],
         ["🔙 Назад", "🔙 В адмін-панель"],
     ]
     return make_reply_keyboard(rows)

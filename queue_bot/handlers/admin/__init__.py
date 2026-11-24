@@ -11,7 +11,7 @@ from .users import admin_list_users_start, admin_paginate_users, admin_open_user
 from .settings import admin_category_settings
 from .settings import admin_back_to_main_panel, admins_menu, list_admins_message, ask_admin_id, receive_admin_id, choose_admin_to_remove, confirm_remove_admin_text, cancel_remove_admin, start_broadcast_flow, preview_broadcast_message, perform_broadcast, start_maintenance_prompt, process_maintenance_time_entry, disable_maintenance
 from .schedule import admin_category_schedule, admin_add_replacement_photo_hint, admin_working_saturday_btn, render_working_saturday_panel, admin_set_working_saturday_day, admin_pick_working_saturday_day, admin_parity_working_saturday, admin_set_parity_working_saturday, admin_cancel_working_saturday, admin_pairs_working_saturday, admin_set_pairs_working_saturday, admin_view_working_saturday_schedule, admin_other_working_saturdays, admin_goto_working_saturday, admin_back_working_saturday, admin_broadcast_working_saturday_prompt, admin_broadcast_working_saturday_send
-from .queues import admin_pick_active_queues, admin_paginate_active_queues, admin_selected_queue_view, admin_click_add_students, receive_student_names, start_managing_students, admin_paginate_students, select_student_from_list, back_to_students_list, back_to_queue_manager_from_any, student_move_up, student_move_down, student_ask_number, student_receive_number, student_ask_rename, student_receive_rename, student_toggle_block, student_mark_passed_by_admin, student_remove_by_admin
+from .queues import admin_ask_queue_deletion, admin_confirm_queue_deletion, admin_pick_active_queues, admin_paginate_active_queues, admin_selected_queue_view, admin_click_add_students, receive_student_names, start_managing_students, admin_paginate_students, select_student_from_list, back_to_students_list, back_to_queue_manager_from_any, student_move_up, student_move_down, student_ask_number, student_receive_number, student_ask_rename, student_receive_rename, student_toggle_block, student_mark_passed_by_admin, student_remove_by_admin
 
 router = Router()
 router.callback_query.filter(_is_admin_filter)
@@ -86,6 +86,8 @@ router.message(F.text.in_({'📊 Звіти та статистика', '📊 З
     '📥 Завантажити звіт (PDF)', '📥 Експорт зведеної таблиці (CSV)', '📚 Звіти за предметами',
     '📊 Звіти за предметами', '📊 Інший предмет'}), StateFilter('*'))(admin_reports_removed)
 router.message(AdminPanelState.select_queue_for_view, F.text.startswith('📋 '))(admin_selected_queue_view)
+router.message(F.text == '🗑 Видалити чергу', admin_state_filter)(admin_ask_queue_deletion)
+router.message(AdminPanelState.confirm_queue_deletion, F.text == 'Підтвердити видалення черги')(admin_confirm_queue_deletion)
 router.message(F.text == '➕ Додати студентів', StateFilter('*'))(admin_click_add_students)
 router.message(AdminPanelState.add_student_names, F.text)(receive_student_names)
 router.message(F.text.in_({'🔢 Порядок черги', '🔢 Керувати студентами'}), StateFilter('*'))(start_managing_students)

@@ -675,7 +675,7 @@ def _insert_session(conn, subject_id: int, teacher_id: int, lesson_title: str, q
 
 
 # Legacy storage compatibility for archived-data imports and historical fixtures.
-# Live Telegram/HTTP routes never expose signup toggles or session finalization.
+# Live Telegram/HTTP routes leave signup open until an administrator removes the queue.
 def set_signup_open(conn, actor_id: int, session_id: int, is_open: bool) -> None:
     with transaction(conn):
         require_admin(conn, actor_id)
@@ -813,6 +813,9 @@ def _validate_carry(conn, session_id: int, carry: dict[int, int]) -> dict[int, s
 
 
 def _archive(conn, session_id: int) -> None:
+    conn.execute("UPDATE lesson_runs SET active = 0 WHERE session_id = ? AND active = 1", (session_id,))
+    conn.execute("UPDATE swap_requests SET status = 'cancelled' WHERE session_id = ? AND status = 'pending'",
+                 (session_id,))
     # Невиконані записи лишаються в історії зі статусом removed
     conn.execute(
         "UPDATE queue_entries SET status = 'removed', position = NULL, "

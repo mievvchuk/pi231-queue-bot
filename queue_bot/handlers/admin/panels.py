@@ -104,6 +104,6 @@ async def admin_category_queues(message: Message, state: FSMContext, conn, subje
 
 async def permanent_queue_notice(message: Message, state: FSMContext, conn):
     admins.require_admin(conn, message.from_user.id)
-    await message.answer('Черги постійні: запис доступний завжди. Закриття, завершення та повторне створення прибрано.')
+    await message.answer('Щоб прибрати чергу з активного списку, відкрийте її картку й натисніть «Видалити чергу».')
     await admin_panel_open(message, state, conn)
 

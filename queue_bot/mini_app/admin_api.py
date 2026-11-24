@@ -182,8 +182,11 @@ async def manage(request):
     # direct invocation and future body readers that may yield.
     ctx, conn, uid = checked(request, owner)
     action = data.get('action')
+    if section == 'history' and action == 'delete':
+        queues.finish_session(conn, uid, api.integer(data.get('session_id')))
+        return response({'message': 'Чергу видалено з активного списку.'})
     if section == 'history' and action == 'finish':
-        raise BotError('Черги постійні. Завершення та повторне створення черги прибрано.')
+        raise BotError('Щоб прибрати чергу з активного списку, відкрийте її картку й натисніть «Видалити чергу».')
     if section == 'group':
         if action == 'add':
             users.admin_create_placeholder(conn, uid, text(data.get('full_name'), 61))

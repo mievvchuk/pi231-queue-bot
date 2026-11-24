@@ -370,3 +370,28 @@ async def test_admin_queue_list_excludes_closed_and_archived_without_deleting_re
         response = await admin_client.get(f'/api/miniapp/admin/manage/history?sid={sid}&mode=admin', headers=headers(100))
         assert response.status == 400
         assert queues.get_session(conn, sid) is not None
+
+
+@pytest.mark.asyncio
+async def test_admin_removes_queue_and_preserves_completed_history(admin_client, conn):
+    from queue_bot.services import attendance, swap_requests
+
+    sid = queues.create_session(conn, 100, 1, 1)
+    queues.join_queue(conn, 1, sid)
+    queues.join_queue(conn, 100, sid)
+    queues.join_queue(conn, 101, sid)
+    done, sender, target = queues.get_entries(conn, sid)
+    queues.mark_done(conn, 100, done['id'])
+    attendance.start(conn, 100, sid)
+    swap_requests.create(conn, 100, sender['id'], target['id'])
+    payload = {'action': 'delete', 'session_id': sid}
+    assert (await post(admin_client, 'history', payload, uid=1)).status == 403
+    assert (await post(admin_client, 'history', payload, uid=101)).status == 200
+
+    assert queues.get_session(conn, sid)['status'] == 'archived'
+    assert not queues.get_entries(conn, sid)
+    assert queues.get_history(conn, sid)[0]['status'] == 'completed'
+    assert attendance.active_run(conn, sid) is None
+    assert conn.execute('SELECT status FROM swap_requests WHERE session_id = ?', (sid,)).fetchone()['status'] == 'cancelled'
+    assert queues.create_session(conn, 100, 1, 1) != sid
+    assert (await post(admin_client, 'history', payload, uid=101)).status == 400

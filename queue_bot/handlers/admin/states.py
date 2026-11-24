@@ -12,7 +12,7 @@ class AdminPanelState(StatesGroup):
     select_queue_for_close = State()
     select_subject_for_report = State()
     add_student_names = State()
-    confirm_finish_queue = State()
+    confirm_queue_deletion = State()
 
 
 

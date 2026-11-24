@@ -65,6 +65,27 @@ async def admin_selected_queue_view(message: Message, state: FSMContext, conn, s
     await switch_admin(message, state, conn, subjects)
 
 
+async def admin_ask_queue_deletion(message: Message, state: FSMContext, conn, subjects):
+    from .presentation import get_open_session
+
+    session = get_open_session(conn, (await state.get_data()).get("session_id"))
+    await state.set_state(AdminPanelState.confirm_queue_deletion)
+    label = html.escape(queue_label(subjects, session))
+    await message.answer(
+        f"Видалити чергу <b>{label}</b>?\n\n"
+        "Активні записи буде знято. Історія здач залишиться в архіві.",
+        reply_markup=make_reply_keyboard([["Підтвердити видалення черги"], ["🔙 Назад до черги"]]),
+    )
+
+
+async def admin_confirm_queue_deletion(message: Message, state: FSMContext, conn, subjects):
+    sid = (await state.get_data()).get("session_id")
+    queues.finish_session(conn, message.from_user.id, sid)
+    await state.clear()
+    await message.answer("Чергу видалено з активного списку.")
+    await _show_active_queues(message, state, conn, subjects, 1)
+
+
 
 async def admin_click_add_students(message: Message, state: FSMContext, conn, subjects):
     from .presentation import get_open_session
