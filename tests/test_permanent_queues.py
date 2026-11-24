@@ -47,7 +47,7 @@ async def test_mode_buttons_are_on_main_screen_for_every_admin_and_create_is_ins
         assert {'⚡ Режим адміна','❓ Допомога','🐞 Повідомити про баг'} <= set(buttons)
         assert '➕ Створити чергу' not in buttons
         await send(app, 'Черги', uid=uid)
-        assert '➕ Створити чергу' in [b.text for r in app[1].call_args[0][0].reply_markup.keyboard for b in r]
+        assert '➕ Створити чергу' in [b.text for r in app[1].call_args[0][0].reply_markup.inline_keyboard for b in r]
     await send(app, '⚡ Режим адміна', uid=1)
     assert not str(await app[0].storage.get_state(StorageKey(bot_id=5,chat_id=1,user_id=1))).startswith('Admin')
 

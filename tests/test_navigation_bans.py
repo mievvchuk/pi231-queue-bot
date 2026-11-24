@@ -274,3 +274,22 @@ async def test_stale_unblock_card_never_installs_permanent_ban(conn, app, monkey
     monkeypatch.setattr(restrictions, 'utc_now', lambda: now + timedelta(days=2))
     await send(app, '🟢 Розблокувати')
     assert not users.get_user(conn, 1)['is_blocked']
+
+
+@pytest.mark.asyncio
+async def test_admin_opens_one_queue_list_and_manages_the_selected_queue(conn, app):
+    sid = queues.create_session(conn, 100, 1, 1)
+    queues.join_queue(conn, 1, sid)
+    await send(app, '📋 Черги та студенти')
+    keyboard = app[1].call_args.args[0].reply_markup.keyboard
+    labels = [button.text for row in keyboard for button in row]
+    assert '➕ Створити чергу' in labels
+    assert '📝 Додати студента' not in labels and '🔢 Змінити порядок' not in labels
+    await send(app, next(label for label in labels if label.startswith('📋 ')))
+    manager = [button.text for row in app[1].call_args_list[-2].args[0].reply_markup.keyboard for button in row]
+    assert {'➕ Додати студентів', '🔢 Порядок черги'} <= set(manager)
+    await send(app, '🔢 Порядок черги')
+    assert 'Оберіть студента' in app[1].call_args.args[0].text
+    await send(app, '🔙 Назад до черги')
+    await send(app, '🔙 Назад')
+    assert 'Активні черги' in app[1].call_args.args[0].text

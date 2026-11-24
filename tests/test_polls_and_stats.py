@@ -164,12 +164,9 @@ def test_new_grouped_keyboards(conn):
     student_kb = get_reply_menu(conn, 999)
     student_texts = [btn.text for row in student_kb.keyboard for btn in row]
     assert student_texts == ['Черги', '📅 Розклад', 'Електронний журнал', '❓ Допомога', '🐞 Повідомити про баг']
-    from queue_bot.handlers.common import get_student_more_menu, get_student_queues_menu
-    queue_texts = [b.text for r in get_student_queues_menu().keyboard for b in r]
-    assert '👥 Мої черги' in queue_texts and '📋 Усі черги' in queue_texts
+    from queue_bot.handlers.common import get_student_more_menu
     more_texts = [b.text for r in get_student_more_menu(conn, 999).keyboard for b in r]
     assert {'❓ Допомога', '🐞 Повідомити про баг'} <= set(more_texts)
-    assert '➕ Створити чергу' in queue_texts
     assert '⚡ Адмін-панель' not in more_texts
     assert '⚡ Режим адміна' in [b.text for r in get_reply_menu(conn, 100).keyboard for b in r]
     # Адмінські функції (опитування, заміни) не повинні бути в меню студента:

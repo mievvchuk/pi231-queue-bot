@@ -14,7 +14,6 @@ from .common import (
     format_queue,
     get_admin_queues_menu,
     get_admin_reply_menu,
-    get_admin_students_menu,
     get_paginated_reply_keyboard,
     html,
     make_reply_keyboard,
@@ -27,100 +26,33 @@ from .common import (
 )
 
 
-async def admin_pick_active_queues(message: Message, state: FSMContext, conn, subjects):
-    await state.clear()
+async def _show_active_queues(message, state, conn, subjects, page):
     sessions = queues.list_sessions(conn, ("open", "closed"))
+    await state.set_state(AdminPanelState.select_queue_for_view)
     if not sessions:
+        await state.update_data(page=1, ui_mode='admin')
         await message.answer("Активних черг немає.", reply_markup=get_admin_queues_menu())
         return
-    await state.set_state(AdminPanelState.select_queue_for_view)
-    await state.update_data(page=1)
-    page_sessions, cur_page, total_pages = paginate(sessions, 1, per_page=8)
-    rows = [[f"📋 {queue_label(subjects, s)}"] for s in page_sessions]
-    markup = get_paginated_reply_keyboard(rows, cur_page, total_pages, back_text="🔙 Назад")
-    text = "👀 Оберіть чергу для перегляду та керування 👇"
+    page = max(1, min(page, (len(sessions) + 7) // 8))
+    await state.update_data(page=page, ui_mode='admin')
+    page_sessions, cur_page, total_pages = paginate(sessions, page, per_page=8)
+    rows = [[f"📋 {queue_label(subjects, session)}"] for session in page_sessions]
+    rows.append(["➕ Створити чергу", "📚 Предмети та викладачі"])
+    markup = get_paginated_reply_keyboard(rows, cur_page, total_pages, back_text="🔙 В адмін-панель")
+    text = "📋 <b>Активні черги</b>\nОберіть чергу для керування."
     if summaries := format_queue_list_pair_plans(conn, page_sessions, subjects):
         text += "\n" + summaries
     await message.answer(text, reply_markup=markup)
 
+
+async def admin_pick_active_queues(message: Message, state: FSMContext, conn, subjects):
+    await state.clear()
+    await _show_active_queues(message, state, conn, subjects, 1)
 
 
 async def admin_paginate_active_queues(message: Message, state: FSMContext, conn, subjects):
-    sessions = queues.list_sessions(conn, ("open", "closed"))
-    data = await state.get_data()
-    page = data.get("page", 1)
-    page = (page - 1) if message.text == "⬅️" else (page + 1)
-    await state.update_data(page=page)
-    page_sessions, cur_page, total_pages = paginate(sessions, page, per_page=8)
-    rows = [[f"📋 {queue_label(subjects, s)}"] for s in page_sessions]
-    markup = get_paginated_reply_keyboard(rows, cur_page, total_pages, back_text="🔙 Назад")
-    text = "Оберіть чергу на кнопках внизу 👇"
-    if summaries := format_queue_list_pair_plans(conn, page_sessions, subjects):
-        text += "\n" + summaries
-    await message.answer(text, reply_markup=markup)
-
-
-
-async def admin_pick_add_student(message: Message, state: FSMContext, conn, subjects):
-    await state.clear()
-    sessions = queues.list_sessions(conn, ("open", "closed"))
-    if not sessions:
-        await message.answer("Активних черг немає.", reply_markup=get_admin_students_menu())
-        return
-    await state.set_state(AdminPanelState.select_queue_for_add_student)
-    await state.update_data(page=1)
-    page_sessions, cur_page, total_pages = paginate(sessions, 1, per_page=8)
-    rows = [[f"📋 {queue_label(subjects, s)}"] for s in page_sessions]
-    markup = get_paginated_reply_keyboard(rows, cur_page, total_pages, back_text="🔙 Назад")
-    await message.answer("📝 Оберіть чергу, в яку додати студентів 👇", reply_markup=markup)
-
-
-
-async def admin_paginate_add_student_queues(message: Message, state: FSMContext, conn, subjects):
-    sessions = queues.list_sessions(conn, ("open", "closed"))
-    data = await state.get_data()
-    page = data.get("page", 1)
-    page = (page - 1) if message.text == "⬅️" else (page + 1)
-    await state.update_data(page=page)
-    page_sessions, cur_page, total_pages = paginate(sessions, page, per_page=8)
-    rows = [[f"📋 {queue_label(subjects, s)}"] for s in page_sessions]
-    markup = get_paginated_reply_keyboard(rows, cur_page, total_pages, back_text="🔙 Назад")
-    await message.answer("Оберіть чергу на кнопках внизу 👇", reply_markup=markup)
-
-
-
-async def admin_pick_order_queue(message: Message, state: FSMContext, conn, subjects):
-    await state.clear()
-    sessions = queues.list_sessions(conn, ("open", "closed"))
-    if not sessions:
-        await message.answer("Активних черг немає.", reply_markup=get_admin_students_menu())
-        return
-    await state.set_state(AdminPanelState.select_queue_for_order)
-    await state.update_data(page=1)
-    page_sessions, cur_page, total_pages = paginate(sessions, 1, per_page=8)
-    rows = [[f"📋 {queue_label(subjects, s)}"] for s in page_sessions]
-    markup = get_paginated_reply_keyboard(rows, cur_page, total_pages, back_text="🔙 Назад")
-    await message.answer("🔢 Оберіть чергу для керування студентами 👇", reply_markup=markup)
-
-
-
-async def admin_paginate_order_queues(message: Message, state: FSMContext, conn, subjects):
-    sessions = queues.list_sessions(conn, ("open", "closed"))
-    data = await state.get_data()
-    page = data.get("page", 1)
-    page = (page - 1) if message.text == "⬅️" else (page + 1)
-    await state.update_data(page=page)
-    page_sessions, cur_page, total_pages = paginate(sessions, page, per_page=8)
-    rows = [[f"📋 {queue_label(subjects, s)}"] for s in page_sessions]
-    markup = get_paginated_reply_keyboard(rows, cur_page, total_pages, back_text="🔙 Назад")
-    await message.answer("Оберіть чергу на кнопках внизу 👇", reply_markup=markup)
-
-
-
-
-
-
-
+    page = (await state.get_data()).get("page", 1)
+    await _show_active_queues(message, state, conn, subjects, page + (-1 if message.text == "⬅️" else 1))
 
 
 async def admin_selected_queue_view(message: Message, state: FSMContext, conn, subjects):
@@ -131,38 +63,6 @@ async def admin_selected_queue_view(message: Message, state: FSMContext, conn, s
     await state.update_data(session_id=session["id"])
     from queue_bot.handlers.navigation import switch_admin
     await switch_admin(message, state, conn, subjects)
-
-
-
-async def admin_selected_queue_add_student(message: Message, state: FSMContext, conn, subjects):
-    session = find_session_by_label(conn, subjects, message.text)
-    if not session:
-        await message.answer("⚠️ Чергу не знайдено. Оберіть зі списку на кнопках внизу 👇")
-        return
-    await state.set_state(AdminPanelState.add_student_names)
-    await state.update_data(session_id=session["id"])
-    await message.answer(
-        f"📝 <b>Додавання студентів:</b>\n"
-        f"{html.escape(queue_label(subjects, session))}\n\n"
-        "Надішліть ПІБ студента або список (кожне з нового рядка).\n"
-        "Можна вказувати номер (наприклад: <code>3. Петренко Іван</code>).",
-        reply_markup=make_reply_keyboard([["🔙 Назад до черги"], ["🔙 Назад"]]),
-    )
-
-
-
-async def admin_selected_queue_order(message: Message, state: FSMContext, conn, subjects):
-    from .presentation import open_admin_student_list
-    session = find_session_by_label(conn, subjects, message.text)
-    if not session:
-        await message.answer("⚠️ Чергу не знайдено. Оберіть зі списку на кнопках внизу 👇")
-        return
-    await state.set_state(AdminOrderState.picking_student)
-    await state.update_data(session_id=session["id"], students_page=1)
-    await open_admin_student_list(message, conn, subjects, session["id"], page=1)
-
-
-
 
 
 

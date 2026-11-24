@@ -18,9 +18,9 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMar
 from queue_bot import config
 from queue_bot.handlers.common import (
     get_reply_menu,
-    get_schedule_reply_menu,
     make_keyboard,
     make_reply_keyboard,
+    show,
 )
 from queue_bot.services import admins, recognition, replacements, schedule, working_days
 from queue_bot.services.errors import BotError
@@ -49,56 +49,113 @@ class EditReplacementState(StatesGroup):
 _private_only = F.chat.type == "private"
 
 
+def _schedule_keyboard(active, *, days=(), private=True):
+    tabs = [('today', 'Сьогодні'), ('tomorrow', 'Завтра'), ('week', 'Тиждень')]
+    rows = [[((f"✓ {label}" if active == key else label), f"sched_view:{key}") for key, label in tabs]]
+    if days:
+        buttons = [(f"{label} {day:%d.%m}", f"sched_view:day:{day.isoformat()}")
+                   for day, label in zip(days, ("Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Нд"))]
+        rows.extend([buttons[:4], buttons[4:]])
+    if private:
+        rows.append([("Заміни", "sched_view:replacements"), ("Залишок пар", "sched_view:remaining")])
+    return make_keyboard(rows)
+
+
+def _weekly_schedule(conn, today, *, private):
+    monday = today - datetime.timedelta(days=today.weekday())
+    days = [monday + datetime.timedelta(days=i) for i in range(7)]
+    data = schedule.read_schedule(conn)
+    lines = [f"🗓 <b>Тиждень {days[0]:%d.%m}–{days[-1]:%d.%m}</b>"]
+    for day in days:
+        lessons, changes = schedule.get_actual_schedule(conn, data, day, config.STUDENT_GROUP)
+        summary = ", ".join(dict.fromkeys(lesson["subject"] for lesson in lessons))
+        if len(summary) > 160:
+            summary = summary[:157] + "…"
+        suffix = " · є заміни" if changes else ""
+        lines.append(f"\n<b>{schedule.DAY_NAMES_UK[schedule.DAY_KEYS[day.weekday()]]} {day:%d.%m}</b>{suffix}\n"
+                     f"{html.escape(summary) if summary else 'Занять немає'}")
+    return "\n".join(lines), _schedule_keyboard("week", days=days, private=private)
+
+
+def _daily_schedule(conn, day, *, active=None, private=True, heading=""):
+    text = schedule.format_schedule_for_date(conn, schedule.read_schedule(conn), day, config.STUDENT_GROUP)
+    return heading + text, _schedule_keyboard(active, private=private)
+
+
 @router.message(_private_only, F.text == "📅 Розклад", StateFilter("*"))
 async def open_schedule_menu(message: Message, state: FSMContext, conn):
     await state.clear()
-    sch_data = schedule.read_schedule(conn)
     now = datetime.datetime.now(ZoneInfo(config.TIMEZONE))
-
-    if now.hour >= 15:
-        target_dt = working_days.get_next_working_day(conn, now.date())
-        period = "на завтра" if target_dt == now.date() + datetime.timedelta(days=1) else "на наступний навчальний день"
-        date_heading = f"{period} ({target_dt.strftime('%d.%m.%Y')})"
+    today = now.date()
+    target = today if now.hour < 15 else working_days.get_next_working_day(conn, today)
+    if target == today:
+        active, label = "today", "на сьогодні"
+    elif target == today + datetime.timedelta(days=1):
+        active, label = "tomorrow", "на завтра"
     else:
-        target_dt = schedule.get_current_date()
-        date_heading = f"на сьогодні ({target_dt.strftime('%d.%m.%Y')})"
-
-    schedule_text = schedule.format_schedule_for_date(conn, sch_data, target_dt, config.STUDENT_GROUP)
-
-    await message.answer(
-        f"📅 <b>Розклад занять {date_heading}:</b>\n\n"
-        f"{schedule_text}\n\n"
-        "Оберіть потрібний період або дію в меню нижче 👇",
-        reply_markup=get_schedule_reply_menu(),
-    )
+        active, label = None, "на наступний навчальний день"
+    text, markup = _daily_schedule(conn, target, active=active,
+                                   heading=f"<b>Розклад {label}</b>\n\n")
+    await message.answer(text, reply_markup=markup)
 
 
 @router.message(_private_only, F.text == "📅 Сьогодні", StateFilter("*"))
 @router.message(Command("today"), StateFilter("*"))
 async def show_today_schedule(message: Message, conn):
-    sch_data = schedule.read_schedule(conn)
-    today_dt = schedule.get_current_date()
-    text = schedule.format_schedule_for_date(conn, sch_data, today_dt, config.STUDENT_GROUP)
-    await message.answer(text)
+    text, markup = _daily_schedule(conn, schedule.get_current_date(), active="today", private=message.chat.type == "private")
+    await message.answer(text, reply_markup=markup)
 
 
 @router.message(_private_only, F.text == "➡️ Завтра", StateFilter("*"))
 @router.message(Command("tomorrow"), StateFilter("*"))
 async def show_tomorrow_schedule(message: Message, conn):
-    sch_data = schedule.read_schedule(conn)
-    tomorrow_dt = schedule.get_tomorrow_date()
-    text = schedule.format_schedule_for_date(conn, sch_data, tomorrow_dt, config.STUDENT_GROUP)
-    await message.answer(text)
+    text, markup = _daily_schedule(conn, schedule.get_tomorrow_date(), active="tomorrow", private=message.chat.type == "private")
+    await message.answer(text, reply_markup=markup)
 
 
 @router.message(_private_only, F.text == "🗓 Весь тиждень", StateFilter("*"))
 @router.message(Command("week"), StateFilter("*"))
 async def show_week_schedule(message: Message, conn):
-    sch_data = schedule.read_schedule(conn)
-    today_dt = schedule.get_current_date()
-    days = schedule.format_week_schedule(conn, sch_data, today_dt, config.STUDENT_GROUP)
-    for day_text in days:
-        await message.answer(day_text)
+    text, markup = _weekly_schedule(conn, schedule.get_current_date(), private=message.chat.type == "private")
+    await message.answer(text, reply_markup=markup)
+
+
+@router.callback_query(F.data.startswith("sched_view:"))
+async def switch_schedule_view(callback: CallbackQuery, conn, subjects):
+    _, action, *parts = callback.data.split(":")
+    private = callback.message.chat.type == "private"
+    if action in ("replacements", "remaining"):
+        if not private:
+            await callback.answer()
+            return
+        await callback.answer()
+        if action == "replacements":
+            await show_replacements(callback.message, conn, viewer_id=callback.from_user.id)
+        else:
+            await show_remaining_pairs(callback.message, conn, subjects)
+        return
+
+    today = schedule.get_current_date()
+    if action == "week":
+        text, markup = _weekly_schedule(conn, today, private=private)
+    else:
+        if action == "day" and parts:
+            try:
+                day = datetime.date.fromisoformat(parts[0])
+            except ValueError:
+                await callback.answer("Некоректна дата.", show_alert=True)
+                return
+        elif action == "today":
+            day = today
+        elif action == "tomorrow":
+            day = today + datetime.timedelta(days=1)
+        else:
+            await callback.answer("Оберіть день ще раз.", show_alert=True)
+            return
+        active = "today" if day == today else "tomorrow" if day == today + datetime.timedelta(days=1) else None
+        text, markup = _daily_schedule(conn, day, active=active, private=private)
+    await callback.answer()
+    await show(callback, text, markup)
 
 
 @router.message(_private_only, F.text == "📚 Пари до кінця семестру", StateFilter("*"))
@@ -146,11 +203,11 @@ async def show_base_schedule(message: Message, conn):
 
 @router.message(_private_only, F.text.in_({"🔄 Заміни", "🔄 Активні заміни"}), StateFilter("*"))
 @router.message(Command("replacements"), StateFilter("*"))
-async def show_replacements(message: Message, conn):
+async def show_replacements(message: Message, conn, *, viewer_id=None):
     from queue_bot.services.channel_import import confirmed_results, approval_keyboard, format_no_replacements
     results = [r for r in confirmed_results(conn) if r['date'] >= replacements.get_today_key()]
     markup = None
-    if results and message.chat.type == 'private' and message.from_user.id == config.OWNER_ID:
+    if results and message.chat.type == 'private' and (viewer_id or message.from_user.id) == config.OWNER_ID:
         markup = approval_keyboard(results[0]['post_id'], confirmed=True)
     items = replacements.get_replacements(conn, group_name=config.STUDENT_GROUP)
     lines = [f"🔄 <b>Актуальні заміни для групи {html.escape(config.STUDENT_GROUP)}:</b>\n"]

@@ -107,7 +107,7 @@ async def open_queue_screen(message: Message, conn, subjects, session_id: int, n
     in_queue = queues.get_user_position(conn, uid, session_id) is not None
     origin = queue_navigation.return_to(conn, uid, session_id)
     markup = get_queue_view_reply_menu(is_admin=is_adm,
-        back_text='🔙 До моїх черг' if origin['source'] == 'my' else '🔙 До черг',
+        back_text='🔙 До моїх черг' if origin['source'] in ('my', 'search_my') else '🔙 До черг',
         can_edit_labs=in_queue and session['status'] != 'archived' and bool(lab_catalog.labs_for_session(session)))
     from queue_bot.handlers import queue_messages
     controls = screen_keyboard(conn, session_id, uid)
@@ -154,19 +154,7 @@ async def student_queue_button_filter(message: Message, state: FSMContext) -> bo
 @router.message(F.text.in_({"📋 Усі черги", "🔍 Переглянути черги", "📋 Стати в чергу"}), StateFilter("*"))
 async def view_all_queues(message: Message, state: FSMContext, conn, subjects):
     await state.clear()
-    sessions = queues.list_sessions(conn, ("open", "closed"))
-    if not sessions:
-        await message.answer(
-            "Активних черг зараз немає.",
-            reply_markup=get_reply_menu(conn, message.from_user.id),
-        )
-        return
-    await state.set_state(StudentFlow.browsing_queues)
-    await state.update_data(category=None, page=1)
-    await state.update_data(queue_search=True, query='')
-    await message.answer(
-        'Пошук черги\nНапишіть назву предмета, її частину або скорочення, наприклад КПЗ. Можна також шукати за викладачем. Або натисніть «Показати всі черги».',
-        reply_markup=make_reply_keyboard([['Показати всі черги'], ['🏠 Головне меню']]))
+    await show_queue_search(message, state, conn, subjects)
 
 
 def search_sessions(sessions, subjects, query):
@@ -183,15 +171,21 @@ def search_sessions(sessions, subjects, query):
     return sorted(result, key=lambda item: queue_label(subjects, item).casefold())
 
 
-async def show_queue_search(message, state, conn, subjects, query='', page=1):
-    sessions = search_sessions(queues.list_sessions(conn, ('open', 'closed')), subjects, query)
+async def show_queue_search(message, state, conn, subjects, query='', page=1, *, scope='all', callback=None):
+    uid = callback.from_user.id if callback else message.from_user.id
+    available = queues.list_user_sessions(conn, uid) if scope == 'mine' else queues.list_sessions(conn, ('open', 'closed'))
+    sessions = search_sessions(available, subjects, query)
     pages = max(1, (len(sessions) + 4) // 5)
     page = max(1, min(page, pages))
     await state.set_state(StudentFlow.browsing_queues)
-    await state.update_data(queue_search=True, query=query, page=page)
+    await state.update_data(queue_search=True, query=query, page=page, queue_scope=scope, ui_mode='student')
     page_sessions = sessions[(page-1)*5:page*5]
-    rows = [[InlineKeyboardButton(text=queue_label(subjects, item), callback_data=f'findq:{item["id"]}')]
-            for item in page_sessions]
+    rows = []
+    for item in page_sessions:
+        label = queue_label(subjects, item)
+        if scope == 'mine' and (position := queues.get_user_position(conn, uid, item['id'])):
+            label = f'№{position} · {label}'
+        rows.append([InlineKeyboardButton(text=label, callback_data=f'findq:{item["id"]}')])
     nav = []
     if page > 1:
         nav.append(InlineKeyboardButton(text='Попередні', callback_data=f'findpage:{page-1}'))
@@ -199,26 +193,48 @@ async def show_queue_search(message, state, conn, subjects, query='', page=1):
         nav.append(InlineKeyboardButton(text='Наступні', callback_data=f'findpage:{page+1}'))
     if nav:
         rows.append(nav)
-    title = ('Пошук: ' + html.escape(query)) if query else 'Усі черги'
-    text = f'{title}\nЗнайдено: {len(sessions)}. Сторінка {page} із {pages}.\nОберіть чергу під цим повідомленням або напишіть інший запит.' if sessions else 'Нічого не знайдено. Спробуйте частину назви предмета або прізвище викладача.'
-    if summaries := format_queue_list_pair_plans(conn, page_sessions, subjects):
-        text += "\n" + summaries
-    await message.answer(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=rows) if rows else None)
+    rows.append([InlineKeyboardButton(text=('✓ ' if scope == key else '') + label, callback_data=f'findscope:{key}')
+                 for key, label in (('mine', 'Мої'), ('all', 'Усі'))])
+    rows.append([InlineKeyboardButton(text='➕ Створити чергу', callback_data='findnew')])
+    title = 'Мої черги' if scope == 'mine' else 'Усі черги'
+    lines = [f'<b>{title}</b>']
+    if query:
+        lines.append(f'Пошук · {html.escape(query)}')
+    if sessions:
+        if pages > 1:
+            lines.append(f'Сторінка {page} із {pages}')
+        if summaries := format_queue_list_pair_plans(conn, page_sessions, subjects):
+            lines.append(summaries)
+    elif query:
+        lines.append('Нічого не знайдено.')
+    else:
+        lines.append('Ви ще не записані в жодну чергу.' if scope == 'mine' else 'Активних черг зараз немає.')
+    lines.append('Напишіть назву предмета, скорочення або прізвище викладача для пошуку.')
+    markup = InlineKeyboardMarkup(inline_keyboard=rows)
+    text = '\n'.join(lines)
+    if callback:
+        await show(callback, text, markup)
+    else:
+        await message.answer(text, reply_markup=markup)
 
 
+@router.callback_query(F.message.chat.type == 'private', F.data.in_({'findscope:mine', 'findscope:all', 'findnew'}))
 @router.callback_query(F.data.startswith('findpage:'))
 async def queue_search_page(callback, state, conn, subjects):
     data = await state.get_data()
     if not data.get('queue_search'):
-        await callback.answer('Відкрийте пошук черг знову.', show_alert=True)
-        return
-    try:
-        page = int(callback.data.split(':')[1])
-    except ValueError:
-        await callback.answer('Невідома сторінка.', show_alert=True)
+        await callback.answer('Відкрийте список черг знову.', show_alert=True)
         return
     await callback.answer()
-    await show_queue_search(callback.message, state, conn, subjects, data.get('query', ''), page)
+    if callback.data == 'findnew':
+        await start_open_queue(callback.message, state, conn, subjects)
+        return
+    action, value = callback.data.split(':', 1)
+    if action == 'findscope':
+        await show_queue_search(callback.message, state, conn, subjects, scope=value, callback=callback)
+    elif value.isdigit():
+        await show_queue_search(callback.message, state, conn, subjects, data.get('query', ''), int(value),
+                                scope=data.get('queue_scope', 'all'), callback=callback)
 
 
 @router.callback_query(F.data.startswith('findq:'))
@@ -233,7 +249,8 @@ async def queue_search_select(callback, state, conn, subjects):
         await callback.answer('Ця черга більше недоступна.', show_alert=True)
         return
     data = await state.get_data()
-    queue_navigation.remember(conn, callback.from_user.id, sid, 'search', data.get('page', 1), query=data.get('query', ''))
+    scope = 'search_my' if data.get('queue_scope') == 'mine' else 'search'
+    queue_navigation.remember(conn, callback.from_user.id, sid, scope, data.get('page', 1), query=data.get('query', ''))
     await state.clear()
     await state.update_data(session_id=sid)
     await callback.answer()
@@ -355,7 +372,8 @@ async def paginate_my_queues(message: Message, state: FSMContext, conn, subjects
 async def refresh_all_queues_list(message: Message, state: FSMContext, conn, subjects):
     data = await state.get_data()
     if data.get('queue_search'):
-        await show_queue_search(message, state, conn, subjects, data.get('query', ''), data.get('page', 1))
+        await show_queue_search(message, state, conn, subjects, data.get('query', ''), data.get('page', 1),
+                                scope=data.get('queue_scope', 'all'))
         return
     category = data.get("category")
     sessions = queues.list_sessions(conn, ("open", "closed"))
@@ -481,12 +499,13 @@ async def refresh_coursework_queues_list(message: Message, state: FSMContext, co
 async def back_to_queues_list(message: Message, state: FSMContext, conn, subjects):
     sid = (await state.get_data()).get('session_id')
     origin = queue_navigation.return_to(conn, message.from_user.id, sid) if sid else {}
+    if origin.get('source') in ('search', 'search_my'):
+        await state.clear()
+        await show_queue_search(message, state, conn, subjects, origin.get('query', ''), origin.get('page', 1),
+                                scope='mine' if origin['source'] == 'search_my' else 'all')
+        return
     if message.text == '🔙 До моїх черг' or (message.text != '🔙 До категорій' and origin.get('source') == 'my'):
         await my_queues(message, state, conn, subjects, page=origin.get('page', 1))
-        return
-    if origin.get('source') == 'search':
-        await view_all_queues(message, state, conn, subjects)
-        await show_queue_search(message, state, conn, subjects, origin.get('query', ''), origin.get('page', 1))
         return
     await view_all_queues(message, state, conn, subjects)
 
@@ -521,7 +540,8 @@ async def queue_search_text_filter(message, state):
 @router.message(StudentFlow.browsing_queues, queue_search_text_filter)
 async def queue_search_text(message, state, conn, subjects):
     query = '' if message.text == 'Показати всі черги' else message.text.strip()[:256]
-    await show_queue_search(message, state, conn, subjects, query)
+    data = await state.get_data()
+    await show_queue_search(message, state, conn, subjects, query, scope=data.get("queue_scope", "all"))
 
 
 # ---------- Дії всередині черги ----------

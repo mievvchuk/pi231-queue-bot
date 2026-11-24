@@ -3,7 +3,7 @@ from .common import F, Router, StateFilter
 from .states import AdminPanelState, AdminUserState, AdminSubjectsState, AdminOrderState, AdminManageState
 from .guards import AdminOnly, _is_admin_filter, admin_state_filter
 from .presentation import get_open_session, get_admin_queue_menu, get_admin_student_menu, open_admin_queue_manager, open_admin_student_list, open_admin_student_manager, format_user_card, show_users_list
-from .panels import admin_quick_manage_from_student_view, admin_switch_to_student_queue_view, admin_panel_open, admin_more_panel, admin_reports_removed, permanent_queue_notice, admin_category_queues, admin_category_students
+from .panels import admin_quick_manage_from_student_view, admin_switch_to_student_queue_view, admin_panel_open, admin_more_panel, admin_reports_removed, permanent_queue_notice, admin_category_queues
 from .subjects import admin_view_subjects_menu, admin_add_teacher_start, admin_add_teacher_subject_picked, admin_add_teacher_name_received, admin_add_new_subject_start, admin_add_new_subject_name_received, admin_add_new_subject_teacher_received, admin_rename_subject_start, admin_rename_subject_picked, admin_rename_subject_name_received, admin_remove_teacher_start, admin_remove_teacher_subject_picked, admin_remove_teacher_confirmed, admin_delete_subject_start, admin_delete_subject_picked, admin_delete_subject_confirmed
 from .subjects import admin_pick_pair_plan, admin_pair_plan_subject_selected, admin_save_pair_plan
 from .users import admin_category_users
@@ -11,7 +11,7 @@ from .users import admin_list_users_start, admin_paginate_users, admin_open_user
 from .settings import admin_category_settings
 from .settings import admin_back_to_main_panel, admins_menu, list_admins_message, ask_admin_id, receive_admin_id, choose_admin_to_remove, confirm_remove_admin_text, cancel_remove_admin, start_broadcast_flow, preview_broadcast_message, perform_broadcast, start_maintenance_prompt, process_maintenance_time_entry, disable_maintenance
 from .schedule import admin_category_schedule, admin_add_replacement_photo_hint, admin_working_saturday_btn, render_working_saturday_panel, admin_set_working_saturday_day, admin_pick_working_saturday_day, admin_parity_working_saturday, admin_set_parity_working_saturday, admin_cancel_working_saturday, admin_pairs_working_saturday, admin_set_pairs_working_saturday, admin_view_working_saturday_schedule, admin_other_working_saturdays, admin_goto_working_saturday, admin_back_working_saturday, admin_broadcast_working_saturday_prompt, admin_broadcast_working_saturday_send
-from .queues import admin_pick_active_queues, admin_paginate_active_queues, admin_pick_add_student, admin_paginate_add_student_queues, admin_pick_order_queue, admin_paginate_order_queues, admin_selected_queue_view, admin_selected_queue_add_student, admin_selected_queue_order, admin_click_add_students, receive_student_names, start_managing_students, admin_paginate_students, select_student_from_list, back_to_students_list, back_to_queue_manager_from_any, student_move_up, student_move_down, student_ask_number, student_receive_number, student_ask_rename, student_receive_rename, student_toggle_block, student_mark_passed_by_admin, student_remove_by_admin
+from .queues import admin_pick_active_queues, admin_paginate_active_queues, admin_selected_queue_view, admin_click_add_students, receive_student_names, start_managing_students, admin_paginate_students, select_student_from_list, back_to_students_list, back_to_queue_manager_from_any, student_move_up, student_move_down, student_ask_number, student_receive_number, student_ask_rename, student_receive_rename, student_toggle_block, student_mark_passed_by_admin, student_remove_by_admin
 
 router = Router()
 router.callback_query.filter(_is_admin_filter)
@@ -47,7 +47,7 @@ router.message(F.text == '🗑 Видалити предмет', StateFilter('*'
 router.message(AdminSubjectsState.select_subject_to_delete, F.text.startswith('🗑 '))(admin_delete_subject_picked)
 router.message(AdminSubjectsState.confirming_delete_subject, F.text == '⚠️ Підтвердити видалення')(admin_delete_subject_confirmed)
 router.message(F.text == '📅 Розклад і заміни', StateFilter('*'))(admin_category_schedule)
-router.message(F.text == '📸 Додати заміни (фото)', StateFilter('*'))(admin_add_replacement_photo_hint)
+router.message(F.text.in_({'📸 Заміни з фото', '📸 Додати заміни (фото)'}), StateFilter('*'))(admin_add_replacement_photo_hint)
 router.message(F.text == '🏢 Робоча субота', StateFilter('*'))(admin_working_saturday_btn)
 router.callback_query(F.data.startswith('ws_set:'))(admin_set_working_saturday_day)
 router.callback_query(F.data.startswith('ws_pick:'))(admin_pick_working_saturday_day)
@@ -78,23 +78,17 @@ router.message(F.text.in_({'⛔ Заблокувати', '🟢 Розблоку�
 router.message(F.text == '🗑 Видалити', AdminUserState.viewing_card)(admin_ask_delete_user)
 router.message(AdminUserState.confirming_delete, F.text)(admin_confirm_delete_user)
 router.message(F.text == '⚙️ Налаштування', StateFilter('*'))(admin_category_settings)
-router.message(F.text.in_({'🔙 Назад', '🔙 В адмін-панель'}), StateFilter(AdminPanelState.in_main_menu, AdminPanelState.in_queues_menu, AdminPanelState.in_students_menu, AdminPanelState.in_reports_menu, AdminPanelState.in_settings_menu, AdminPanelState.in_schedule_menu, AdminUserState.in_users_menu, AdminUserState.browsing_users, AdminPanelState.select_queue_for_view, AdminPanelState.select_queue_for_add_student, AdminPanelState.select_queue_for_order, AdminPanelState.select_queue_for_close, AdminPanelState.select_subject_for_report))(admin_back_to_main_panel)
-router.message(F.text == '👀 Активні черги', StateFilter('*'))(admin_pick_active_queues)
+router.message(F.text.in_({'🔙 Назад', '🔙 В адмін-панель'}), StateFilter(AdminPanelState.in_main_menu, AdminPanelState.in_queues_menu, AdminPanelState.in_students_menu, AdminPanelState.in_reports_menu, AdminPanelState.in_settings_menu, AdminPanelState.in_schedule_menu, AdminUserState.in_users_menu, AdminUserState.browsing_users, AdminPanelState.select_queue_for_view, AdminPanelState.select_queue_for_close, AdminPanelState.select_subject_for_report))(admin_back_to_main_panel)
+router.message(F.text.in_({'👀 Активні черги', '📝 Додати студента', '🔢 Змінити порядок', '✅ Позначити здачу'}), StateFilter('*'))(admin_pick_active_queues)
 router.message(AdminPanelState.select_queue_for_view, F.text.in_({'⬅️', '➡️'}))(admin_paginate_active_queues)
-router.message(F.text == '📝 Додати студента', StateFilter('*'))(admin_pick_add_student)
-router.message(AdminPanelState.select_queue_for_add_student, F.text.in_({'⬅️', '➡️'}))(admin_paginate_add_student_queues)
-router.message(F.text.in_({'🔢 Змінити порядок', '✅ Позначити здачу'}), StateFilter('*'))(admin_pick_order_queue)
-router.message(AdminPanelState.select_queue_for_order, F.text.in_({'⬅️', '➡️'}))(admin_paginate_order_queues)
 router.message(F.text.in_({'📊 Звіти та статистика', '📊 Звіти', '📊 Звіти та таблиці', '📈 Загальна статистика',
     '🍩 Діаграма: Типи та статуси', '📊 Діаграма: Предмети', '🏆 Діаграма: Топ студентів',
     '📥 Завантажити звіт (PDF)', '📥 Експорт зведеної таблиці (CSV)', '📚 Звіти за предметами',
     '📊 Звіти за предметами', '📊 Інший предмет'}), StateFilter('*'))(admin_reports_removed)
 router.message(AdminPanelState.select_queue_for_view, F.text.startswith('📋 '))(admin_selected_queue_view)
-router.message(AdminPanelState.select_queue_for_add_student, F.text.startswith('📋 '))(admin_selected_queue_add_student)
-router.message(AdminPanelState.select_queue_for_order, F.text.startswith('📋 '))(admin_selected_queue_order)
 router.message(F.text == '➕ Додати студентів', StateFilter('*'))(admin_click_add_students)
 router.message(AdminPanelState.add_student_names, F.text)(receive_student_names)
-router.message(F.text == '🔢 Керувати студентами', StateFilter('*'))(start_managing_students)
+router.message(F.text.in_({'🔢 Порядок черги', '🔢 Керувати студентами'}), StateFilter('*'))(start_managing_students)
 router.message(AdminOrderState.picking_student, F.text.in_({'⬅️', '➡️'}))(admin_paginate_students)
 router.message(AdminOrderState.picking_student, F.text.startswith('👤'))(select_student_from_list)
 router.message(F.text == '🔙 До списку студентів', StateFilter('*'))(back_to_students_list)

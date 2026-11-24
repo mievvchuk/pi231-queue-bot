@@ -23,7 +23,6 @@ from queue_bot.handlers.common import (
     get_admin_reply_menu,
     get_admin_schedule_menu,
     get_admin_settings_menu,
-    get_admin_students_menu,
     get_admin_subjects_menu,
     get_admin_users_menu,
     get_paginated_reply_keyboard,

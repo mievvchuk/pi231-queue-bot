@@ -109,15 +109,20 @@ def test_main_queue_only_shows_actions_for_the_current_state(conn, lesson):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('section,expected', [('Черги', '👥 Мої черги'), ('Ще', '❓ Допомога')])
-async def test_main_sections_exit_unfinished_input_and_return_to_three_buttons(conn, app, section, expected):
+@pytest.mark.parametrize('section,expected', [('Черги', 'Мої'), ('Ще', '❓ Допомога')])
+async def test_main_sections_exit_unfinished_input_and_return_to_main_menu(conn, app, section, expected):
     await app[0].storage.set_data(key(), {'session_id':app[2], 'ui_mode':'admin'})
     await app[0].storage.set_state(key(), LateTime.minutes)
     await send(app, section)
-    assert await app[0].storage.get_state(key()) is None
-    assert (await context(app))['ui_mode'] == 'student'
+    data = await context(app)
+    assert data['ui_mode'] == 'student' and 'session_id' not in data
     method = app[1].call_args[0][0]
-    assert expected in [b.text for r in method.reply_markup.keyboard for b in r]
+    if section == 'Черги':
+        assert data['queue_search'] is True
+        assert expected in [b.text for r in method.reply_markup.inline_keyboard for b in r]
+    else:
+        assert await app[0].storage.get_state(key()) is None
+        assert expected in [b.text for r in method.reply_markup.keyboard for b in r]
     await send(app, '🏠 Головне меню')
     method = app[1].call_args[0][0]
     assert [b.text for r in method.reply_markup.keyboard for b in r] == ['Черги', '📅 Розклад', 'Електронний журнал', '❓ Допомога', '🐞 Повідомити про баг']

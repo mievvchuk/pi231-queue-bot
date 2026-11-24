@@ -165,16 +165,12 @@ def test_lesson_number_and_expansions():
 
 
 def test_admin_schedule_keyboards():
-    from queue_bot.handlers.common import get_admin_reply_menu, get_admin_schedule_menu, get_schedule_reply_menu
+    from queue_bot.handlers.common import get_admin_reply_menu, get_admin_schedule_menu
+    from queue_bot.handlers.schedule import _schedule_keyboard
 
-    student_sch_menu = get_schedule_reply_menu()
-    student_sch_texts = [btn.text for row in student_sch_menu.keyboard for btn in row]
-    assert "📅 Сьогодні" in student_sch_texts
-    assert "➡️ Завтра" in student_sch_texts
-    assert "🗓 Весь тиждень" in student_sch_texts
-    assert "📚 Пари до кінця семестру" in student_sch_texts
-    assert "🔄 Заміни" in student_sch_texts
-    assert "🏠 Головне меню" in student_sch_texts
+    student_sch_menu = _schedule_keyboard("today")
+    student_sch_texts = [btn.text for row in student_sch_menu.inline_keyboard for btn in row]
+    assert student_sch_texts == ["✓ Сьогодні", "Завтра", "Тиждень", "Заміни", "Залишок пар"]
 
     admin_menu = get_admin_reply_menu()
     button_texts = [btn.text for row in admin_menu.keyboard for btn in row]
@@ -182,6 +178,7 @@ def test_admin_schedule_keyboards():
 
     sch_menu = get_admin_schedule_menu()
     sch_button_texts = [btn.text for row in sch_menu.keyboard for btn in row]
+    assert "📸 Заміни з фото" in sch_button_texts
     assert "✏️ Редагувати розклад" in sch_button_texts
     assert "🏢 Робоча субота" in sch_button_texts
     assert "🗑 Очистити всі заміни" not in sch_button_texts
@@ -717,3 +714,28 @@ async def test_admin_can_save_just_the_count_for_a_subject_from_timetable(conn):
     await admin_subjects.admin_save_pair_plan(message, state, conn, [])
     plan, = schedule.get_subject_pair_plans(conn).values()
     assert (plan["subject_name"], plan["base_count"], plan["end_date"]) == ("Філософія", 3, "")
+
+
+@pytest.mark.asyncio
+async def test_week_and_day_switch_on_the_same_schedule_message(conn, monkeypatch):
+    from unittest.mock import AsyncMock
+    from queue_bot.handlers import schedule as handlers
+
+    monday = datetime.date(2026, 11, 23)
+    monkeypatch.setattr(schedule, 'get_current_date', lambda: monday)
+    monkeypatch.setattr(schedule, 'read_schedule', lambda _: {'monday': [{'number': 1, 'subject': 'Архітектура'}]})
+    show = AsyncMock()
+    monkeypatch.setattr(handlers, 'show', show)
+    from types import SimpleNamespace
+    callback = SimpleNamespace(data='sched_view:week', message=SimpleNamespace(chat=SimpleNamespace(type='private')),
+                               answer=AsyncMock())
+
+    await handlers.switch_schedule_view(callback, conn, [])
+    show.assert_awaited_once()
+    view, text, keyboard = show.call_args.args
+    assert view is callback and 'Тиждень' in text and 'Архітектура' in text
+    monday_button = keyboard.inline_keyboard[1][0]
+    callback.data = monday_button.callback_data
+    await handlers.switch_schedule_view(callback, conn, [])
+    view, text, _ = show.call_args.args
+    assert view is callback and '2 пара — немає заняття' in text and 'Архітектура' in text

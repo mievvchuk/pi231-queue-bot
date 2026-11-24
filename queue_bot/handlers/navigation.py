@@ -4,7 +4,7 @@ from aiogram.filters import Command, StateFilter
 from aiogram.fsm.state import State, StatesGroup
 
 from queue_bot.handlers import journal as journal_handlers
-from queue_bot.handlers.common import JOURNAL_TEXT, get_reply_menu, get_student_queues_menu, get_student_more_menu
+from queue_bot.handlers.common import JOURNAL_TEXT, get_reply_menu, get_student_more_menu
 from queue_bot.services import admins, queues, users
 from queue_bot.services.errors import BotError
 
@@ -30,13 +30,11 @@ async def student_home(message, state, conn, note=''):
 
 
 @router.message(F.text == 'Черги', StateFilter('*'))
-async def student_queues_section(message, state, conn):
+async def student_queues_section(message, state, conn, subjects):
     if not users.get_user(conn, message.from_user.id):
         raise BotError('Спочатку зареєструйтесь: /start')
-    await state.clear()
-    await state.update_data(ui_mode='student')
-    await message.answer('Черги\n«Мої черги» — ваші записи. «Усі черги» — перегляд і запис у чергу.',
-                         reply_markup=get_student_queues_menu())
+    from queue_bot.handlers.student import view_all_queues
+    await view_all_queues(message, state, conn, subjects)
 
 
 @router.message(F.text == 'Ще', StateFilter('*'))
@@ -114,10 +112,10 @@ async def home(message, state, conn):
 
 
 @router.message(AdminNavigation.queue, F.text.in_({'🔙 Назад', '🔙 До черг', '🔙 До списку черг'}))
-async def back_from_admin_queue(message, state, conn):
+async def back_from_admin_queue(message, state, conn, subjects):
     from queue_bot.handlers.admin import admin_category_queues
     admins.require_admin(conn, message.from_user.id)
-    await admin_category_queues(message, state)
+    await admin_category_queues(message, state, conn, subjects)
     await state.update_data(ui_mode='admin')
 
 

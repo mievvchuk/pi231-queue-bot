@@ -148,14 +148,8 @@
       "admin_back_to_main_panel",
       "admin_pick_active_queues",
       "admin_paginate_active_queues",
-      "admin_pick_add_student",
-      "admin_paginate_add_student_queues",
-      "admin_pick_order_queue",
-      "admin_paginate_order_queues",
       "admin_reports_removed",
       "admin_selected_queue_view",
-      "admin_selected_queue_add_student",
-      "admin_selected_queue_order",
       "admin_click_add_students",
       "receive_student_names",
       "start_managing_students",
@@ -229,6 +223,7 @@
       "save_schedule_pair"
     ],
     "callback_query": [
+      "switch_schedule_view",
       "reject_recognition",
       "confirm_recognition",
       "edit_replacement_draft",
@@ -298,6 +293,7 @@
       "receive_passed_labs"
     ],
     "callback_query": [
+      "queue_search_page",
       "queue_search_page",
       "queue_search_select",
       "swap_accept",

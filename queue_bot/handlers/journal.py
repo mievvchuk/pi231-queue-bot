@@ -129,14 +129,30 @@ async def _render(event, state, data, context, screen="subjects", *args, note=No
                 lines.append("Оцінка входить до середнього балу другої атестації та семестру з КПЗ.")
                 rows.append([button("Змінити оцінку" if record else "Додати оцінку", "cell", "lab", 1, 1, 0)])
             else:
+                available = {work["attestation"] for work in subject["labs"]}
+                selected = args[0] if args else context.get("attestation")
+                if selected not in (1, 2):
+                    selected = min(available, default=1)
+                context["attestation"] = selected
+                page = args[1] if len(args) > 1 else 0
+                context["works_page"] = page
+                tabs, dates = [], []
                 for n in (1, 2):
                     due = next((d["due_date"] for d in data["dates"] if d["subject_key"] == subject["key"] and d["number"] == n), None)
                     when = f" · {date.fromisoformat(due):%d.%m.%Y}" if due else ""
                     lines.append(f"Атестація {n}: <b>{_avg(data, target, subject['key'], n)}</b>{when}")
-                    rows.append([button(f"Додати оцінку · атестація {n}", "works", n)])
+                    tabs.append(button(f"{'✓ ' if n == selected else ''}Атестація {n}", "subject", n))
                     if data["can_set_dates"]:
-                        rows[-1].append(button(f"Дата {n}", "due", n))
+                        dates.append(button(f"Дата {n}", "due", n))
                 lines.append(f"Семестр: <b>{_avg(data, target, subject['key'], 'all')}</b>")
+                rows.append(tabs)
+                entries = [_work_button(work, records, button, selected)
+                           for work in subject["labs"] if work["attestation"] == selected]
+                paged(entries, page, "subject", selected)
+                if not entries:
+                    lines.append(f"\nДля атестації {selected} робіт ще немає.")
+                if dates:
+                    rows.append(dates)
                 configured = {("lab", work["number"], p) for work in subject["labs"] for p in range(1, work["parts"] + 1)}
                 if records.keys() - configured:
                     rows.append([button("Попередні записи", "works", 0)])
@@ -166,7 +182,7 @@ async def _render(event, state, data, context, screen="subjects", *args, note=No
             for part in range(1, work["parts"] + 1):
                 label = f"Оцінка {part} · {_grade_text(records.get(('lab', number, part)))}"
                 rows.append([button(label, "cell", "lab", number, part, attestation)])
-            rows.append([button("‹ До робіт", "works", attestation)])
+            rows.append([button("‹ До робіт", "subject", attestation, context.get("works_page", 0))])
 
         elif screen == "cell":
             kind, number, part, attestation = args
@@ -188,8 +204,12 @@ async def _render(event, state, data, context, screen="subjects", *args, note=No
                 context["draft"].update(record_id=record["id"], revision=record["revision"])
             if subject.get("coursework_for"):
                 context["return_to"] = ["subject"]
+            elif attestation == 0:
+                context["return_to"] = ["works", 0]
+            elif work and work["parts"] > 1:
+                context["return_to"] = ["parts", number, attestation]
             else:
-                context["return_to"] = ["parts", number, attestation] if work and work["parts"] > 1 else ["works", attestation]
+                context["return_to"] = ["subject", attestation, context.get("works_page", 0)]
             rows.extend([[button(str(n), "grade", n) for n in range(first, first + 3)] for first in (0, 3)])
             if record:
                 rows.append([button("Видалити оцінку", "confirm_delete_grade", _grade_text(record), *args)])
@@ -295,7 +315,7 @@ async def journal_action(callback, state, conn, subjects):
             destination = ["subjects"]
         await _render(callback, state, data, context, *destination, note="✅ Оцінку видалено.")
         return
-    selecting_subject = action == "subject" and bool(args)
+    selecting_subject = action == "subject" and bool(args) and isinstance(args[0], str)
     if action == "student":
         context["student"] = args[0]
     elif action == "personal":
@@ -304,6 +324,7 @@ async def journal_action(callback, state, conn, subjects):
         context["period"] = args[0]
     elif selecting_subject:
         context["subject"] = args[0]
+        context.pop("attestation", None)
         args = []
     data = _view(conn, uid, subjects, context, group=action == "students")
     context["period"] = data["period"]

@@ -41,12 +41,15 @@ async def test_journal_edit_works_without_mini_app_url_and_uses_shared_records(a
     await choose(app, 'Навчальний період')
     await choose(app, journal.current_period().replace(':', ' · семестр '))
     await choose(app, 'Предмет')
-    await choose(app, 'Додати оцінку · атестація 1')
     await choose(app, 'Оцінка · —')
     await send(app, '4,5', uid=1)
     data = journal.view(conn, 1, app[0]['subjects'])
     record, = data['records']
     assert (record['grade'], record['user_id'], record['number'], record['part']) == (4.5, data['viewer_id'], 1, 1)
+    await choose(app, 'Атестація 2')
+    assert '✓ Атестація 2' in str(app[1].call_args.args[0].reply_markup)
+    await choose(app, 'Атестація 1')
+    assert 'Оцінка · 4.5' in str(app[1].call_args.args[0].reply_markup)
 
     monkeypatch.setattr(config, 'MINI_APP_URL', 'https://bot.example/app/')
     await send(app, 'Електронний журнал', uid=1)
@@ -64,7 +67,6 @@ async def test_admin_edits_group_grade_with_revision_and_preserves_existing_note
     await choose(app, 'Журнал групи', uid=100)
     await choose(app, 'Петренко Іван', uid=100)
     await choose(app, 'Предмет', uid=100)
-    await choose(app, 'Додати оцінку · атестація 1', uid=100)
     await choose(app, 'Оцінка · 2', uid=100)
     await choose(app, '5', uid=100)
     record, = journal.view(conn, 1, app[0]['subjects'])['records']
@@ -100,7 +102,7 @@ async def test_journal_image_is_sent_with_only_the_selected_students_grades(app,
     await choose(app, "Предмет", uid=uid)
     assert exported == [("Петренко Іван", [4.25])]
     photo, menu = [call.args[0] for call in app[1].call_args_list[-2:]]
-    assert "Додати оцінку" in str(menu.reply_markup)
+    assert "Оцінка ·" in str(menu.reply_markup)
     with Image.open(BytesIO(photo.photo.data)) as png:
         assert png.format == "PNG"
         assert png.getpixel((0, 0)) == (255, 255, 255)
@@ -199,7 +201,6 @@ async def test_journal_retries_photo_and_keeps_grade_menu_available(app, conn, m
     assert isinstance(menu, SendMessage)
     assert ("Telegram тимчасово" in menu.text) == (failed_photos == 2)
     assert "Зображення оцінок" in str(menu.reply_markup)
-    await choose(app, "Додати оцінку · атестація 1")
     await choose(app, "Оцінка · —")
     await choose(app, "4")
     row, = journal.view(conn, 1, app[0]["subjects"])["records"]
@@ -239,7 +240,6 @@ async def test_journal_grade_deletion_requires_telegram_confirmation(app, conn):
     })
     await send(app, 'Електронний журнал', uid=1)
     await choose(app, 'Предмет')
-    await choose(app, 'Додати оцінку · атестація 1')
     await choose(app, 'Оцінка · 4')
     await choose(app, 'Видалити оцінку')
     assert journal.view(conn, 1, subjects)['records'][0]['grade'] == 4

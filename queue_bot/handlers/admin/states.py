@@ -9,8 +9,6 @@ class AdminPanelState(StatesGroup):
     in_settings_menu = State()
     in_schedule_menu = State()
     select_queue_for_view = State()
-    select_queue_for_add_student = State()
-    select_queue_for_order = State()
     select_queue_for_close = State()
     select_subject_for_report = State()
     add_student_names = State()

@@ -31,7 +31,7 @@ def get_open_session(conn, session_id: int):
 
 def get_admin_queue_menu(is_open: bool) -> ReplyKeyboardMarkup:
     rows = [
-        ["➕ Додати студентів", "🔢 Керувати студентами"],
+        ["➕ Додати студентів", "🔢 Порядок черги"],
         ["👤 Режим студента", "🔄 Оновити"],
         ["🔙 Назад", "🔙 В адмін-панель"],
     ]

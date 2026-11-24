@@ -98,3 +98,26 @@ async def test_remaining_pairs_appear_in_telegram_queue_search_and_details(conn,
     assert expected in app[1].call_args.args[0].text
     await _click_search(app, f"findq:{sid}")
     assert expected in app[1].call_args.args[0].text
+
+
+@pytest.mark.asyncio
+async def test_queue_home_shows_results_and_mine_filter_survives_return(conn, app):
+    sid = app[2]
+    other = queues.create_session(conn, 100, 2, 1)
+    queues.join_queue(conn, 1, sid)
+
+    await send(app, 'Черги')
+    action = app[1].call_args.args[0]
+    assert f'findq:{sid}' in str(action.reply_markup) and f'findq:{other}' in str(action.reply_markup)
+    assert 'Показати всі черги' not in str(action.reply_markup)
+
+    await _click_search(app, 'findscope:mine')
+    action = app[1].call_args.args[0]
+    assert action.message_id == 10
+    assert f'findq:{sid}' in str(action.reply_markup) and f'findq:{other}' not in str(action.reply_markup)
+    await _click_search(app, f'findq:{sid}')
+    await send(app, '🔙 До моїх черг')
+    assert (await state(app).get_data())['queue_scope'] == 'mine'
+    assert 'Мої черги' in app[1].call_args.args[0].text
+    await _click_search(app, 'findnew')
+    assert 'Оберіть тип черги' in app[1].call_args.args[0].text
