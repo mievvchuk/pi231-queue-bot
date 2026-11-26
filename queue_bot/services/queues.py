@@ -788,7 +788,7 @@ def delete_session(conn, actor_id: int, session_id: int) -> None:
         conn.execute("DELETE FROM bot_state WHERE key LIKE ? OR key LIKE ?",
                      (f"lesson_schedule:{session_id}:%", f"queue_navigation:%:{session_id}"))
         # The session is the penultimate segment; other IDs may equal it too.
-        message_keys = conn.execute("SELECT key FROM bot_state WHERE key LIKE 'queue_message:%'").fetchall()
+        message_keys = conn.execute("SELECT key FROM bot_state WHERE key LIKE ?", ("queue_message:%",)).fetchall()
         for row in message_keys:
             parts = row['key'].split(':')
             if len(parts) == 6 and parts[-2] == str(session_id):
