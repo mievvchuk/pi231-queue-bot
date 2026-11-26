@@ -29,13 +29,16 @@ def get_open_session(conn, session_id: int):
 
 
 
-def get_admin_queue_menu(is_open: bool) -> ReplyKeyboardMarkup:
+def get_admin_queue_menu(is_open: bool, *, consultation=False, active=False, scheduled=False) -> ReplyKeyboardMarkup:
     rows = [
         ["➕ Додати студентів", "🔢 Порядок черги"],
         ["👤 Режим студента", "🔄 Оновити"],
         ["🗑 Видалити чергу"],
         ["🔙 Назад", "🔙 В адмін-панель"],
     ]
+    if consultation:
+        controls = [['⏹ Зупинити консультацію']] if active else ([['✏️ Змінити запуск консультації', '❌ Скасувати запуск консультації']] if scheduled else [['▶️ Запуск консультації']])
+        rows = controls + rows
     return make_reply_keyboard(rows)
 
 
@@ -68,14 +71,23 @@ async def open_admin_queue_manager(message: Message, conn, subjects, session_id:
     )
     from queue_bot.handlers.attendance import lesson_summary
     text += lesson_summary(conn, session_id, message.from_user.id)
+    from queue_bot.services import consultations
+    plan = consultations.get_plan(conn, session_id) if session['queue_type'] == 'consultation' else None
+    if plan and plan['status'] in ('expired', 'cancelled'):
+        text += '\n\nЗапланований запуск не відбувся. За потреби заплануйте консультацію ще раз.'
     if note:
         text = f"{note}\n\n{text}"
     from queue_bot.handlers import queue_messages
     uid = message.from_user.id
+    menu = get_admin_queue_menu(session['status'] == 'open',
+        consultation=session['queue_type'] == 'consultation', active=bool(attendance.active_run(conn, session_id)),
+        scheduled=bool(plan and plan['status'] == 'pending'))
+    if refresh and session['queue_type'] == 'consultation':
+        await message.answer('Керування консультацією', reply_markup=menu)
     if refresh and await queue_messages.refresh(message, conn, uid, session_id, 'admin', text):
         return
     if not refresh:
-        await message.answer('Керування чергою', reply_markup=get_admin_queue_menu(session["status"] == "open"))
+        await message.answer('Керування чергою', reply_markup=menu)
     sent = await message.answer(text)
     queue_messages.remember(conn, sent, uid, session_id, 'admin')
 

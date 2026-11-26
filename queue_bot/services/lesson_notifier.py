@@ -30,7 +30,7 @@ def keyboard(row, *, session_id=None):
         rows = [[button('Я вже на місці', 'present')], [button('Уточнити запізнення', 'late')]]
     else:
         rows = [[button('Я вже на місці', 'present')],
-                [button('Запізнююсь', 'late')], [button('На цій парі не буду', 'absent')]]
+                [button('Запізнююсь', 'late')], [button('Цього разу не буду', 'absent')]]
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -53,7 +53,7 @@ def message_content(row, kind, title):
     if kind == 'call':
         return f'{title}\nВаша черга. Чи готові зараз здавати? На відповідь є 10 хвилин. Якщо не готові, натисніть «Не готовий, пропустити мене» — одразу викличемо наступного. Без відповіді вас також тимчасово пропустять зі збереженням пріоритету.'
     if kind == 'presence':
-        return f'{title}\nНа цій парі розпочато здачу. Ви вже на місці? На відповідь є 10 хвилин. Викликаємо за порядком черги серед присутніх; швидкість відповіді не дає переваги. Якщо не відповісте, готові студенти проходитимуть перед вами. Ваш пріоритет збережеться.'
+        return f'{title}\nУ цій черзі розпочато здачу. Ви вже на місці? На відповідь є 10 хвилин. Викликаємо за порядком черги серед присутніх; швидкість відповіді не дає переваги. Якщо не відповісте, готові студенти проходитимуть перед вами. Ваш пріоритет збережеться.'
     if kind == 'reminder':
         return f'{title}\nВказаний час запізнення минув. Ви вже прийшли? Підтвердьте присутність або уточніть час. На відповідь є 10 хвилин; поки інші можуть здавати.'
     if kind == 'skipped':
@@ -92,7 +92,7 @@ async def deliver(bot, conn, subjects, *, now=None):
         session = attendance.queues.get_session(conn, row['session_id'])
         subject = find_subject(subjects, session['subject_id'])
         teacher = find_teacher(subject, session['teacher_id']) if subject else None
-        title = html.escape((subject['name'] if subject else 'Черга') + ' — ' + (teacher['name'] if teacher else 'Викладач'))
+        title = html.escape((subject['name'] if subject else 'Черга') + ' — ' + (teacher['name'] if teacher else 'Викладач') + (' · консультація' if session['queue_type'] == 'consultation' else ''))
         try:
             if not row['telegram_id'] or row['telegram_id'] < 0:
                 raise ValueError('У студента ще немає Telegram-профілю')
@@ -134,6 +134,12 @@ async def watch_lessons(bot, conn, subjects, interval=5):
         except Exception as error:
             from queue_bot.services import diagnostics
             await diagnostics.report(error, bot=bot, conn=conn, context={'source':'worker', 'operation':'lesson_schedule'})
+        try:
+            from queue_bot.services.consultations import tick as start_consultations
+            start_consultations(conn)
+        except Exception as error:
+            from queue_bot.services import diagnostics
+            await diagnostics.report(error, bot=bot, conn=conn, context={'source':'worker', 'operation':'consultation_start'})
         try:
             attendance.tick(conn)
             await deliver(bot, conn, subjects)

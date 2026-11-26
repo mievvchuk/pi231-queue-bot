@@ -9,6 +9,8 @@ from queue_bot.services.errors import BotError
 from queue_bot.services.lesson_notifier import keyboard, deliver
 
 router = Router(name='attendance')
+from queue_bot.handlers.consultations import router as consultation_router
+router.include_router(consultation_router)
 
 
 class LateTime(StatesGroup):
@@ -22,8 +24,17 @@ class TurnTime(StatesGroup):
 def lesson_summary(conn, sid, uid):
     data = attendance.view(conn, sid, uid)
     if not data:
+        from queue_bot.services.consultations import get_plan
+        from queue_bot.services.schedule import UK_TZ
+        from datetime import datetime
+        plan = get_plan(conn, sid)
+        if plan and plan['status'] == 'pending':
+            when = datetime.fromtimestamp(plan['starts_at'], UK_TZ).strftime('%d.%m.%Y о %H:%M')
+            return f'\n\n🕒 Консультація почнеться <b>{when}</b> (Київ). Тривалість: {plan["minutes"]} хв.'
         return ''
-    lines = ['\n\nЗдача на парі активна. На відповіді — 10 хвилин.']
+    session = queues.get_session(conn, sid)
+    label = 'Консультація активна' if session['queue_type'] == 'consultation' else 'Здача на парі активна'
+    lines = [f'\n\n{label}. На відповіді — 10 хвилин.']
     if data['collecting']:
         from datetime import datetime
         from queue_bot.services.schedule import UK_TZ

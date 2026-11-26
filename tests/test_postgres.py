@@ -10,6 +10,22 @@ from queue_bot.services import admins, queues, restrictions, users
 from queue_bot.services import swap_requests
 
 
+def test_postgres_consultation_timer_is_durable_and_starts_once(pg_conn):
+    from queue_bot.services import consultations, attendance
+    conn = pg_conn
+    sid = queues.create_session(conn, 100, 1, 1, queue_type='consultation')
+    queues.join_queue(conn, 1, sid)
+    consultations.configure(conn, 100, sid, minutes=60, starts_at=11000, now=10000)
+    conn._init_schema()
+    consultations.tick(conn, now=11000)
+    consultations.tick(conn, now=11001)
+    assert attendance.active_run(conn, sid, now=11001)['ends_at'] == 14600
+    assert conn.execute('SELECT COUNT(*) FROM lesson_runs').fetchone()[0] == 1
+    assert conn.execute('SELECT COUNT(*) FROM lesson_messages').fetchone()[0] == 1
+    consultations.cancel(conn, 100, sid, stop=True)
+    assert queues.get_user_position(conn, 1, sid) == 1
+
+
 def test_postgres_subgroup_restart_and_permanent_queue_deletion(pg_conn):
     from queue_bot.services import attendance
 

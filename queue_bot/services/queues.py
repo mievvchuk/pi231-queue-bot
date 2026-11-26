@@ -797,6 +797,7 @@ def delete_session(conn, actor_id: int, session_id: int) -> None:
         conn.execute("DELETE FROM lesson_runs WHERE session_id = ?", (session_id,))
         conn.execute("DELETE FROM queue_entries WHERE session_id = ?", (session_id,))
         conn.execute("DELETE FROM queue_sessions WHERE id = ?", (session_id,))
+        conn.execute("DELETE FROM bot_state WHERE key = ?", (f'consultation_start:{session_id}',))
         conn.execute("DELETE FROM bot_state WHERE key LIKE ? OR key LIKE ?",
                      (f"lesson_schedule:{session_id}:%", f"queue_navigation:%:{session_id}"))
         # The session is the penultimate segment; other IDs may equal it too.

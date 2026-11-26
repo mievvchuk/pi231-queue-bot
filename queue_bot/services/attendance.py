@@ -142,14 +142,20 @@ def start(conn, actor, sid, *, minutes=90, now=None):
         require_admin(conn, actor)
         _lock(conn, sid)
         queues._require_session(conn, sid)
-        if active_run(conn, sid, now=now):
-            raise BotError('Режим здачі вже запущено для цієї черги.')
-        conn.execute('UPDATE lesson_runs SET active = 0 WHERE session_id = ? AND active = 1', (sid,))
-        rid = conn.execute('INSERT INTO lesson_runs(session_id, started_at, ends_at) VALUES (?, ?, ?)',
-                           (sid, now, now + minutes * 60)).lastrowid
-        run = conn.execute('SELECT * FROM lesson_runs WHERE id = ?', (rid,)).fetchone()
-        _sync(conn, run)
-        log_action(conn, actor, 'start_lesson', f'{sid}: {minutes} хв; відповідь 10 хв')
+        rid = _start_locked(conn, actor, sid, minutes=minutes, now=now)
+    return rid
+
+
+def _start_locked(conn, actor, sid, *, minutes, now, ends_at=None):
+    """The caller owns the session lock and transaction and has checked permissions."""
+    if active_run(conn, sid, now=now):
+        raise BotError('Режим здачі вже запущено для цієї черги.')
+    conn.execute('UPDATE lesson_runs SET active = 0 WHERE session_id = ? AND active = 1', (sid,))
+    rid = conn.execute('INSERT INTO lesson_runs(session_id, started_at, ends_at) VALUES (?, ?, ?)',
+                       (sid, now, ends_at if ends_at is not None else now + minutes * 60)).lastrowid
+    run = conn.execute('SELECT * FROM lesson_runs WHERE id = ?', (rid,)).fetchone()
+    _sync(conn, run)
+    log_action(conn, actor, 'start_lesson', f'{sid}: {minutes} хв; відповідь 10 хв')
     return rid
 
 

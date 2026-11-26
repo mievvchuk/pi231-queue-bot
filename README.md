@@ -19,6 +19,10 @@ A Telegram bot and optional Telegram Mini App/PWA for managing student queues fo
 - Report problems through the bot.
 
 ### Administrators
+- In a consultation queue, use **«▶️ Запуск консультації»** to start now, after a number of minutes,
+  today at a specified time, or on an exact date and time (Kyiv). Choose a duration of 10–240 minutes
+  and confirm. Scheduled starts persist across restarts, can be edited or cancelled, and use the same
+  attendance and student calling workflow as ordinary classes. Stopping preserves queue positions and work.
 - Create and manage lesson or consultation queues; open/close registration, move participants, add students, complete or remove entries, and archive sessions.
 - Create a follow-up queue and transfer selected students to chosen positions while retaining session history.
 - Manage users, administrator access, subject/teacher data, schedules, restrictions, and bot settings.
