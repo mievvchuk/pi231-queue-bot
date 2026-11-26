@@ -45,6 +45,7 @@ def get_reply_menu(conn, telegram_id: int) -> ReplyKeyboardMarkup:
         [KeyboardButton(text="📋 Усі черги"), KeyboardButton(text="👥 Мої черги")],
         [KeyboardButton(text="➕ Відкрити чергу"), KeyboardButton(text="📅 Розклад")],
         [KeyboardButton(text="❓ Допомога"), KeyboardButton(text="🐞 Повідомити про баг")],
+        [KeyboardButton(text="👥 Моя підгрупа")],
     ]
     if admins.is_admin(conn, telegram_id):
         keyboard.append([KeyboardButton(text="⚡ Адмін-панель")])
@@ -718,6 +719,17 @@ class Guard(BaseMiddleware):
             with suppress(TelegramBadRequest):
                 await event.answer()
         try:
+            # Обов'язковий вибір для наявних користувачів, навіть зі старих кнопок.
+            from services import users
+            from services.subgroups import PROMPT, subgroup_keyboard
+            sender = getattr(event, "from_user", None)
+            chat = event.chat if isinstance(event, Message) else getattr(getattr(event, "message", None), "chat", None)
+            if conn and sender and chat and chat.type == "private":
+                profile = users.get_user(conn, sender.id)
+                choosing = isinstance(event, CallbackQuery) and event.data in {"subgroup:1", "subgroup:2"}
+                if profile and profile["subgroup"] is None and not profile["is_blocked"] and not choosing:
+                    await event.bot.send_message(sender.id, PROMPT, reply_markup=subgroup_keyboard())
+                    return
             return await handler(event, data)
         except BotError as error:
             await self.notify(event, f"⚠️ {html.escape(str(error))}")

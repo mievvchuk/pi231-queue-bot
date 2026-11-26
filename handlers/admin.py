@@ -89,6 +89,7 @@ class AdminPanelState(StatesGroup):
     select_subject_for_report = State()
     add_student_names = State()
     confirm_finish_queue = State()
+    confirm_delete_queue = State()
 
 
 async def admin_state_filter(message: Message, state: FSMContext) -> bool:
@@ -159,6 +160,7 @@ def get_admin_queue_menu(is_open: bool) -> ReplyKeyboardMarkup:
     rows = [
         ["➕ Додати студентів", "🔢 Керувати студентами"],
         [lock_text, "📦 Завершити чергу"],
+        ["🗑 Видалити чергу"],
         ["👤 Як студент (Моє місце)", "🔄 Оновити"],
         ["🔙 Назад", "🔙 В адмін-панель"],
     ]
@@ -2085,6 +2087,34 @@ async def student_remove_by_admin(message: Message, state: FSMContext, conn, sub
 
 # ---------- Завершення черги ----------
 
+@router.message(F.text == "🗑 Видалити чергу", StateFilter("*"))
+async def ask_delete_queue(message: Message, state: FSMContext, conn, subjects):
+    data = await state.get_data()
+    session = queues.get_session(conn, data.get("session_id"))
+    if not session:
+        raise BotError("Чергу не обрано або вже видалено.")
+    await state.set_state(AdminPanelState.confirm_delete_queue)
+    await message.answer(
+        f"🗑 Видалити чергу?\n{html.escape(queue_label(subjects, session))}\n\n"
+        "Усі записи та історію цієї черги буде видалено безповоротно.",
+        reply_markup=make_reply_keyboard([["⚠️ Видалити чергу назавжди"], ["↩️ Скасувати видалення черги"]]),
+    )
+
+
+@router.message(AdminPanelState.confirm_delete_queue, F.text == "⚠️ Видалити чергу назавжди")
+async def confirm_delete_queue(message: Message, state: FSMContext, conn):
+    data = await state.get_data()
+    queues.delete_session(conn, message.from_user.id, data.get("session_id"))
+    await state.clear()
+    await message.answer("✅ Чергу та всі її записи видалено назавжди.", reply_markup=get_admin_queues_menu())
+
+
+@router.message(AdminPanelState.confirm_delete_queue, F.text == "↩️ Скасувати видалення черги")
+async def cancel_delete_queue(message: Message, state: FSMContext, conn):
+    await state.clear()
+    await message.answer("Видалення скасовано.", reply_markup=get_admin_queues_menu())
+
+
 @router.message(F.text == "📦 Завершити чергу", StateFilter("*"))
 async def ask_finish_queue(message: Message, state: FSMContext, conn, subjects):
     data = await state.get_data()
@@ -2170,11 +2200,12 @@ async def history_details_view(message: Message, state: FSMContext, conn, subjec
     session = queues.get_session(conn, session_id)
     if not session:
         raise BotError("Чергу не знайдено.")
+    await state.update_data(session_id=session_id)
     lines = [f"{html.escape(r['full_name'])} — {HISTORY_MARK.get(r['status'], r['status'])}" for r in queues.get_history(conn, session_id)]
     header = format_queue(subjects, session, [])
     body = "\n".join(lines) or "Записів немає."
     text = header.replace("Черга порожня.", "") + body
-    rows = [["🔙 До списку історії", "🔙 Назад"]]
+    rows = [["🗑 Видалити чергу"], ["🔙 До списку історії", "🔙 Назад"]]
     await message.answer(text, reply_markup=make_reply_keyboard(rows))
 
 

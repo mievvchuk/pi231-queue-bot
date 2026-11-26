@@ -74,6 +74,9 @@ async def main() -> None:
 
     bot = Bot(config.get_bot_token(), default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 
+    from services.subgroups import prompt_missing_subgroups
+    asyncio.create_task(prompt_missing_subgroups(bot, conn))
+
     from services.updates import check_and_broadcast_updates
     asyncio.create_task(check_and_broadcast_updates(bot, conn))
 

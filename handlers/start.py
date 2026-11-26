@@ -13,6 +13,7 @@ from handlers.common import (
 )
 from services import admins, users
 from services.errors import BotError
+from services.subgroups import PROMPT, subgroup_keyboard
 
 router = Router()
 router.message.filter(F.chat.type == "private")
@@ -126,8 +127,32 @@ async def register(message: Message, state: FSMContext, conn):
         message.bot, conn, new_user, username=message.from_user.username
     )
     await message.answer(
-        "✅ Реєстрацію завершено!\n\nГоловне меню. Оберіть дію на клавіатурі внизу 👇",
-        reply_markup=get_reply_menu(conn, message.from_user.id),
+        "✅ Ім’я збережено!\n\n" + PROMPT,
+        reply_markup=subgroup_keyboard(),
+    )
+
+
+@router.message(Command("subgroup"), StateFilter("*"))
+@router.message(F.text == "👥 Моя підгрупа", StateFilter("*"))
+async def choose_subgroup(message: Message, state: FSMContext, conn):
+    user = users.get_user(conn, message.from_user.id)
+    if not user:
+        raise BotError("Спочатку зареєструйтесь: /start")
+    await state.clear()
+    current = f"Ваша підгрупа: {user['subgroup']}.\n\n" if user["subgroup"] else ""
+    await message.answer(current + PROMPT, reply_markup=subgroup_keyboard())
+
+
+@router.callback_query(F.data.in_({"subgroup:1", "subgroup:2"}), StateFilter("*"))
+async def save_subgroup(callback: CallbackQuery, state: FSMContext, conn):
+    subgroup = int(callback.data.split(":")[1])
+    users.set_subgroup(conn, callback.from_user.id, subgroup)
+    await state.clear()
+    await show(callback, f"✅ Збережено: {subgroup} підгрупа.")
+    await callback.bot.send_message(
+        callback.from_user.id,
+        "Головне меню. Оберіть дію на клавіатурі внизу 👇",
+        reply_markup=get_reply_menu(conn, callback.from_user.id),
     )
 
 

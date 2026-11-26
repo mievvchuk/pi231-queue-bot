@@ -666,6 +666,17 @@ def remove_user_from_all_queues(conn, actor_id: int, user_id: int) -> None:
 
 # ---------- Адмін: завершення заняття ----------
 
+def delete_session(conn, actor_id: int, session_id: int) -> None:
+    """Безповоротно видаляє чергу разом з активними й історичними записами."""
+    with transaction(conn):
+        require_admin(conn, actor_id)
+        session = _require_session(conn, session_id, ("open", "closed", "archived"))
+        conn.execute("DELETE FROM queue_entries WHERE session_id = ?", (session_id,))
+        conn.execute("DELETE FROM queue_sessions WHERE id = ?", (session_id,))
+        log_action(conn, actor_id, "delete_session",
+                   f"{session_id}: subject={session['subject_id']}, teacher={session['teacher_id']}")
+
+
 def finish_session(conn, actor_id: int, session_id: int, create_new: bool = False,
                    carry: dict[int, int] | None = None) -> int | None:
     """Архівує чергу. Усе в одній транзакції: або все виконається, або нічого.

@@ -29,6 +29,18 @@ def get_user_by_id(conn, user_id: int):
     return conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
 
 
+def set_subgroup(conn, telegram_id: int, subgroup: int):
+    user = get_user(conn, telegram_id)
+    if not user:
+        raise BotError("Спочатку зареєструйтесь: /start")
+    if user["is_blocked"]:
+        raise BotError("Вас заблоковано адміністратором.")
+    if type(subgroup) is not int or subgroup not in (1, 2):
+        raise BotError("Оберіть підгрупу 1 або 2.")
+    conn.execute("UPDATE users SET subgroup = ? WHERE telegram_id = ?", (subgroup, telegram_id))
+    return get_user(conn, telegram_id)
+
+
 def register_user(conn: sqlite3.Connection, telegram_id: int, full_name: str):
     existing = get_user(conn, telegram_id)
     if existing:

@@ -56,6 +56,8 @@ async def test_non_admin_back_to_queue_routes_to_student(conn, make_user):
     dp.include_routers(start.router, admin.router, student.router, start.fallback_router)
 
     make_user(999, "Петренко Іван")
+    from services import users
+    users.set_subgroup(conn, 999, 1)
     session = queues.create_session(conn, 100, 3, 4)
 
     user = User(id=999, is_bot=False, first_name="Іван")

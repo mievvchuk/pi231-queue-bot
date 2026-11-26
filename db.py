@@ -190,6 +190,10 @@ MIGRATIONS = [
     ALTER TABLE queue_entries ADD COLUMN labs_count INTEGER NOT NULL DEFAULT 1;
     """,
     SCHEDULE_SCHEMA,
+    """
+    ALTER TABLE users ADD COLUMN subgroup INTEGER CHECK (subgroup IN (1, 2));
+    ALTER TABLE users ADD COLUMN subgroup_prompted INTEGER NOT NULL DEFAULT 0;
+    """,
 ]
 
 PG_SCHEMA = """
@@ -387,6 +391,8 @@ class PGConnectionWrapper:
             cur.execute(PG_SCHEMA)
             cur.execute(SCHEDULE_SCHEMA.replace("id INTEGER PRIMARY KEY", "id SERIAL PRIMARY KEY", 1))
             cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_blocked BOOLEAN NOT NULL DEFAULT FALSE;")
+            cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS subgroup INTEGER CHECK (subgroup IN (1, 2));")
+            cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS subgroup_prompted INTEGER NOT NULL DEFAULT 0;")
             cur.execute("ALTER TABLE queue_sessions ADD COLUMN IF NOT EXISTS queue_type TEXT NOT NULL DEFAULT 'lesson';")
             cur.execute("ALTER TABLE queue_entries ADD COLUMN IF NOT EXISTS ready_to_swap BOOLEAN NOT NULL DEFAULT FALSE;")
             cur.execute("ALTER TABLE queue_entries ADD COLUMN IF NOT EXISTS swap_wish TEXT DEFAULT NULL;")
