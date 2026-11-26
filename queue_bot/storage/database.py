@@ -225,6 +225,10 @@ from queue_bot.storage.journal_schema import JOURNAL_SCHEMA
 MIGRATIONS.append(JOURNAL_SCHEMA)
 from queue_bot.storage.journal_grid_schema import GRID_SCHEMA, GRID_COPY
 MIGRATIONS.append(GRID_SCHEMA + GRID_COPY)
+MIGRATIONS.append("""
+ALTER TABLE users ADD COLUMN subgroup INTEGER CHECK (subgroup IN (1, 2));
+ALTER TABLE users ADD COLUMN subgroup_prompted INTEGER NOT NULL DEFAULT 0;
+""")
 
 SCHEDULE_SCHEMA = """
 CREATE TABLE IF NOT EXISTS schedule_lessons (
@@ -493,6 +497,8 @@ class PGConnectionWrapper:
             cur.execute('ALTER TABLE lesson_attendance ADD COLUMN IF NOT EXISTS turn_due BIGINT;')
             cur.execute('ALTER TABLE users ADD COLUMN IF NOT EXISTS deleted_at TEXT;')
             cur.execute('ALTER TABLE working_saturdays ADD COLUMN IF NOT EXISTS pairs_count INTEGER;')
+            cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS subgroup INTEGER CHECK (subgroup IN (1, 2));")
+            cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS subgroup_prompted INTEGER NOT NULL DEFAULT 0;")
             cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_blocked BOOLEAN NOT NULL DEFAULT FALSE;")
             cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS banned_until TEXT DEFAULT NULL;")
             cur.execute("ALTER TABLE queue_entries ADD COLUMN IF NOT EXISTS lab_count INTEGER DEFAULT NULL CHECK (lab_count IS NULL OR lab_count BETWEEN 1 AND 20);")

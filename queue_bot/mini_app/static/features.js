@@ -554,8 +554,8 @@ window.createPI231Features = function (H) {
       });
       return [btn('До списку сесій',()=>open('admin-history'),'button secondary'),caption,
         card(el('h2',{},session?.subject||'Обрана сесія'),sessionMeta(session),
-          session?.status==='open'?btn('Видалити чергу',()=>confirm('Видалити чергу?',
-            session.subject+' · Активні записи буде знято. Історія здач залишиться в архіві.',
+          session?btn('Видалити чергу',()=>confirm('Видалити чергу?',
+            session.subject+' · Чергу, усі її записи та історію буде видалено безповоротно.',
             adminPath('admin-history'),{action:'delete',session_id:session.id}),'text-button danger'):null,
           el('h3',{},'Учасники сесії · '+people.size),
           el('div',{class:'history-participants'},...(participants.length?participants:[el('p',{class:'empty'},'У цій сесії ще немає учасників.')])) )];

@@ -135,7 +135,7 @@ async def test_compact_admin_menu_keeps_secondary_actions_and_owner_access(conn,
     assert len(buttons()) == 7
     await send(app, 'Ще для адміна', uid=uid)
     await send(app, '👤 Режим студента', uid=uid)
-    assert buttons() == ['Черги', '📅 Розклад', 'Електронний журнал', '❓ Допомога', '🐞 Повідомити про баг', '⚡ Режим адміна']
+    assert buttons() == ['Черги', '📅 Розклад', 'Електронний журнал', '👥 Моя підгрупа', '❓ Допомога', '🐞 Повідомити про баг', '⚡ Режим адміна']
 
 
 @pytest.mark.asyncio
@@ -314,5 +314,5 @@ async def test_admin_can_cancel_or_confirm_deleting_the_selected_queue(conn, app
     await send(app, 'Підтвердити видалення черги', uid=1)
     assert queues.get_session(conn, sid)['status'] == 'open'
     await send(app, 'Підтвердити видалення черги')
-    assert queues.get_session(conn, sid)['status'] == 'archived'
+    assert queues.get_session(conn, sid) is None
     assert 'Активних черг немає' in app[1].call_args.args[0].text

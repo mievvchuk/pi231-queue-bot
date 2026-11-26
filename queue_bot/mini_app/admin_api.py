@@ -183,8 +183,8 @@ async def manage(request):
     ctx, conn, uid = checked(request, owner)
     action = data.get('action')
     if section == 'history' and action == 'delete':
-        queues.finish_session(conn, uid, api.integer(data.get('session_id')))
-        return response({'message': 'Чергу видалено з активного списку.'})
+        queues.delete_session(conn, uid, api.integer(data.get('session_id')))
+        return response({'message': 'Чергу та всі її записи видалено назавжди.'})
     if section == 'history' and action == 'finish':
         raise BotError('Щоб прибрати чергу з активного списку, відкрийте її картку й натисніть «Видалити чергу».')
     if section == 'group':

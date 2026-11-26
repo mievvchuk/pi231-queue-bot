@@ -772,6 +772,31 @@ def remove_user_from_all_queues(conn, actor_id: int, user_id: int) -> None:
 
 # ---------- Адмін: завершення заняття ----------
 
+def delete_session(conn, actor_id: int, session_id: int) -> None:
+    """Permanently remove one queue and its dependent attendance and swaps."""
+    from queue_bot.services.attendance import _lock
+    with transaction(conn):
+        require_admin(conn, actor_id)
+        _lock(conn, session_id)
+        session = _require_session(conn, session_id, ("open", "closed", "archived"))
+        conn.execute("DELETE FROM swap_requests WHERE session_id = ?", (session_id,))
+        conn.execute("DELETE FROM lesson_attendance WHERE run_id IN "
+                     "(SELECT id FROM lesson_runs WHERE session_id = ?)", (session_id,))
+        conn.execute("DELETE FROM lesson_runs WHERE session_id = ?", (session_id,))
+        conn.execute("DELETE FROM queue_entries WHERE session_id = ?", (session_id,))
+        conn.execute("DELETE FROM queue_sessions WHERE id = ?", (session_id,))
+        conn.execute("DELETE FROM bot_state WHERE key LIKE ? OR key LIKE ?",
+                     (f"lesson_schedule:{session_id}:%", f"queue_navigation:%:{session_id}"))
+        # The session is the penultimate segment; other IDs may equal it too.
+        message_keys = conn.execute("SELECT key FROM bot_state WHERE key LIKE 'queue_message:%'").fetchall()
+        for row in message_keys:
+            parts = row['key'].split(':')
+            if len(parts) == 6 and parts[-2] == str(session_id):
+                conn.execute("DELETE FROM bot_state WHERE key = ?", (row['key'],))
+        log_action(conn, actor_id, "delete_session",
+                   f"{session_id}: subject={session['subject_id']}, teacher={session['teacher_id']}")
+
+
 def finish_session(conn, actor_id: int, session_id: int, create_new: bool = False,
                    carry: dict[int, int] | None = None) -> int | None:
     """Архівує чергу. Усе в одній транзакції: або все виконається, або нічого.

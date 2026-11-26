@@ -125,4 +125,4 @@ async def test_main_sections_exit_unfinished_input_and_return_to_main_menu(conn,
         assert expected in [b.text for r in method.reply_markup.keyboard for b in r]
     await send(app, '🏠 Головне меню')
     method = app[1].call_args[0][0]
-    assert [b.text for r in method.reply_markup.keyboard for b in r] == ['Черги', '📅 Розклад', 'Електронний журнал', '❓ Допомога', '🐞 Повідомити про баг']
+    assert [b.text for r in method.reply_markup.keyboard for b in r] == ['Черги', '📅 Розклад', 'Електронний журнал', '👥 Моя підгрупа', '❓ Допомога', '🐞 Повідомити про баг']

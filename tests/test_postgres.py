@@ -10,6 +10,25 @@ from queue_bot.services import admins, queues, restrictions, users
 from queue_bot.services import swap_requests
 
 
+def test_postgres_subgroup_restart_and_permanent_queue_deletion(pg_conn):
+    from queue_bot.services import attendance
+
+    conn = pg_conn
+    users.set_subgroup(conn, 1, 2)
+    sid = queues.create_session(conn, 100, 1, 1)
+    queues.join_queue(conn, 1, sid)
+    queues.join_queue(conn, 100, sid)
+    entries = queues.get_entries(conn, sid)
+    swap_requests.create(conn, 1, entries[0]['id'], entries[1]['id'])
+    attendance.start(conn, 100, sid, minutes=10)
+    conn._init_schema()
+    assert users.get_user(conn, 1)['subgroup'] == 2
+    queues.delete_session(conn, 100, sid)
+    assert queues.get_session(conn, sid) is None
+    for table in ('queue_entries', 'swap_requests', 'lesson_runs', 'lesson_attendance', 'lesson_messages'):
+        assert conn.execute(f'SELECT COUNT(*) FROM {table}').fetchone()[0] == 0
+
+
 def test_postgres_grid_imports_v1_grades_and_keeps_independent_components(pg_conn):
     from queue_bot.services import journal
     conn=pg_conn

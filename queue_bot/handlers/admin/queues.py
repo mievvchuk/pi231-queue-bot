@@ -73,16 +73,16 @@ async def admin_ask_queue_deletion(message: Message, state: FSMContext, conn, su
     label = html.escape(queue_label(subjects, session))
     await message.answer(
         f"Видалити чергу <b>{label}</b>?\n\n"
-        "Активні записи буде знято. Історія здач залишиться в архіві.",
+        "Чергу, усі її записи та історію буде видалено безповоротно.",
         reply_markup=make_reply_keyboard([["Підтвердити видалення черги"], ["🔙 Назад до черги"]]),
     )
 
 
 async def admin_confirm_queue_deletion(message: Message, state: FSMContext, conn, subjects):
     sid = (await state.get_data()).get("session_id")
-    queues.finish_session(conn, message.from_user.id, sid)
+    queues.delete_session(conn, message.from_user.id, sid)
     await state.clear()
-    await message.answer("Чергу видалено з активного списку.")
+    await message.answer("Чергу та всі її записи видалено назавжди.")
     await _show_active_queues(message, state, conn, subjects, 1)
 
 

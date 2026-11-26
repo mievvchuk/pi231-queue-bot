@@ -39,7 +39,9 @@ async def main():
         from queue_bot.services.lesson_notifier import watch_lessons
         from queue_bot.services.channel_import import watch_channel
         from queue_bot.services import coursework_priority
+        from queue_bot.services.subgroups import prompt_missing_subgroups
         tasks = [
+            asyncio.create_task(prompt_missing_subgroups(bot, conn)),
             asyncio.create_task(watch_channel(bot, conn)),
             asyncio.create_task(watch_lessons(bot, conn, subjects)),
             asyncio.create_task(check_and_broadcast_updates(bot, conn)),

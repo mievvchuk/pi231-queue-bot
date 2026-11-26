@@ -21,4 +21,5 @@ def conn(db_path):
 def make_user(conn):
     def _make(telegram_id: int, name: str):
         users.register_user(conn, telegram_id, name)
+        users.set_subgroup(conn, telegram_id, 1)
     return _make

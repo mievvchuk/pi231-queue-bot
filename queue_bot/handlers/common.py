@@ -53,7 +53,7 @@ def journal_web_app() -> WebAppInfo | None:
 
 def get_reply_menu(conn, telegram_id: int) -> ReplyKeyboardMarkup:
     """Main navigation for the Telegram bot."""
-    rows = [['Черги', '📅 Розклад'], [JOURNAL_TEXT], ['❓ Допомога', '🐞 Повідомити про баг']]
+    rows = [['Черги', '📅 Розклад'], [JOURNAL_TEXT], ['👥 Моя підгрупа'], ['❓ Допомога', '🐞 Повідомити про баг']]
     if admins.is_admin(conn, telegram_id):
         rows.append(['⚡ Режим адміна'])
     return make_reply_keyboard(rows)
@@ -796,6 +796,17 @@ class Guard(BaseMiddleware):
         if isinstance(event, CallbackQuery):
             with suppress(TelegramBadRequest):
                 await event.answer()
+        # Обов'язковий вибір для наявних користувачів, навіть зі старих кнопок.
+        from queue_bot.services import users
+        from queue_bot.services.subgroups import PROMPT, subgroup_keyboard
+        sender = getattr(event, "from_user", None)
+        chat = event.chat if isinstance(event, Message) else getattr(getattr(event, "message", None), "chat", None)
+        if conn and sender and chat and chat.type == "private":
+            profile = users.get_user(conn, sender.id)
+            choosing = isinstance(event, CallbackQuery) and event.data in {"subgroup:1", "subgroup:2"}
+            if profile and profile["subgroup"] is None and not profile["is_blocked"] and not choosing:
+                await event.bot.send_message(sender.id, PROMPT, reply_markup=subgroup_keyboard())
+                return
         return await handler(event, data)
 
     @staticmethod

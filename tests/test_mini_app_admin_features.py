@@ -373,7 +373,7 @@ async def test_admin_queue_list_excludes_closed_and_archived_without_deleting_re
 
 
 @pytest.mark.asyncio
-async def test_admin_removes_queue_and_preserves_completed_history(admin_client, conn):
+async def test_admin_deletes_queue_and_all_completed_history(admin_client, conn):
     from queue_bot.services import attendance, swap_requests
 
     sid = queues.create_session(conn, 100, 1, 1)
@@ -388,10 +388,10 @@ async def test_admin_removes_queue_and_preserves_completed_history(admin_client,
     assert (await post(admin_client, 'history', payload, uid=1)).status == 403
     assert (await post(admin_client, 'history', payload, uid=101)).status == 200
 
-    assert queues.get_session(conn, sid)['status'] == 'archived'
+    assert queues.get_session(conn, sid) is None
     assert not queues.get_entries(conn, sid)
-    assert queues.get_history(conn, sid)[0]['status'] == 'completed'
+    assert not queues.get_history(conn, sid)
     assert attendance.active_run(conn, sid) is None
-    assert conn.execute('SELECT status FROM swap_requests WHERE session_id = ?', (sid,)).fetchone()['status'] == 'cancelled'
+    assert conn.execute('SELECT status FROM swap_requests WHERE session_id = ?', (sid,)).fetchone() is None
     assert queues.create_session(conn, 100, 1, 1) != sid
     assert (await post(admin_client, 'history', payload, uid=101)).status == 400

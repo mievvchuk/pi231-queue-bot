@@ -51,6 +51,8 @@
     "message": [
       "start",
       "register",
+      "choose_subgroup",
+      "choose_subgroup",
       "reply_main_menu",
       "reply_help",
       "reply_help_topic",
@@ -63,6 +65,7 @@
       "admin_send_bug_reply"
     ],
     "callback_query": [
+      "save_subgroup",
       "open_menu",
       "help_screen",
       "admin_resolve_bug_callback",
