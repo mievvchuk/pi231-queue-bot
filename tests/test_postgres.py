@@ -14,6 +14,7 @@ def test_postgres_subgroup_restart_and_permanent_queue_deletion(pg_conn):
     from queue_bot.services import attendance
 
     conn = pg_conn
+    users.register_user(conn, 100, 'Адмін Власник')
     users.set_subgroup(conn, 1, 2)
     sid = queues.create_session(conn, 100, 1, 1)
     queues.join_queue(conn, 1, sid)
