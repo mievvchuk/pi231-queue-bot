@@ -593,6 +593,31 @@ def queue_label(subjects: list[dict], session) -> str:
     return f"{subject} — {teacher}{type_badge}{lock}"
 
 
+def queue_button_label(subjects: list[dict], session) -> str:
+    """Keep the type and teacher visible on narrow Telegram buttons."""
+    from queue_bot.services.lesson_scheduler import subject_name
+    from queue_bot.services.subgroups import queue_subgroup
+
+    subject, teacher = session_names(subjects, session)
+    short_names = {
+        subject_name('Програмування в Інтернет'): 'ПІ',
+        subject_name('Людино-машинна взаємодія'): 'ЛМВ',
+        subject_name('Машинне навчання'): 'МН',
+        subject_name('Архітектура та проєкт ПЗ'): 'АТПЗ',
+        subject_name('Конструювання програмного забезпечення'): 'КПЗ',
+        subject_name('Проєкт інтерфейсів користувача ПС'): 'ПІКПС',
+        subject_name('Курсова робота з КПЗ'): 'Курсова КПЗ',
+    }
+    short = short_names.get(subject_name(subject), subject)
+    if len(short) > 18:
+        short = short[:17].rstrip() + '…'
+    if subgroup := queue_subgroup(session):
+        short += f'-{subgroup}'
+    surname = teacher.split()[0] if teacher.split() else '?'
+    kind = '💬 Консультація' if session['queue_type'] == 'consultation' else '📖 Пара'
+    return f'{kind} · {short} · {surname}'
+
+
 def format_queue_pair_plan(session, subject: str, plans: dict) -> str:
     plan = schedule.queue_pair_plan(session, subject, plans)
     if not plan:

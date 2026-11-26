@@ -36,6 +36,7 @@ from queue_bot.handlers.common import (
     notify_swap_wishes,
     paginate,
     queue_label,
+    queue_button_label,
     session_names,
     show,
 )
@@ -184,9 +185,9 @@ async def show_queue_search(message, state, conn, subjects, query='', page=1, *,
     page_sessions = sessions[(page-1)*5:page*5]
     rows = []
     for item in page_sessions:
-        label = queue_label(subjects, item)
+        label = queue_button_label(subjects, item)
         if scope == 'mine' and (position := queues.get_user_position(conn, uid, item['id'])):
-            label = f'№{position} · {label}'
+            label += f' · №{position}'
         rows.append([InlineKeyboardButton(text=label, callback_data=f'findq:{item["id"]}')])
     nav = []
     if page > 1:
@@ -200,6 +201,9 @@ async def show_queue_search(message, state, conn, subjects, query='', page=1, *,
     rows.append([InlineKeyboardButton(text='➕ Створити чергу', callback_data='findnew')])
     title = 'Мої черги' if scope == 'mine' else 'Усі черги'
     lines = [f'<b>{title}</b>']
+    profile = users.get_user(conn, uid)
+    if profile and profile['subgroup']:
+        lines.append(f'👥 Ваша підгрупа: {profile["subgroup"]} · КПЗ-{profile["subgroup"]}')
     if query:
         lines.append(f'Пошук · {html.escape(query)}')
     if sessions:
