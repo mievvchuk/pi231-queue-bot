@@ -381,16 +381,16 @@ def _subject_slots(lessons, day):
     for lesson in lessons:
         subject = lesson["subject"]
         if is_scheduled_subject(subject):
-            end = time.max
+            start = time.max
             with suppress(ValueError):
-                end = time.fromisoformat(lesson["endTime"]).replace(tzinfo=None)
+                start = time.fromisoformat(lesson["startTime"]).replace(tzinfo=None)
             slot = (lesson["number"], subject_name(subject))
-            slots[slot] = datetime.combine(day, end, tzinfo=UK_TZ)
+            slots[slot] = datetime.combine(day, start, tzinfo=UK_TZ)
     return slots
 
 
 def get_remaining_pairs(conn, *, now: datetime | None = None, project_finish: bool = True) -> dict[str, dict]:
-    """Consume the saved count only for actual completed lessons and find the last upcoming slot."""
+    """Consume the saved count when actual lessons start and find the last upcoming slot."""
     from queue_bot.services.lesson_scheduler import subject_name
     from queue_bot.services.working_days import list_working_saturdays
 
@@ -430,9 +430,9 @@ def get_remaining_pairs(conn, *, now: datetime | None = None, project_finish: bo
 
     for offset in range((min(today, max(end_by_subject.values())) - start).days + 1):
         day = start + timedelta(days=offset)
-        for (_, key), finishes in slots_on(day).items():
+        for (_, key), begins in slots_on(day).items():
             plan = active.get(key)
-            if plan and plan["remaining"] and day <= end_by_subject[key] and saved[key] < finishes <= now:
+            if plan and plan["remaining"] and day <= end_by_subject[key] and saved[key] < begins <= now:
                 plan["remaining"] -= 1
                 if not plan["remaining"]:
                     plan["finish_date"] = day.isoformat()
@@ -462,8 +462,8 @@ def get_remaining_pairs(conn, *, now: datetime | None = None, project_finish: bo
                 break
             day = special_days.pop()
 
-        for (_, key), finishes in slots_on(day).items():
-            if key in pending and day <= end_by_subject[key] and finishes > max(now, saved[key]):
+        for (_, key), begins in slots_on(day).items():
+            if key in pending and day <= end_by_subject[key] and begins > max(now, saved[key]):
                 pending[key] -= 1
                 if not pending[key]:
                     plans[key]["finish_date"] = day.isoformat()

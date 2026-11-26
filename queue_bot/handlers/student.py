@@ -94,6 +94,8 @@ async def open_queue_screen(message: Message, conn, subjects, session_id: int, n
     session = get_session_or_fail(conn, session_id)
     entries = queues.get_entries(conn, session_id)
     uid = telegram_id if telegram_id is not None else message.from_user.id
+    from queue_bot.services.subgroups import require_queue_access
+    require_queue_access(conn, uid, session)
     is_adm = admins.is_admin(conn, uid)
     from queue_bot.services import attendance
     text = '👤 <b>Режим студента</b>\n\n' + format_queue(
@@ -173,7 +175,7 @@ def search_sessions(sessions, subjects, query):
 
 async def show_queue_search(message, state, conn, subjects, query='', page=1, *, scope='all', callback=None):
     uid = callback.from_user.id if callback else message.from_user.id
-    available = queues.list_user_sessions(conn, uid) if scope == 'mine' else queues.list_sessions(conn, ('open', 'closed'))
+    available = queues.list_student_sessions(conn, uid, mine=True) if scope == 'mine' else queues.list_student_sessions(conn, uid)
     sessions = search_sessions(available, subjects, query)
     pages = max(1, (len(sessions) + 4) // 5)
     page = max(1, min(page, pages))
@@ -282,7 +284,7 @@ async def open_queue_category(message: Message, state: FSMContext, conn, subject
         await view_all_queues(message, state, conn, subjects)
         return
 
-    sessions = queues.list_sessions(conn, ("open", "closed"))
+    sessions = queues.list_student_sessions(conn, message.from_user.id)
     lessons, consults, coursework = categorize_sessions(sessions, subjects)
     cat_map = {
         "lessons": lessons,
@@ -307,7 +309,7 @@ async def open_queue_category(message: Message, state: FSMContext, conn, subject
 @router.message(F.text == "👥 Мої черги", StateFilter("*"))
 async def my_queues(message: Message, state: FSMContext, conn, subjects, page=1):
     await state.clear()
-    sessions = queues.list_user_sessions(conn, message.from_user.id)
+    sessions = queues.list_student_sessions(conn, message.from_user.id, mine=True)
     page = max(1, min(page, (len(sessions) + 7) // 8 or 1))
     await state.set_state(StudentFlow.browsing_my_queues)
     await state.update_data(page=page)
@@ -328,7 +330,7 @@ async def my_queues(message: Message, state: FSMContext, conn, subjects, page=1)
 async def paginate_all_queues(message: Message, state: FSMContext, conn, subjects):
     data = await state.get_data()
     category = data.get("category")
-    sessions = queues.list_sessions(conn, ("open", "closed"))
+    sessions = queues.list_student_sessions(conn, message.from_user.id)
     if not category:
         lessons, consults, coursework = categorize_sessions(sessions, subjects)
         text = format_queue_categories_overview(len(lessons), len(consults), len(coursework))
@@ -356,7 +358,7 @@ async def paginate_all_queues(message: Message, state: FSMContext, conn, subject
 
 @router.message(StudentFlow.browsing_my_queues, F.text.in_({"⬅️", "➡️"}))
 async def paginate_my_queues(message: Message, state: FSMContext, conn, subjects):
-    sessions = queues.list_user_sessions(conn, message.from_user.id)
+    sessions = queues.list_student_sessions(conn, message.from_user.id, mine=True)
     data = await state.get_data()
     page = data.get("page", 1)
     page = (page - 1) if message.text == "⬅️" else (page + 1)
@@ -376,7 +378,7 @@ async def refresh_all_queues_list(message: Message, state: FSMContext, conn, sub
                                 scope=data.get('queue_scope', 'all'))
         return
     category = data.get("category")
-    sessions = queues.list_sessions(conn, ("open", "closed"))
+    sessions = queues.list_student_sessions(conn, message.from_user.id)
     if not sessions:
         await state.clear()
         await message.answer("Активних черг немає.", reply_markup=get_reply_menu(conn, message.from_user.id))
@@ -407,7 +409,7 @@ async def refresh_all_queues_list(message: Message, state: FSMContext, conn, sub
 
 @router.message(F.text.in_({"🔄 Оновити список", "🔄 Оновити"}), StudentFlow.browsing_my_queues)
 async def refresh_my_queues_list(message: Message, state: FSMContext, conn, subjects):
-    sessions = queues.list_user_sessions(conn, message.from_user.id)
+    sessions = queues.list_student_sessions(conn, message.from_user.id, mine=True)
     data = await state.get_data()
     page = data.get("page", 1)
     if not sessions:
@@ -438,7 +440,7 @@ async def open_coursework_group(message: Message, state: FSMContext, conn, subje
         raw = raw.removeprefix(prefix)
     cw_name = raw.strip()
 
-    sessions = queues.list_sessions(conn, ("open", "closed"))
+    sessions = queues.list_student_sessions(conn, message.from_user.id)
     cw_sessions = [s for s in sessions if session_names(subjects, s)[0].lower() == cw_name.lower()]
     if not cw_sessions:
         cw_sessions = [s for s in sessions if "курсов" in session_names(subjects, s)[0].lower()]
@@ -473,7 +475,7 @@ async def open_coursework_group(message: Message, state: FSMContext, conn, subje
 async def paginate_coursework_queues(message: Message, state: FSMContext, conn, subjects):
     data = await state.get_data()
     cw_name = data.get("coursework_name", "Курсова робота з КПЗ")
-    sessions = queues.list_sessions(conn, ("open", "closed"))
+    sessions = queues.list_student_sessions(conn, message.from_user.id)
     page = data.get("page", 1)
     page = (page - 1) if message.text == "⬅️" else (page + 1)
     await state.update_data(page=page)
@@ -487,7 +489,7 @@ async def paginate_coursework_queues(message: Message, state: FSMContext, conn, 
 async def refresh_coursework_queues_list(message: Message, state: FSMContext, conn, subjects):
     data = await state.get_data()
     cw_name = data.get("coursework_name", "Курсова робота з КПЗ")
-    sessions = queues.list_sessions(conn, ("open", "closed"))
+    sessions = queues.list_student_sessions(conn, message.from_user.id)
     page = data.get("page", 1)
     await message.answer(
         f"Список черг для «{html.escape(cw_name)}» оновлено 👇",
@@ -514,7 +516,7 @@ async def back_to_queues_list(message: Message, state: FSMContext, conn, subject
 async def select_queue_by_button(message: Message, state: FSMContext, conn, subjects):
     session = find_session_by_label(conn, subjects, message.text)
     if not session:
-        sessions = queues.list_sessions(conn, ("open", "closed"))
+        sessions = queues.list_student_sessions(conn, message.from_user.id)
         lessons, consults, coursework = categorize_sessions(sessions, subjects)
         await message.answer(
             "⚠️ Чергу не знайдено або її закрито. Оберіть категорію активних черг 👇",
@@ -1511,7 +1513,12 @@ async def new_queue_subject_selected(message: Message, state: FSMContext, conn, 
         return
 
     await state.set_state(StudentFlow.creating_queue_teacher)
-    rows = [[f"👨‍🏫 {matched_sub['name']} — {t['name']}"] for t in matched_sub["teachers"]]
+    from queue_bot.services.subgroups import available_to
+    user = users.get_user(conn, message.from_user.id)
+    subgroup = user['subgroup'] if user else None
+    teachers = [t for t in matched_sub['teachers'] if admins.is_admin(conn, message.from_user.id)
+                or available_to({'subject_id': matched_sub['id'], 'teacher_id': t['id']}, subgroup)]
+    rows = [[f"👨‍🏫 {matched_sub['name']} — {t['name']}"] for t in teachers]
     rows.append(["💡 Додати предмет / викладача"])
     rows.append(["🔙 Назад", "🏠 Головне меню"])
     await message.answer(f"Оберіть викладача для предмета «{matched_sub['name']}» 👇", reply_markup=make_reply_keyboard(rows))
@@ -1595,7 +1602,7 @@ async def legacy_view_queue(callback: CallbackQuery, conn, subjects, state: FSMC
     await state.update_data(session_id=session_id)
     with suppress(Exception):
         await callback.message.delete()
-    await open_queue_screen(callback.message, conn, subjects, session_id)
+    await open_queue_screen(callback.message, conn, subjects, session_id, telegram_id=callback.from_user.id)
 
 
 @router.callback_query(F.data.startswith(("sd:", "sn:")))
@@ -1610,7 +1617,7 @@ async def legacy_button_finish(callback: CallbackQuery, conn, subjects, state: F
     note = "✅ <b>Здачу зараховано</b>\n\nВас знято з черги." if passed else "❌ <b>Позначено: не здав</b>"
     with suppress(Exception):
         await callback.message.delete()
-    await open_queue_screen(callback.message, conn, subjects, session_id, note=note)
+    await open_queue_screen(callback.message, conn, subjects, session_id, note=note, telegram_id=callback.from_user.id)
 
 
 @router.callback_query(F.data.startswith("lv:"))

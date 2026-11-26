@@ -569,7 +569,7 @@ async def test_schedule_editor_groups_only_matching_pairs(conn):
     assert all(len(row) == 1 for row in view.kwargs["reply_markup"].inline_keyboard)
 
 
-def test_remaining_pairs_project_from_count_and_consume_completed_replacements(conn):
+def test_remaining_pairs_project_from_count_and_consume_started_replacements(conn):
     from queue_bot.services import working_days
 
     schedule.replace_schedule_from_backup(conn, {

@@ -42,6 +42,9 @@ def session_for(request):
     session = queues.get_session(request[REQ_CONTEXT]['conn'], path_id(request))
     if not session or session['status'] == 'archived':
         raise BotError('Ця черга вже завершена або недоступна.')
+    if not request[REQ_ADMIN]:
+        from queue_bot.services.subgroups import require_queue_access
+        require_queue_access(request[REQ_CONTEXT]['conn'], request[REQ_UID], session)
     return session
 
 
@@ -170,6 +173,9 @@ async def bootstrap(request):
     sessions = queues.list_sessions(ctx['conn'], ('open', 'closed'))
     if request[REQ_USER] is None:
         return web.json_response({'me': {'name': None, 'is_registered': False, 'is_admin': False, 'is_owner': False}, 'queues': [], 'swaps': [], 'today': schedule.get_current_date().isoformat()})
+    if not request[REQ_ADMIN]:
+        from queue_bot.services.subgroups import filter_sessions
+        sessions = filter_sessions(ctx['conn'], uid, sessions)
     try:
         next_lesson = schedule.get_upcoming_lesson(ctx['conn'], schedule.read_schedule(ctx['conn']))
     except (ValueError, TypeError, KeyError, AttributeError):

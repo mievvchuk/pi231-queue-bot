@@ -28,6 +28,12 @@ def get_entry(conn: sqlite3.Connection, entry_id: int):
     return conn.execute("SELECT * FROM queue_entries WHERE id = ?", (entry_id,)).fetchone()
 
 
+def list_student_sessions(conn, telegram_id, *, mine=False):
+    from queue_bot.services.subgroups import filter_sessions
+    sessions = list_user_sessions(conn, telegram_id) if mine else list_sessions(conn, UNFINISHED)
+    return filter_sessions(conn, telegram_id, sessions)
+
+
 def get_entries(conn: sqlite3.Connection, session_id: int) -> list[sqlite3.Row]:
     """Активні записи по порядку. full_name = NULL означає вільне місце."""
     return conn.execute(
@@ -140,6 +146,8 @@ def join_queue(conn: sqlite3.Connection, telegram_id: int, session_id: int,
             raise BotError(f"🛠 Зараз тривають технічні роботи (орієнтовно до {end_t}). Запис до черги закрито.")
 
         session = _require_session(conn, session_id, statuses=("open", "closed"))
+        from queue_bot.services.subgroups import require_queue_access
+        require_queue_access(conn, telegram_id, session)
         if lab_numbers is not None:
             lab_numbers = lab_catalog.validate_numbers(session, lab_numbers)
             lab_catalog.validate_selection_time(session, lab_numbers, planned_minutes)
@@ -464,6 +472,10 @@ def create_queue(conn: sqlite3.Connection, telegram_id: int, subject_id: int,
 
         if conn.execute("SELECT 1 FROM users WHERE telegram_id = ? AND deleted_at IS NULL", (telegram_id,)).fetchone() is None:
             raise BotError("Спочатку зареєструйтесь: /start")
+        from queue_bot.services.subgroups import require_queue_access
+        from queue_bot.services.admins import is_admin
+        if not is_admin(conn, telegram_id):
+            require_queue_access(conn, telegram_id, {'subject_id': subject_id, 'teacher_id': teacher_id})
         return _insert_session(conn, subject_id, teacher_id, lesson_title.strip(), queue_type=queue_type)
 
 

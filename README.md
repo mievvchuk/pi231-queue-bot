@@ -10,7 +10,7 @@ A Telegram bot and optional Telegram Mini App/PWA for managing student queues fo
 
 ### Students
 - Register with a full name through the Telegram bot or Mini App, view active queues, and join at the end or in an available reserved slot.
-- Choose subgroup 1 or 2 in the bot. Existing students without a selection receive a one-time prompt after startup; their next private interaction also requires a selection. Change it via «👥 Моя підгрупа» or `/subgroup`. The choice persists across restarts; queue filtering is pending subgroup rules.
+- Choose subgroup 1 or 2 in the bot. Existing students without a selection receive a one-time prompt after startup; their next private interaction also requires a selection. Change it via «👥 Моя підгрупа» or `/subgroup`. The choice persists across restarts; only КПЗ is split by subgroup: Щуцький (1) and Кондратюк (2), for lessons and consultations. Other subjects, including course work, are shared. Student lists, creation and signup enforce this rule; administrators can manage all queues.
 - View their current position, queue participants, and personal entries; leave a queue or mark work as completed.
 - Select individual laboratory numbers for supported subjects and set an estimated completion time from **5 minutes up to the sum of their selected labs' maximum durations**.
 - Edit selected labs or planned time without losing their position. When multiple labs are selected, mark only the completed ones and keep the remaining work in the same queue.
@@ -42,6 +42,8 @@ A queue session belongs to a subject, teacher, and queue type. Its lifecycle is 
 For subjects with a lab catalog, students choose lab numbers and an individual time estimate before their place is confirmed. The same lab and time selection is available in consultation queues for those subjects. Subjects without a lab catalog skip these fields. A single selected lab can be completed immediately; with multiple labs, students can report partial completion and retain their place for the remainder. Old or stale action buttons must not modify a newer entry.
 
 «Видалити чергу» in Telegram and the Mini App permanently deletes the selected queue, its entries, swap requests, and attendance data after confirmation. It preserves other queues, student profiles, and grades in the independent journal.
+
+Saved subject pair counts decrease at the scheduled start of each effective lesson (Kyiv time), taking substitutions, cancellations, and working Saturdays into account. The count is recomputed from the saved baseline, so refreshing or restarting cannot subtract a lesson twice. A manual count reset describes the remaining lessons from the moment it is saved.
 
 Admin actions are logged. Queue updates, swaps, transfers, and archival are handled in database transactions. Swap requests expire after **10 minutes** if unanswered.
 

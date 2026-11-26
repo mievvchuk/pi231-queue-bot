@@ -21,7 +21,17 @@ def public_catalog(ctx):
 
 async def catalog(request):
     from . import api
-    return web.json_response({'subjects':public_catalog(request[api.REQ_CONTEXT])})
+    ctx = request[api.REQ_CONTEXT]
+    catalog = public_catalog(ctx)
+    if not request[api.REQ_ADMIN]:
+        from queue_bot.services.subgroups import available_to
+        user = users.get_user(ctx['conn'], request[api.REQ_UID])
+        subgroup = user['subgroup'] if user else None
+        for subject in catalog:
+            subject['teachers'] = [teacher for teacher in subject['teachers']
+                if available_to({'subject_id': subject['id'], 'teacher_id': teacher['id']}, subgroup)]
+        catalog = [subject for subject in catalog if subject['teachers']]
+    return web.json_response({'subjects':catalog})
 
 
 async def register(request):
@@ -45,6 +55,9 @@ async def create_queue(request):
     teacher=subjects.find_teacher(subject,api.integer(data.get('teacher_id')))
     if not teacher:
         raise BotError('Викладач не належить цьому предмету.')
+    if not request[api.REQ_ADMIN]:
+        from queue_bot.services.subgroups import require_queue_access
+        require_queue_access(ctx['conn'], uid, {'subject_id': subject['id'], 'teacher_id': teacher['id']})
     kind=data.get('type','normal')
     if kind not in ('normal','lesson','consultation'):
         raise BotError('Оберіть тип черги.')
