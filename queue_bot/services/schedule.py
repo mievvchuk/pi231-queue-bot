@@ -194,7 +194,7 @@ def get_upcoming_lesson(conn, schedule_data, *, now=None, group_name=None):
             if (working_days.get_working_saturday(conn, target.isoformat()) and
                     working_days.is_saturday_archived(target.isoformat(), now=now)):
                 continue
-        lessons, _ = get_actual_schedule(conn, schedule_data, target, group_name or config.STUDENT_GROUP)
+        lessons, _ = get_actual_schedule(conn, schedule_data, target, group_name or config.STUDENT_GROUP, now=now)
         for number in sorted({item['number'] for item in lessons}):
             start, end = PAIR_TIMES.get(number, ('', ''))
             if not start or not end:
@@ -297,12 +297,35 @@ def _planned_lessons(schedule_data, dt, ws):
     return base
 
 
-def get_actual_schedule(conn, schedule_data: dict, dt: date, group_name: str = "ПІ-231") -> tuple[list[dict], list[dict]]:
+def get_actual_schedule(conn, schedule_data: dict, dt: date, group_name: str = "ПІ-231", *, now=None) -> tuple[list[dict], list[dict]]:
     date_str = dt.isoformat()
     replacements = get_replacements(conn, date=date_str, group_name=group_name)
 
     base = get_planned_schedule(conn, schedule_data, dt)
-    return _apply_replacements(base, replacements), replacements
+    lessons = _apply_replacements(base, replacements)
+    now = (now or datetime.now(UK_TZ)).astimezone(UK_TZ)
+    if dt >= now.date() and lessons:
+        from queue_bot.services.lesson_scheduler import subject_name
+        # Counting uses the unfiltered timetable, so hiding a completed subject
+        # cannot restore its remaining count or erase historical lessons.
+        plans = get_remaining_pairs(conn, now=now, project_finish=False)
+        completed = {key: plan for key, plan in plans.items() if plan['remaining'] == 0}
+
+        def visible(lesson):
+            plan = completed.get(subject_name(lesson['subject']))
+            if plan is None:
+                return True
+            # The final class consumes its count at the start, but must still
+            # run attendance and remain visible until the bell rings.
+            try:
+                start = datetime.combine(dt, time.fromisoformat(lesson['startTime']), UK_TZ)
+                end = datetime.combine(dt, time.fromisoformat(lesson['endTime']), UK_TZ)
+            except (ValueError, TypeError, KeyError):
+                return False
+            return plan['exhausted_at'] == int(start.timestamp()) and start <= now < end
+
+        lessons = [lesson for lesson in lessons if visible(lesson)]
+    return lessons, replacements
 
 
 def _apply_replacements(base, replacements):
@@ -400,6 +423,7 @@ def get_remaining_pairs(conn, *, now: datetime | None = None, project_finish: bo
     for plan in plans.values():
         plan["remaining"] = plan["base_count"]
         plan["finish_date"] = None
+        plan["exhausted_at"] = None
     active = {key: plan for key, plan in plans.items() if plan["remaining"]}
     if not active:
         return plans
@@ -436,6 +460,7 @@ def get_remaining_pairs(conn, *, now: datetime | None = None, project_finish: bo
                 plan["remaining"] -= 1
                 if not plan["remaining"]:
                     plan["finish_date"] = day.isoformat()
+                    plan["exhausted_at"] = int(begins.timestamp())
 
     if not project_finish:
         return plans

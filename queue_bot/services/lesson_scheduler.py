@@ -127,7 +127,7 @@ def sync_schedule(conn, subjects, *, now=None, schedule_data=None):
         return
     local = datetime.fromtimestamp(now, schedule.UK_TZ)
     data = schedule.read_schedule(conn) if schedule_data is None else schedule_data
-    lessons, replacements = schedule.get_actual_schedule(conn, data, local.date(), config.STUDENT_GROUP)
+    lessons, replacements = schedule.get_actual_schedule(conn, data, local.date(), config.STUDENT_GROUP, now=local)
     replacements_by_pair = {int(item['lesson_number']): item for item in replacements}
     planned_lessons = schedule.get_planned_schedule(conn, data, local.date()) if replacements else []
     sessions = queues.list_sessions(conn, ('open', 'closed'))

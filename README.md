@@ -49,6 +49,8 @@ For subjects with a lab catalog, students choose lab numbers and an individual t
 
 Saved subject pair counts decrease at the scheduled start of each effective lesson (Kyiv time), taking substitutions, cancellations, and working Saturdays into account. The count is recomputed from the saved baseline, so refreshing or restarting cannot subtract a lesson twice. A manual count reset describes the remaining lessons from the moment it is saved.
 
+When a saved subject count reaches zero, that subject is omitted from the current and future effective timetable, including Mini App views, daily schedules and automatic attendance starts. Its final ongoing lesson stays visible until it ends. Historical days and the editable source timetable are preserved so the count remains stable; setting a positive remaining count restores upcoming lessons. Subjects without a saved count stay visible.
+
 Admin actions are logged. Queue updates, swaps, transfers, and archival are handled in database transactions. Swap requests expire after **10 minutes** if unanswered.
 
 ## Laboratory catalog
