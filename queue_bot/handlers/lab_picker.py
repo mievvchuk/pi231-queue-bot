@@ -6,17 +6,17 @@ from queue_bot.handlers.common import make_keyboard, make_reply_keyboard
 from queue_bot.services import lab_catalog
 
 
-async def start_picker(message, state, session, *, prefix, allowed, selected):
+async def start_picker(message, state, session, *, prefix, allowed, selected, conn=None):
     nonce = secrets.token_hex(6)
     await state.update_data(picker_nonce=nonce, picker_allowed=sorted(allowed), picker_selected=sorted(selected))
     data = await state.get_data()
     await message.answer('Оберіть лабораторні на кнопках нижче або введіть номери через кому.',
                          reply_markup=make_reply_keyboard([['🔙 Назад до черги']]))
-    text, markup = picker_content(session, data, prefix)
+    text, markup = picker_content(session, data, prefix, conn=conn)
     await message.answer(text, reply_markup=markup)
 
 
-def picker_content(session, data, prefix):
+def picker_content(session, data, prefix, *, conn=None):
     allowed = set(data['picker_allowed'])
     selected = data.get('picker_selected', [])
     nonce = data['picker_nonce']
@@ -24,7 +24,7 @@ def picker_content(session, data, prefix):
     heading = '✅ Які лабораторні здали?' if completing else '🧪 Оберіть лабораторні для здачі'
     lines = [f'<b>{heading}</b>', '']
     buttons = []
-    for lab in lab_catalog.labs_for_session(session):
+    for lab in lab_catalog.labs_for_session(session, conn=conn):
         number = lab['number']
         if number not in allowed:
             continue
@@ -34,7 +34,7 @@ def picker_content(session, data, prefix):
         buttons.append((f"{mark} №{number} · {lab['max_minutes']} хв", f'{prefix}:{nonce}:t:{number}'))
     lines.extend(['', 'Обрано: ' + (lab_catalog.format_numbers(selected) if selected else 'ще нічого')])
     if selected:
-        lines.append(f'Сумарний ліміт: <b>{lab_catalog.selection_limit(session, selected)} хв</b>')
+        lines.append(f'Сумарний ліміт: <b>{lab_catalog.selection_limit(session, selected, conn=conn)} хв</b>')
     lines.append('Натискайте номери, потім підтвердьте. Або введіть, наприклад: 1, 2.')
     rows = [buttons[i:i + 2] for i in range(0, len(buttons), 2)]
     rows.extend([

@@ -219,8 +219,8 @@ async def student_action(request):
         attendance.respond(conn, uid, token, data.get('response'), minutes=data.get('minutes'))
         return web.json_response({'message': 'Відповідь збережено.'})
     if action == 'join':
-        labs = lab_catalog.labs_for_session(session)
-        numbers = lab_catalog.validate_numbers(session, data.get('labs')) if labs else None
+        labs = lab_catalog.labs_for_session(session, conn=conn)
+        numbers = lab_catalog.validate_numbers(session, data.get('labs'), conn=conn) if labs else None
         minutes = integer(data.get('minutes'), minimum=5) if labs else None
         position = integer(data['position'], maximum=1000) if data.get('position') is not None else None
         if position is not None and not queues.has_free_slots(conn, sid) and queues.are_first_10_occupied(conn, sid):
@@ -229,7 +229,7 @@ async def student_action(request):
         return web.json_response({'message': f'Ви записалися. Ваше місце: {place}.', 'position': place, 'queue_id': sid})
     session, entry = current_entry(request, data)
     if action == 'finish-turn':
-        has_work = bool(lab_catalog.labs_for_session(session))
+        has_work = bool(lab_catalog.labs_for_session(session, conn=conn))
         if session['queue_type'] == 'consultation':
             has_work = has_work and bool(lab_catalog.read_numbers(entry['selected_labs']))
         queues.finish_own_entry(conn, uid, sid, passed=not has_work)
@@ -259,13 +259,13 @@ async def student_action(request):
                 await notify_swap_wishes(ctx['bot'], conn, ctx['subjects'], sid, uid, new_wish)
         return web.json_response({'message': 'Побажання обміну оновлено.'})
     if action == 'edit':
-        numbers = lab_catalog.validate_numbers(session, data.get('labs'))
+        numbers = lab_catalog.validate_numbers(session, data.get('labs'), conn=conn)
         minutes = integer(data.get('minutes'), minimum=5)
         queues.set_own_lab_selection(conn, uid, sid, numbers, planned_minutes=minutes,
                                     expected_entry_id=entry['id'], expected_revision=entry['entry_revision'])
         return web.json_response({'message': 'Лабораторні й час оновлено. Місце збережено.'})
     if action == 'complete':
-        pending = lab_catalog.read_numbers(entry['selected_labs']) if lab_catalog.labs_for_session(session) else None
+        pending = lab_catalog.read_numbers(entry['selected_labs']) if lab_catalog.labs_for_session(session, conn=conn) else None
         if pending:
             selected = pending if len(pending) == 1 else data.get('labs')
             remaining = queues.record_own_passed_lab_numbers(conn, uid, sid, selected,

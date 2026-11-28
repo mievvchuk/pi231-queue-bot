@@ -45,7 +45,7 @@ def queue_view(conn, subjects, session, uid, *, detail=False, admin=False, pair_
     result['my_planned_minutes'] = own['planned_minutes'] if own else None
     if detail:
         result['entries'] = [entry_view(row, uid, admin) for row in attendance.display_entries(rows, lesson)]
-        result['labs'] = list(lab_catalog.labs_for_session(session))
+        result['labs'] = list(lab_catalog.labs_for_session(session, conn=conn))
         result['can_pick_position'] = session['status'] != 'archived'
         by_position = {row['position']: row for row in rows}
         last = max(by_position, default=0)

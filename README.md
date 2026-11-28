@@ -65,7 +65,17 @@ The default catalog is [`data/lab_catalog.json`](data/lab_catalog.json). It can 
 | Software Architecture and Design | 1–3 | 20 min |
 | Software Construction | 1–11 | 25, 10, 10, 15, 10, 15, 20, 15, 15, 15, 15 min |
 
-Some labs have titles in the catalog; untitled ones are identified by number. These are **per-lab maximums**, not an automatically shared classroom time budget. Changing the catalog requires an application restart and does not automatically create subjects or queues.
+Some labs have titles in the catalog; untitled ones are identified by number. These are **per-lab maximums**, not an automatically shared classroom time budget.
+
+Administrators can open **«Предмети та викладачі → 🧪 Лабораторні»**, select a subject, and add or name several works in one message:
+
+```text
+1. Topic of the first lab
+2. Topic of the second lab
+3 | Topic with a custom time limit | 30
+```
+
+The bot previews the batch before confirmation. Existing numbers keep their time limits unless a new limit is supplied; new works default to 20 minutes. A subject supports up to 20 works with unique numbers 1–100 and titles up to 100 characters. Other works and existing student entries are preserved. Administrator changes are stored in the database, appear immediately in the Telegram picker and Mini App, and survive deployments. Editing the fallback JSON file still requires an application restart; loading it never creates subjects or queues.
 
 ## Project structure
 

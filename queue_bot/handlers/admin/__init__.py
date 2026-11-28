@@ -18,6 +18,8 @@ router.callback_query.filter(_is_admin_filter)
 router.message.filter(F.chat.type == "private", _is_admin_filter)
 router.callback_query.middleware(AdminOnly())
 router.message.middleware(AdminOnly())
+from .labs import router as labs_router
+router.include_router(labs_router)
 
 router.message(F.text == '⚡ Керувати чергою (Адмін)', StateFilter('*'))(admin_quick_manage_from_student_view)
 router.message(F.text == '👤 Як студент (Моє місце)', StateFilter('*'))(admin_switch_to_student_queue_view)

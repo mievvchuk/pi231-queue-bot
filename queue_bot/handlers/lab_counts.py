@@ -51,7 +51,7 @@ async def begin_lab_count(message, state, conn, session_id, *, action='join', po
             raise BotError('Ви вже записані в цю чергу.')
     elif entry is None:
         raise BotError('Ви не записані в цю чергу.')
-    if not lab_catalog.labs_for_session(session):
+    if not lab_catalog.labs_for_session(session, conn=conn):
         await state.clear()
         await state.update_data(session_id=session_id)
         if action == 'join':
@@ -69,14 +69,14 @@ async def begin_lab_count(message, state, conn, session_id, *, action='join', po
     if action == 'time' and numbers:
         await state.update_data(lab_numbers=numbers)
         await state.set_state(LabCountFlow.minutes)
-        await prompt_minutes(message, session, numbers)
+        await prompt_minutes(message, session, numbers, conn=conn)
         return
     if action == 'time':
         await state.update_data(lab_action='edit')
     await state.set_state(LabCountFlow.entering)
     await start_picker(message, state, session, prefix='labpick',
-                       allowed=[lab['number'] for lab in lab_catalog.labs_for_session(session) if lab['number'] not in completed],
-                       selected=numbers or [])
+                       allowed=[lab['number'] for lab in lab_catalog.labs_for_session(session, conn=conn) if lab['number'] not in completed],
+                       selected=numbers or [], conn=conn)
 
 
 async def ask_lab_count(message, state, conn, subjects):
@@ -96,19 +96,19 @@ async def ask_planned_minutes(message, state, conn, subjects):
 async def prepare_minutes(message, state, conn, numbers):
     data = await state.get_data()
     session = queues.get_session(conn, data['session_id'])
-    numbers = lab_catalog.validate_numbers(session, numbers)
+    numbers = lab_catalog.validate_numbers(session, numbers, conn=conn)
     if not set(numbers).issubset(data.get('picker_allowed', [])):
         raise BotError('Оберіть лише доступні лабораторні.')
     await state.update_data(lab_numbers=numbers)
     await state.set_state(LabCountFlow.minutes)
-    await prompt_minutes(message, session, numbers)
+    await prompt_minutes(message, session, numbers, conn=conn)
 
 
 async def receive_lab_count(message, state, conn, subjects):
     data = await state.get_data()
     session = queues.get_session(conn, data.get('session_id'))
     try:
-        numbers = lab_catalog.parse_numbers(message.text, session, allowed=data.get('picker_allowed'))
+        numbers = lab_catalog.parse_numbers(message.text, session, allowed=data.get('picker_allowed'), conn=conn)
         await prepare_minutes(message, state, conn, numbers)
     except BotError as error:
         await message.answer(str(error))
@@ -124,12 +124,12 @@ async def lab_selection_callback(callback, state, conn, subjects):
     elif action == 'ok':
         await prepare_minutes(callback.message, state, conn, data['picker_selected'])
     else:
-        text, markup = picker_content(queues.get_session(conn, data['session_id']), data, 'labpick')
+        text, markup = picker_content(queues.get_session(conn, data['session_id']), data, 'labpick', conn=conn)
         await show(callback, text, markup)
 
 
-async def prompt_minutes(message, session, numbers):
-    limit = lab_catalog.selection_limit(session, numbers)
+async def prompt_minutes(message, session, numbers, *, conn=None):
+    limit = lab_catalog.selection_limit(session, numbers, conn=conn)
     choices = sorted({n for n in (5, 10, 15, 20, limit) if n <= limit})
     await message.answer(f'⏱ <b>Скільки хвилин приблизно займе здача?</b>\n\n'
                          f'Обрано: {lab_catalog.format_numbers(numbers)}. Максимальний ліміт: <b>{limit} хв</b>.\n'
@@ -149,7 +149,7 @@ async def receive_planned_minutes(message, state, conn, subjects):
     try:
         minutes = int(text) if text.isascii() and text.isdigit() and len(text) <= 10 else None
         validate_planned_minutes(minutes, allow_unknown=False)
-        lab_catalog.validate_selection_time(queues.get_session(conn, sid), numbers, minutes)
+        lab_catalog.validate_selection_time(queues.get_session(conn, sid), numbers, minutes, conn=conn)
     except BotError as error:
         await message.answer(str(error))
         return

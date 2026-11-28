@@ -140,7 +140,7 @@ async def queue_action(callback, state, conn, subjects):
                 bool(entry), is_open=session['status'] != 'archived',
                 can_pick_number=True,
                 swap_wish=entry['swap_wish'] if entry else None,
-                labs_available=bool(lab_catalog.labs_for_session(session)),
+                labs_available=bool(lab_catalog.labs_for_session(session, conn=conn)),
                 consultation=session['queue_type'] == 'consultation' or session['subject_id'] == 7))
         elif action == 'refresh':
             await open_queue_screen(callback.message, conn, subjects, sid, telegram_id=uid,
@@ -214,7 +214,7 @@ async def attendance_answer(callback, state, conn, subjects):
         if action == 'finish':
             from queue_bot.services import lab_catalog
             session = queues.get_session(conn, sid)
-            queues.finish_own_entry(conn, callback.from_user.id, sid, passed=not bool(lab_catalog.labs_for_session(session)))
+            queues.finish_own_entry(conn, callback.from_user.id, sid, passed=not bool(lab_catalog.labs_for_session(session, conn=conn)))
             attendance.tick(conn)
         else:
             minutes = int(action[4:]) if action.startswith('late') else None

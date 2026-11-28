@@ -189,6 +189,7 @@ def get_admin_subjects_menu(is_owner: bool = False) -> ReplyKeyboardMarkup:
     rows = [
         ["👨‍🏫 Додати викладача", "➕ Додати предмет"],
         ["📅 Внести залишок пар"],
+        ["🧪 Лабораторні"],
     ]
     if is_owner:
         rows.append(["✏️ Перейменувати предмет", "🗑 Відкріпити викладача"])
@@ -639,8 +640,9 @@ def format_queue_list_pair_plans(conn, sessions, subjects) -> str:
     return "".join(f"\n<b>{html.escape(name)}</b> · {summary}" for name, summary in summaries.items())
 
 
-def format_queue(subjects: list[dict], session, entries, my_telegram_id: int | None = None, show_id: bool = False, *, lesson=None, pair_plans=None) -> str:
+def format_queue(subjects: list[dict], session, entries, my_telegram_id: int | None = None, show_id: bool = False, *, lesson=None, pair_plans=None, conn=None) -> str:
     lines = []
+    definitions = lab_catalog.labs_for_session(session, conn=conn)
 
     subject, teacher = session_names(subjects, session)
     q_type = session["queue_type"] if "queue_type" in session.keys() else "lesson"
@@ -676,7 +678,7 @@ def format_queue(subjects: list[dict], session, entries, my_telegram_id: int | N
             if group != previous_group:
                 lines.extend(['', '<b>' + group + '</b>'])
                 previous_group = group
-        line = format_entry(row, my_telegram_id, show_id=show_id)
+        line = format_entry(row, my_telegram_id, show_id=show_id, conn=conn, labs=definitions)
         if lesson and row['id'] in lesson['states']:
             line += ' — ' + html.escape(lesson['states'][row['id']])
         lines.append(line)
@@ -685,7 +687,7 @@ def format_queue(subjects: list[dict], session, entries, my_telegram_id: int | N
     return "\n".join(lines)
 
 
-def format_entry(row, my_telegram_id: int | None = None, marked: bool = False, show_id: bool = False) -> str:
+def format_entry(row, my_telegram_id: int | None = None, marked: bool = False, show_id: bool = False, *, conn=None, labs=None) -> str:
     raw_name = row["full_name"] if "full_name" in row.keys() else None
     if raw_name:
         name = html.escape(raw_name)
@@ -715,7 +717,8 @@ def format_entry(row, my_telegram_id: int | None = None, marked: bool = False, s
     minutes = row['planned_minutes'] if 'planned_minutes' in row.keys() and tg_id else None
     details = format_lab_details(count, minutes)
     if 'subject_id' in row.keys():
-        if not lab_catalog.labs_for_session(row):
+        definitions = labs if labs is not None else lab_catalog.labs_for_session(row, conn=conn)
+        if not definitions:
             details = ''
         elif tg_id and 'selected_labs' in row.keys():
             numbers = lab_catalog.read_numbers(row['selected_labs'])
@@ -724,8 +727,9 @@ def format_entry(row, my_telegram_id: int | None = None, marked: bool = False, s
                 if minutes is not None:
                     details += f' · ≈{minutes} хв'
                 try:
-                    details += f' · ліміт {lab_catalog.selection_limit(row, numbers)} хв'
-                except BotError:
+                    limits = {lab['number']: lab['max_minutes'] for lab in definitions}
+                    details += f' · ліміт {sum(limits[number] for number in numbers)} хв'
+                except KeyError:
                     details += ' · оновіть перелік лабораторних'
     lab_part = f' · {details}' if details else ''
     coursework_badge = " 📑 [курсова]" if 'coursework_priority' in row.keys() and row['coursework_priority'] and tg_id else ""

@@ -101,7 +101,7 @@ async def open_queue_screen(message: Message, conn, subjects, session_id: int, n
     from queue_bot.services import attendance
     text = '👤 <b>Режим студента</b>\n\n' + format_queue(
         subjects, session, entries, uid, lesson=attendance.view(conn, session_id, uid),
-        pair_plans=schedule.read_queue_pair_plans(conn),
+        pair_plans=schedule.read_queue_pair_plans(conn), conn=conn,
     )
     from queue_bot.handlers.attendance import lesson_summary, screen_keyboard
     text += lesson_summary(conn, session_id, uid)
@@ -111,7 +111,7 @@ async def open_queue_screen(message: Message, conn, subjects, session_id: int, n
     origin = queue_navigation.return_to(conn, uid, session_id)
     markup = get_queue_view_reply_menu(is_admin=is_adm,
         back_text='🔙 До моїх черг' if origin['source'] in ('my', 'search_my') else '🔙 До черг',
-        can_edit_labs=in_queue and session['status'] != 'archived' and bool(lab_catalog.labs_for_session(session)))
+        can_edit_labs=in_queue and session['status'] != 'archived' and bool(lab_catalog.labs_for_session(session, conn=conn)))
     from queue_bot.handlers import queue_messages
     controls = screen_keyboard(conn, session_id, uid)
     if refresh and await queue_messages.refresh(message, conn, uid, session_id, 'student', text,
@@ -584,7 +584,7 @@ async def show_queue_actions(message: Message, state: FSMContext, conn):
     ready_to_swap = queues.is_ready_to_swap(conn, message.from_user.id, session_id) if is_in_queue else False
     markup = get_queue_actions_reply_menu(
         is_in_queue, is_open=is_open, can_pick_number=can_pick, swap_wish=swap_wish, ready_to_swap=ready_to_swap,
-        labs_available=bool(lab_catalog.labs_for_session(session)),
+        labs_available=bool(lab_catalog.labs_for_session(session, conn=conn)),
         consultation=session['queue_type'] == 'consultation' or session['subject_id'] == 7,
     )
     await message.answer("⚙️ <b>Оберіть дію:</b>", reply_markup=markup)

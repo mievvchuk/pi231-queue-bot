@@ -22,7 +22,7 @@ async def begin_completion(message, state, conn, session_id, *, telegram_id=None
     entry = next((r for r in queues.get_entries(conn, session_id) if r['telegram_id'] == uid), None)
     if entry is None:
         raise BotError('Ви не записані в цю чергу.')
-    labs_available = bool(lab_catalog.labs_for_session(session))
+    labs_available = bool(lab_catalog.labs_for_session(session, conn=conn))
     pending = lab_catalog.read_numbers(entry['selected_labs']) if labs_available else None
     consultation = session['queue_type'] == 'consultation' or session['subject_id'] == 7
     if end_consultation and not consultation:
@@ -41,7 +41,7 @@ async def begin_completion(message, state, conn, session_id, *, telegram_id=None
         await finish_selection(message, state, conn, subjects, pending, telegram_id=uid)
         return
     await state.set_state(CompletionFlow.count)
-    await start_picker(message, state, session, prefix='labdone', allowed=pending, selected=[])
+    await start_picker(message, state, session, prefix='labdone', allowed=pending, selected=[], conn=conn)
 
 
 async def finish_selection(message, state, conn, subjects, numbers, *, telegram_id=None, bot=None):
@@ -75,7 +75,7 @@ async def receive_passed_labs(message, state, conn, subjects):
     try:
         text = message.text.strip()
         numbers = (data.get('picker_allowed', []) if text.casefold() in {'усі', 'всі', '✅ усі'} else
-                   lab_catalog.parse_numbers(text, session, allowed=data.get('picker_allowed')))
+                   lab_catalog.parse_numbers(text, session, allowed=data.get('picker_allowed'), conn=conn))
     except BotError as error:
         await message.answer(str(error))
         return
@@ -93,5 +93,5 @@ async def passed_selection_callback(callback, state, conn, subjects):
         await finish_selection(callback.message, state, conn, subjects, data['picker_selected'],
                                telegram_id=callback.from_user.id, bot=callback.bot)
     else:
-        text, markup = picker_content(queues.get_session(conn, data['session_id']), data, 'labdone')
+        text, markup = picker_content(queues.get_session(conn, data['session_id']), data, 'labdone', conn=conn)
         await show(callback, text, markup)

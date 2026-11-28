@@ -149,8 +149,8 @@ def join_queue(conn: sqlite3.Connection, telegram_id: int, session_id: int,
         from queue_bot.services.subgroups import require_queue_access
         require_queue_access(conn, telegram_id, session)
         if lab_numbers is not None:
-            lab_numbers = lab_catalog.validate_numbers(session, lab_numbers)
-            lab_catalog.validate_selection_time(session, lab_numbers, planned_minutes)
+            lab_numbers = lab_catalog.validate_numbers(session, lab_numbers, conn=conn)
+            lab_catalog.validate_selection_time(session, lab_numbers, planned_minutes, conn=conn)
             lab_count = len(lab_numbers)
         user = conn.execute("SELECT id, is_blocked FROM users WHERE telegram_id = ?", (telegram_id,)).fetchone()
         if user is None:
@@ -358,7 +358,7 @@ def set_own_planned_minutes(conn, telegram_id: int, session_id: int, minutes: in
         _check_revision(entry, expected_entry_id, expected_revision)
         numbers = lab_catalog.read_numbers(entry['selected_labs'])
         if numbers:
-            lab_catalog.validate_selection_time(session, numbers, minutes)
+            lab_catalog.validate_selection_time(session, numbers, minutes, conn=conn)
         conn.execute('UPDATE queue_entries SET planned_minutes = ?, entry_revision = entry_revision + 1 WHERE id = ?', (minutes, entry['id']))
 
 
@@ -374,11 +374,11 @@ def set_own_lab_selection(conn, telegram_id, session_id, numbers, *, planned_min
         session = _require_session(conn, session_id)
         entry = _own_active_entry(conn, telegram_id, session_id)
         _check_revision(entry, expected_entry_id, expected_revision)
-        numbers = lab_catalog.validate_numbers(session, numbers)
+        numbers = lab_catalog.validate_numbers(session, numbers, conn=conn)
         if set(numbers) & set(lab_catalog.read_numbers(entry['passed_labs']) or []):
             raise BotError('Ці лабораторні вже здані в цьому записі.')
         minutes = planned_minutes if planned_minutes is not None else entry['planned_minutes']
-        lab_catalog.validate_selection_time(session, numbers, minutes)
+        lab_catalog.validate_selection_time(session, numbers, minutes, conn=conn)
         conn.execute('UPDATE queue_entries SET selected_labs = ?, lab_count = ?, planned_minutes = ?, '
                      'entry_revision = entry_revision + 1 WHERE id = ?',
                      (json.dumps(numbers), len(numbers), minutes, entry['id']))
@@ -392,14 +392,14 @@ def record_own_passed_lab_numbers(conn, telegram_id, session_id, numbers, *, ent
         from queue_bot.services.attendance import require_completion
         require_completion(conn, entry)
         pending = lab_catalog.read_numbers(entry['selected_labs'])
-        numbers = lab_catalog.validate_numbers(session, numbers)
+        numbers = lab_catalog.validate_numbers(session, numbers, conn=conn)
         if not pending or not set(numbers).issubset(pending):
             raise BotError('Оберіть лише лабораторні з вашого поточного запису.')
         remaining = sorted(set(pending) - set(numbers))
         passed = sorted(set(lab_catalog.read_numbers(entry['passed_labs']) or []) | set(numbers))
         minutes = entry['planned_minutes']
         if remaining and minutes is not None:
-            minutes = min(minutes, lab_catalog.selection_limit(session, remaining))
+            minutes = min(minutes, lab_catalog.selection_limit(session, remaining, conn=conn))
         conn.execute('UPDATE queue_entries SET selected_labs = ?, passed_labs = ?, lab_count = ?, '
                      'labs_passed = labs_passed + ?, planned_minutes = ?, entry_revision = entry_revision + 1 WHERE id = ?',
                      (json.dumps(remaining), json.dumps(passed), len(remaining) or None, len(numbers), minutes, entry['id']))

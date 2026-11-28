@@ -10,6 +10,22 @@ from queue_bot.services import admins, queues, restrictions, users
 from queue_bot.services import swap_requests
 
 
+def test_postgres_administrator_lab_titles_persist_and_students_can_select_new_numbers(pg_conn):
+    from queue_bot import config
+    from queue_bot.services import lab_catalog, lab_definitions
+    from queue_bot.services.subjects import load_subjects
+    conn = pg_conn
+    subjects = load_subjects(config.SUBJECTS_PATH)
+    lab_definitions.save_batch(conn, 100, subjects, 6, '1. Дизайн\n2 | Прототип | 30')
+    conn._init_schema()
+    assert [lab['title'] for lab in lab_catalog.labs_for_session({'subject_id':6}, conn=conn)] == ['Дизайн', 'Прототип']
+    sid = queues.create_session(conn, 100, 6, 6)
+    queues.join_queue(conn, 1, sid, lab_numbers=[1,2], planned_minutes=40)
+    entry = queues.get_entries(conn, sid)[0]
+    assert queues.record_own_passed_lab_numbers(conn, 1, sid, [1], entry_id=entry['id'], expected_revision=entry['entry_revision']) == [2]
+    assert queues.get_user_position(conn, 1, sid) == 1
+
+
 def test_postgres_consultation_timer_is_durable_and_starts_once(pg_conn):
     from queue_bot.services import consultations, attendance
     conn = pg_conn

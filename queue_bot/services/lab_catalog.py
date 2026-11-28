@@ -12,6 +12,11 @@ from queue_bot.services.lab_estimates import validate_planned_minutes
 @lru_cache(maxsize=8)
 def load_catalog(path):
     data = json.loads(Path(path).read_text(encoding='utf-8-sig'))
+    validate_catalog(data)
+    return data
+
+
+def validate_catalog(data):
     if not isinstance(data, dict):
         raise RuntimeError('LAB_CATALOG_PATH must contain a subject map')
     for sid, subject in data.items():
@@ -34,18 +39,27 @@ def load_catalog(path):
             numbers.append(number)
         if len(numbers) != len(set(numbers)) or sum(lab['max_minutes'] for lab in labs) > 2**31 - 1:
             raise RuntimeError('Duplicate laboratory number or excessive total time limit')
-    return data
 
 
-def labs_for_session(session):
+def labs_for_session(session, *, conn=None):
     if not session:
         return ()
     subject = load_catalog(config.LAB_CATALOG_PATH).get(str(session['subject_id']))
-    return tuple(subject['labs']) if subject else ()
+    labs = {lab['number']: dict(lab) for lab in subject['labs']} if subject else {}
+    if conn is not None:
+        rows = conn.execute('SELECT value FROM bot_state WHERE key LIKE ?',
+                            (f'lab_definition:{session["subject_id"]}:%',)).fetchall()
+        for row in rows:
+            lab = json.loads(row['value'])
+            labs[lab['number']] = lab
+    result = sorted(labs.values(), key=lambda lab: lab['number'])
+    if result:
+        validate_catalog({str(session['subject_id']): {'labs': result}})
+    return tuple(result)
 
 
-def validate_numbers(session, numbers, *, allow_empty=False):
-    labs = labs_for_session(session)
+def validate_numbers(session, numbers, *, allow_empty=False, conn=None):
+    labs = labs_for_session(session, conn=conn)
     if not labs:
         raise BotError('У цій черзі немає переліку лабораторних або лімітів.')
     if (not isinstance(numbers, (list, tuple)) or (not numbers and not allow_empty) or
@@ -57,15 +71,15 @@ def validate_numbers(session, numbers, *, allow_empty=False):
     return sorted(numbers)
 
 
-def selection_limit(session, numbers):
-    numbers = validate_numbers(session, numbers)
-    return sum(lab['max_minutes'] for lab in labs_for_session(session) if lab['number'] in numbers)
+def selection_limit(session, numbers, *, conn=None):
+    numbers = validate_numbers(session, numbers, conn=conn)
+    return sum(lab['max_minutes'] for lab in labs_for_session(session, conn=conn) if lab['number'] in numbers)
 
 
-def validate_selection_time(session, numbers, minutes):
+def validate_selection_time(session, numbers, minutes, *, conn=None):
     validate_planned_minutes(minutes)
-    if minutes is not None and minutes > selection_limit(session, numbers):
-        raise BotError(f'Максимальний час для обраних лабораторних — {selection_limit(session, numbers)} хв.')
+    if minutes is not None and minutes > selection_limit(session, numbers, conn=conn):
+        raise BotError(f'Максимальний час для обраних лабораторних — {selection_limit(session, numbers, conn=conn)} хв.')
 
 
 def read_numbers(raw):
@@ -81,11 +95,11 @@ def read_numbers(raw):
         raise BotError('Не вдалося прочитати перелік лабораторних. Оберіть його ще раз.') from None
 
 
-def parse_numbers(text, session, *, allowed=None):
+def parse_numbers(text, session, *, allowed=None, conn=None):
     parts = re.split(r'[,;\s]+', text.strip().replace('№', ''))
     if not parts or any(not part.isascii() or not part.isdigit() or len(part) > 3 for part in parts):
         raise BotError('Введіть номери через кому, наприклад: 1, 2.')
-    numbers = validate_numbers(session, [int(part) for part in parts])
+    numbers = validate_numbers(session, [int(part) for part in parts], conn=conn)
     if allowed is not None and not set(numbers).issubset(allowed):
         raise BotError('Оберіть лише лабораторні з вашого поточного запису.')
     return numbers
